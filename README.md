@@ -126,6 +126,7 @@ BigFix> get fixlets/operator/mah60
 
 # Examples using BESAPI
 
+- https://github.com/jgstew/besapi/tree/master/examples
 - https://github.com/jgstew/generate_bes_from_template/blob/master/examples/generate_uninstallers.py
 - https://github.com/jgstew/jgstew-recipes/blob/main/SharedProcessors/BESImport.py
 - https://github.com/jgstew/jgstew-recipes/blob/main/SharedProcessors/BigFixActioner.py
