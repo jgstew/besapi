@@ -91,27 +91,27 @@ OR
 >>> import bescli
 >>> bescli.main()
 
-BES> login
+BigFix> login
 User [mah60]: mah60
 Root Server (ex. https://server.institution.edu:52311): https://my.company.org:52311
 Password:
 Login Successful!
-BES> get help
+BigFix> get help
 ...
-BES> get sites
+BigFix> get sites
 ...
-BES> get sites.OperatorSite.Name
+BigFix> get sites.OperatorSite.Name
 mah60
-BES> get help/fixlets
+BigFix> get help/fixlets
 GET:
 /api/fixlets/{site}
 POST:
 /api/fixlets/{site}
-BES> get fixlets/operator/mah60
+BigFix> get fixlets/operator/mah60
 ...
 ```
 
-# REST API Help
+# BigFix REST API Documentation
 
 - https://developer.bigfix.com/rest-api/
 - http://bigfix.me/restapi
@@ -123,6 +123,13 @@ BES> get fixlets/operator/mah60
 - lxml
 - requests
 - cmd2
+
+# Examples using BESAPI
+
+- https://github.com/jgstew/generate_bes_from_template/blob/master/examples/generate_uninstallers.py
+- https://github.com/jgstew/jgstew-recipes/blob/main/SharedProcessors/BESImport.py
+- https://github.com/jgstew/jgstew-recipes/blob/main/SharedProcessors/BigFixActioner.py
+- https://github.com/jgstew/jgstew-recipes/blob/main/SharedProcessors/BigFixSessionRelevance.py
 
 # Pyinstaller
 
