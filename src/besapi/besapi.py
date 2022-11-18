@@ -9,6 +9,7 @@ Maintained by James Stewart since 2021
 Library for communicating with the BES (BigFix) REST API.
 """
 
+import configparser
 import datetime
 import json
 import logging
@@ -16,8 +17,6 @@ import os
 import random
 import site
 import string
-
-# import urllib3.poolmanager
 
 try:
     from urllib import parse
@@ -113,6 +112,7 @@ def parse_bes_modtime(string_datetime):
     return datetime.datetime.strptime(string_datetime, "%a, %d %b %Y %H:%M:%S %z")
 
 
+# import urllib3.poolmanager
 # # https://docs.python-requests.org/en/latest/user/advanced/#transport-adapters
 # class HTTPAdapterBiggerBlocksize(requests.adapters.HTTPAdapter):
 #     """custom HTTPAdapter for requests to override blocksize
@@ -148,6 +148,48 @@ def parse_bes_modtime(string_datetime):
 #             strict=True,
 #             **pool_kwargs,
 #         )
+
+
+def get_bes_conn_using_config_file(conf_file=None):
+    """
+    read connection values from config file
+    return besapi connection
+    """
+    config_paths = [
+        "/etc/besapi.conf",
+        os.path.expanduser("~/besapi.conf"),
+        os.path.expanduser("~/.besapi.conf"),
+        "besapi.conf",
+    ]
+    # if conf_file specified, then only use that:
+    if conf_file:
+        config_paths = [conf_file]
+
+    configparser_instance = configparser.ConfigParser()
+
+    found_config_files = configparser_instance.read(config_paths)
+
+    if found_config_files and configparser_instance:
+        print("Attempting BESAPI Connection using config file:", found_config_files)
+        try:
+            BES_ROOT_SERVER = configparser_instance.get("besapi", "BES_ROOT_SERVER")
+        except BaseException:
+            BES_ROOT_SERVER = None
+
+        try:
+            BES_USER_NAME = configparser_instance.get("besapi", "BES_USER_NAME")
+        except BaseException:
+            BES_USER_NAME = None
+
+        try:
+            BES_PASSWORD = configparser_instance.get("besapi", "BES_PASSWORD")
+        except BaseException:
+            BES_PASSWORD = None
+
+        if BES_ROOT_SERVER and BES_USER_NAME and BES_PASSWORD:
+            return BESConnection(BES_USER_NAME, BES_PASSWORD, BES_ROOT_SERVER)
+
+    return None
 
 
 class BESConnection:

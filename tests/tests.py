@@ -132,3 +132,5 @@ if bigfix_cli.bes_conn:
             'CMD /C python -m besapi ls clear ls conf "query number of bes computers" version error_count exit',
             check=True,
         )
+        bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+        print("login succeeded:", bes_conn.login())

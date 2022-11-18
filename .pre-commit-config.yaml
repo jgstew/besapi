@@ -6,7 +6,7 @@
 # https://github.com/pre-commit/pre-commit-hooks
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.1.0
+    rev: v4.3.0
     hooks:
       - id: check-yaml
       - id: check-json
@@ -27,7 +27,7 @@ repos:
       # - id: no-commit-to-branch
       #   args: [--branch, main]
   - repo: https://github.com/adrienverge/yamllint.git
-    rev: v1.26.3
+    rev: v1.28.0
     hooks:
       - id: yamllint
         args: [-c=.yamllint.yaml]
@@ -35,11 +35,7 @@ repos:
     rev: v5.10.1
     hooks:
       - id: isort
-  - repo: https://gitlab.com/pycqa/flake8
-    rev: 3.9.2
-    hooks:
-      - id: flake8
   - repo: https://github.com/psf/black
-    rev: 22.1.0
+    rev: 22.10.0
     hooks:
       - id: black
