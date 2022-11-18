@@ -1,3 +1,9 @@
+"""
+This will export all bigfix sites to a folder called `export`
+
+This is equivalent of running `python -m besapi export_all_sites`
+"""
+
 import os
 
 import besapi
