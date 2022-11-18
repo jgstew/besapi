@@ -1,5 +1,8 @@
 import besapi
 
+# another session relevance option:
+# ids of bes actions whose( ("Expired" = state of it OR "Stopped" = state of it) AND (now - time issued of it > 180 * day) )
+
 SESSION_RELEVANCE = """ids of bes actions whose( (targeted by list flag of it OR targeted by id flag of it) AND not reapply flag of it AND not group member flag of it AND "Open"=state of it AND (now - time issued of it) >= 8 * day )"""
 
 
