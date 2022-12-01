@@ -13,7 +13,7 @@ CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
             <Action>Action1</Action>
         </SourceFixlet>
         <Target>
-            <AllComputers>true</AllComputers>
+            <ComputerName>BIGFIX</ComputerName>
         </Target>
         <Parameter Name="test_name">test_value</Parameter>
         <Title>Test parameters - SourcedFixletAction - BES Clients Have Incorrect Clock Time</Title>
