@@ -1,6 +1,6 @@
 import besapi
 
-MESSAGE_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
+CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<SingleAction>
 		<Title>Test message from besapi</Title>
@@ -100,7 +100,7 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    result = bes_conn.post("actions", MESSAGE_XML)
+    result = bes_conn.post("actions", CONTENT_XML)
 
     print(result)
 
