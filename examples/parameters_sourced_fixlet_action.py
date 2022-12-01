@@ -6,18 +6,18 @@ import besapi
 
 CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
-	<SourcedFixletAction>
-		<SourceFixlet>
-     		<Sitename>BES Support</Sitename>
-     		<FixletID>15</FixletID>
-     		<Action>Action1</Action>
-   		</SourceFixlet>
-		<Target>
+    <SourcedFixletAction>
+        <SourceFixlet>
+            <Sitename>BES Support</Sitename>
+            <FixletID>15</FixletID>
+            <Action>Action1</Action>
+        </SourceFixlet>
+        <Target>
             <AllComputers>true</AllComputers>
         </Target>
-		<Parameter Name="test_name">test_value</Parameter>
-		<Title>Test parameters - SourcedFixletAction - BES Clients Have Incorrect Clock Time</Title>
-	</SourcedFixletAction>
+        <Parameter Name="test_name">test_value</Parameter>
+        <Title>Test parameters - SourcedFixletAction - BES Clients Have Incorrect Clock Time</Title>
+    </SourcedFixletAction>
 </BES>
 """
 
