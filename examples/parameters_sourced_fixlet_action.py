@@ -20,7 +20,7 @@ CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
         <Target>
             <ComputerName>BIGFIX</ComputerName>
         </Target>
-        <Parameter Name="test_name">test_value</Parameter>
+        <Parameter Name="test_name_demo">test_value_demo</Parameter>
         <Title>Test parameters - SourcedFixletAction - BES Clients Have Incorrect Clock Time</Title>
     </SourcedFixletAction>
 </BES>
