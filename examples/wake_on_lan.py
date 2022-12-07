@@ -35,12 +35,12 @@ def main():
 
     # print(computer_id_array)
 
-    computer_id_xml_string = ""
+    computer_ids_xml_string = ""
 
     for item in computer_id_array:
-        computer_id_xml_string += '<Computer ComputerID="' + str(item) + '" />'
+        computer_ids_xml_string += '<Computer ComputerID="' + str(item) + '" />'
 
-    # print(computer_id_xml_string)
+    # print(computer_ids_xml_string)
 
     soap_xml = (
         """<?xml version="1.0" encoding="utf-8"?>
@@ -50,7 +50,7 @@ def main():
     <message name="WakeOnLANIn">
       <WakeOnLANRequest>
         """
-        + computer_id_xml_string
+        + computer_ids_xml_string
         + """
       </WakeOnLANRequest>
     </message>
