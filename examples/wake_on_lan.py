@@ -31,9 +31,16 @@ def main():
      whose(root server flag of it AND now - last report time of it < 1 * day)
     """
 
-    root_server_id = int(bes_conn.session_relevance_string(session_relevance))
+    computer_id_array = bes_conn.session_relevance_array(session_relevance)
 
-    print(root_server_id)
+    print(computer_id_array)
+
+    computer_id_xml_string = ""
+
+    for item in computer_id_array:
+        computer_id_xml_string += '<Computer ComputerID="' + str(item) + '" />'
+
+    print(computer_id_xml_string)
 
     soap_xml = (
         """<?xml version="1.0" encoding="utf-8"?>
@@ -42,9 +49,9 @@ def main():
   <soap:Body>
     <message name="WakeOnLANIn">
       <WakeOnLANRequest>
-        <Computer ComputerID=\""""
-        + str(root_server_id)
-        + """\" />
+        """
+        + computer_id_xml_string
+        + """
       </WakeOnLANRequest>
     </message>
     <portType name="WakeOnLANPortType">
