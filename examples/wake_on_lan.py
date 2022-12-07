@@ -13,8 +13,6 @@ Related:
 - https://localhost:52311/rd-proxy?RequestUrl=cgi-bin/bfenterprise/BESMirrorRequest.exe/-textreport
 - Gather Download Request: https://localhost:52311/rd-proxy?RequestUrl=bfmirror/downloads/_ACTION_ID_/_DOWNLOAD_ID_
 """
-import sys
-
 import besapi
 
 
@@ -25,7 +23,9 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    # SessionRelevance for root server id:
+    # SessionRelevance for computer ids you wish to wake:
+    # this currently returns the root server itself, which should have no real effect.
+    # change this to a singular or plural result of computer ids you wish to wake.
     session_relevance = """
     maxima of ids of bes computers
      whose(root server flag of it AND now - last report time of it < 1 * day)
@@ -33,14 +33,14 @@ def main():
 
     computer_id_array = bes_conn.session_relevance_array(session_relevance)
 
-    print(computer_id_array)
+    # print(computer_id_array)
 
     computer_id_xml_string = ""
 
     for item in computer_id_array:
         computer_id_xml_string += '<Computer ComputerID="' + str(item) + '" />'
 
-    print(computer_id_xml_string)
+    # print(computer_id_xml_string)
 
     soap_xml = (
         """<?xml version="1.0" encoding="utf-8"?>
