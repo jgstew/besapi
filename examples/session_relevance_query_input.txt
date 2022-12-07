@@ -1,1 +1,1 @@
-(it as string) of (name of it, id of it) of members of bes computer groups whose (name of it = "Windows non-BigFix")
+(it as string) of (name of it, id of it) of members of items 1 of (it, bes computer groups) whose(item 0 of it = id of item 1 of it) of minimum of ids of bes computer groups whose (exists members of it)

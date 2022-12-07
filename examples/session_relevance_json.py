@@ -14,11 +14,12 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    session_relevance = """names of members of bes computer groups whose (name of it = "Windows non-BigFix")"""
+    with open("examples/session_relevance_query_input.txt") as file:
+        session_relevance = file.read()
 
-    result = bes_conn.get(
-        bes_conn.url(f"query?output=json&relevance={session_relevance}")
-    )
+    data = {"output": "json", "relevance": session_relevance}
+
+    result = bes_conn.post(bes_conn.url("query"), data)
 
     print(result)
 
