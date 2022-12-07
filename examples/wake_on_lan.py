@@ -6,6 +6,7 @@ requires `besapi`, install with command `pip install besapi`
 Related:
 
 - http://localhost:__WebReportsPort__/json/wakeonlan?cid=_ComputerID_&cid=_NComputerID_
+- POST(binary) http://localhost:52311/data/wake-on-lan
 - https://localhost:52311/rd-proxy?RequestUrl=cgi-bin/bfenterprise/BESGatherMirrorNew.exe/-triggergatherdb?forwardtrigger
 - https://localhost:52311/rd-proxy?RequestUrl=../../cgi-bin/bfenterprise/ClientRegister.exe?RequestType=GetComputerID
 - https://localhost:52311/rd-proxy?RequestUrl=cgi-bin/bfenterprise/BESGatherMirror.exe/-besgather&body=SiteContents&url=http://_MASTHEAD_FQDN_:52311/cgi-bin/bfgather.exe/actionsite
@@ -20,8 +21,7 @@ import besapi
 def main():
     """Execution starts here"""
     print("main()")
-    print("WORK IN PROGRESS! Does not work currently! Exiting!")
-    sys.exit(-1)
+
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
@@ -33,15 +33,47 @@ def main():
 
     root_server_id = int(bes_conn.session_relevance_string(session_relevance))
 
-    print(
-        f"Work in progress POST {bes_conn.rootserver}/data/wake-on-lan {root_server_id}"
+    print(root_server_id)
+
+    soap_xml = (
+        """<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:tns="http://schemas.bigfix.com/WakeOnLAN" targetNamespace="http://schemas.bigfix.com/WakeOnLAN" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <soap:Header />
+  <soap:Body>
+    <message name="WakeOnLANIn">
+      <WakeOnLANRequest>
+        <Computer ComputerID=\""""
+        + str(root_server_id)
+        + """\" />
+      </WakeOnLANRequest>
+    </message>
+    <portType name="WakeOnLANPortType">
+      <operation name="WakeOnLAN">
+        <input message="tns:WakeOnLANIn" />
+      </operation>
+    </portType>
+    <binding name="WakeOnLANBinding" type="tns:WakeOnLANPortType">
+      <soap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+      <operation name="WakeOnLAN">
+        <soap:operation soapAction="http://schemas.bigfix.com/WakeOnLAN" />
+        <input>
+          <soap:body use="literal" />
+        </input>
+      </operation>
+    </binding>
+    <service name="WakeOnLANService">
+      <port name="WakeOnLANPort" binding="tns:WakeOnLANBinding">
+        <soap:address location="https://localhost:52311/WakeOnLAN" />
+      </port>
+    </service>
+  </soap:Body>
+</soap:Envelope>
+"""
     )
 
-    print(
-        bes_conn.session.post(
-            f"{bes_conn.rootserver}/data/wake-on-lan", data=f"cid={root_server_id}"
-        )
-    )
+    print(bes_conn.session.post(f"{bes_conn.rootserver}/WakeOnLan", data=soap_xml))
+
+    print("Finished, Response 200 means succces.")
 
 
 if __name__ == "__main__":
