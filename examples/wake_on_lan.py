@@ -78,9 +78,12 @@ def main():
 """
     )
 
-    print(bes_conn.session.post(f"{bes_conn.rootserver}/WakeOnLan", data=soap_xml))
+    result = bes_conn.session.post(f"{bes_conn.rootserver}/WakeOnLan", data=soap_xml)
 
-    print("Finished, Response 200 means succces.")
+    print(result)
+    print(result.text)
+
+    print("Finished, Response 200 should mean succces.")
 
 
 if __name__ == "__main__":
