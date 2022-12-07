@@ -27,8 +27,8 @@ def main():
     # this currently returns the root server itself, which should have no real effect.
     # change this to a singular or plural result of computer ids you wish to wake.
     session_relevance = """
-    maxima of ids of bes computers
-     whose(root server flag of it AND now - last report time of it < 1 * day)
+    ids of bes computers
+     whose(root server flag of it AND now - last report time of it < 10 * day)
     """
 
     computer_id_array = bes_conn.session_relevance_array(session_relevance)
