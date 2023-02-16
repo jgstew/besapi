@@ -11,6 +11,7 @@ Library for communicating with the BES (BigFix) REST API.
 
 import configparser
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -529,7 +530,7 @@ class BESConnection:
 
         return result
 
-    def upload(self, file_path, file_name=None):
+    def upload(self, file_path, file_name=None, file_hash=None):
         """
         upload a single file
         https://developer.bigfix.com/rest-api/api/upload.html
@@ -541,6 +542,34 @@ class BESConnection:
         # if file_name not specified, then get it from tail of file_path
         if not file_name:
             file_name = os.path.basename(file_path)
+
+        if not file_hash:
+            besapi_logger.warning(
+                "SHA1 hash of file to be uploaded not provided, calculating it."
+            )
+            sha1 = hashlib.sha1()
+            with open(file_path, "rb") as f:
+                while True:
+                    # read 64k chunks
+                    data = f.read(65536)
+                    if not data:
+                        break
+                    sha1.update(data)
+            file_hash = sha1.hexdigest()
+
+        check_upload = None
+        if file_hash:
+            try:
+                check_upload = self.get_upload(str(file_name), str(file_hash))
+            except BaseException as err:
+                print(err)
+
+            if check_upload:
+                besapi_logger.warning(
+                    "Existing Matching Upload Found, Skipping Upload!"
+                )
+                # return same data as if we had uploaded
+                return check_upload
 
         # Example Header::  Content-Disposition: attachment; filename="file.xml"
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
