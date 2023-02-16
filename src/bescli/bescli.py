@@ -111,7 +111,6 @@ class BESCLInterface(Cmd):
                 self.conf_path = found_config_files[0]
 
         if self.CONFPARSER:
-
             try:
                 self.BES_ROOT_SERVER = self.CONFPARSER.get("besapi", "BES_ROOT_SERVER")
             except BaseException:

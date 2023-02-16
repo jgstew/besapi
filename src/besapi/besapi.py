@@ -77,7 +77,6 @@ def elem2dict(node):
         else:
             value = elem2dict(element)
         if key in result:
-
             if type(result[key]) is list:
                 result[key].append(value)
             else:
@@ -196,7 +195,6 @@ class BESConnection:
     """BigFix RESTAPI connection abstraction class"""
 
     def __init__(self, username, password, rootserver, verify=False):
-
         if not verify:
             # disable SSL warnings
             requests.packages.urllib3.disable_warnings()  # pylint: disable=no-member
