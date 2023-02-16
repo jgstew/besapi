@@ -505,6 +505,32 @@ class BESConnection:
 
         return self.get_computergroup(site_path, new_group_name)
 
+    def get_upload(self, file_name, file_hash):
+        """
+        check for a specific file upload reference
+
+        each upload is uniquely identified by sha1 and filename
+
+        - https://developer.bigfix.com/rest-api/api/upload.html
+        - https://github.com/jgstew/besapi/issues/3
+        """
+        if len(file_hash) != 40:
+            raise ValueError("Invalid SHA1 Hash! Must be 40 characters!")
+
+        if " " in file_hash or " " in file_name:
+            raise ValueError("file name and hash cannot contain spaces")
+
+        if len(file_name) > 0:
+            result = self.get(self.url("upload/" + file_hash + "/" + file_name))
+        else:
+            raise ValueError("No file_name specified. Must be at least one character.")
+
+        if "Upload not found" in result.text:
+            # print("WARNING: Upload not found!")
+            return None
+
+        return result
+
     def upload(self, file_path, file_name=None):
         """
         upload a single file
