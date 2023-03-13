@@ -40,6 +40,8 @@ def main():
 
     fixlet_site_name = str(result.besdict["Query"]["Result"]["Answer"])
 
+    # escape `/` in site name, if applicable
+    # do spaces need escaped too? `%20`
     fixlet_site_name = fixlet_site_name.replace("/", "%2f")
 
     print(fixlet_site_name)
@@ -52,6 +54,7 @@ def main():
 
     root_xml = lxml.etree.fromstring(fixlet_content.besxml)
 
+    # get first MIMEField
     xml_first_mime = root_xml.find(".//*/MIMEField")
 
     xml_container = xml_first_mime.getparent()
@@ -60,6 +63,7 @@ def main():
 
     print(xml_container.index(xml_first_mime))
 
+    # new mime to set relevance eval to once an hour:
     new_mime = lxml.etree.XML(
         """<MIMEField>
 			<Name>x-relevance-evaluation-period</Name>
@@ -70,12 +74,14 @@ def main():
     print(lxml.etree.tostring(new_mime))
 
     # insert new mime BEFORE first MIME
+    # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
     xml_container.insert(xml_container.index(xml_first_mime) - 1, new_mime)
 
     print(
+        "\nPreview of new XML:\n ",
         lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True).decode(
             "utf-8"
-        )
+        ),
     )
 
     # TODO: PUT changed XML back to RESTAPI resource to modify
