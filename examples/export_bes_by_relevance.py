@@ -18,9 +18,10 @@ def main():
 
     result = bes_conn.session_relevance_array(session_relevance)
 
-    print(result)
-
-    # TODO: export files
+    for item in result:
+        print(item)
+        # export bes file:
+        print(bes_conn.export_item_by_resource(item))
 
 
 if __name__ == "__main__":
