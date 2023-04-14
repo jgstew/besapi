@@ -14,7 +14,11 @@ def main():
 
     print(bes_conn.last_connected)
 
-    session_relevance = '(type of it as lowercase & "/custom/" & name of site of it & "/" & id of it as string) of custom bes fixlets whose(name of it as lowercase contains "oracle")'
+    # change the relevance here to adjust which content gets exported:
+    fixlets_rel = 'custom bes fixlets whose(name of it as lowercase contains "oracle" AND name of it does not contain "VirtualBox")'
+
+    # this does not currently work with things in the actionsite:
+    session_relevance = f'(type of it as lowercase & "/custom/" & name of site of it & "/" & id of it as string) of {fixlets_rel}'
 
     result = bes_conn.session_relevance_array(session_relevance)
 
