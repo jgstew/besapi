@@ -1,6 +1,8 @@
 """
 import bes file into site
 
+- https://developer.bigfix.com/rest-api/api/import.html
+
 requires `besapi`, install with command `pip install besapi`
 """
 
@@ -18,6 +20,7 @@ def main():
 
     with open(BES_FILE_PATH) as f:
         content = f.read()
+        # https://developer.bigfix.com/rest-api/api/import.html
         result = bes_conn.post(f"import/{SITE_PATH}", content)
         print(result)
 
