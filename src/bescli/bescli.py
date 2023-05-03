@@ -358,6 +358,15 @@ class BESCLInterface(Cmd):
         """export site contents to current folder"""
         self.bes_conn.export_all_sites(verbose=False)
 
+    complete_import_bes = Cmd.path_complete
+
+    def do_import_bes(self, statement):
+        """import bes file"""
+
+        self.poutput(f"Import file: {statement.args}")
+
+        self.poutput(self.bes_conn.import_bes_to_site(str(statement.args)))
+
     complete_upload = Cmd.path_complete
 
     def do_upload(self, file_path):

@@ -150,6 +150,30 @@ def parse_bes_modtime(string_datetime):
 #         )
 
 
+def validate_xsd(doc):
+    """validate results using XML XSDs"""
+    try:
+        xmldoc = etree.fromstring(doc)
+    except BaseException:
+        return False
+
+    for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
+        xmlschema_doc = etree.parse(resource_filename(__name__, "schemas/%s" % xsd))
+
+        # one schema may throw an error while another will validate
+        try:
+            xmlschema = etree.XMLSchema(xmlschema_doc)
+        except etree.XMLSchemaParseError as err:
+            # this should only error if the XSD itself is malformed
+            besapi_logger.error("ERROR with `%s`: %s", xsd, err)
+            raise err
+
+        if xmlschema.validate(xmldoc):
+            return True
+
+    return False
+
+
 def get_bes_conn_using_config_file(conf_file=None):
     """
     read connection values from config file
@@ -313,12 +337,12 @@ class BESConnection:
             if "no such child: Answer" in str(err):
                 try:
                     result.append("ERROR: " + rel_result.besobj.Query.Error.text)
-                except AttributeError as err:
-                    if "no such child: Error" in str(err):
+                except AttributeError as err2:
+                    if "no such child: Error" in str(err2):
                         result.append("<Nothing> Nothing returned, but no error.")
                         besapi_logger.info("Query did not return any results")
                     else:
-                        besapi_logger.error("%s\n%s", err, rel_result.text)
+                        besapi_logger.error("%s\n%s", err2, rel_result.text)
                         raise
             else:
                 raise
@@ -429,6 +453,29 @@ class BESConnection:
         if self.validate_site_path(site_path):
             self.site_path = site_path
             return self.site_path
+
+    def import_bes_to_site(self, bes_file_path, site_path=None):
+        """import bes file to site"""
+
+        if not os.access(bes_file_path, os.R_OK):
+            besapi_logger.error(f"{bes_file_path} is not readable")
+            raise FileNotFoundError(f"{bes_file_path} is not readable")
+
+        site_path = self.get_current_site_path(site_path)
+
+        self.validate_site_path(site_path, True, True)
+
+        with open(bes_file_path, "rb") as f:
+            content = f.read()
+
+            # validate BES File contents:
+            if validate_xsd(content):
+                # TODO: validate write access to site?
+                # https://developer.bigfix.com/rest-api/api/import.html
+                result = self.post(f"import/{site_path}", content)
+                return result
+            else:
+                besapi_logger.error(f"{bes_file_path} is not valid")
 
     def create_site_from_file(self, bes_file_path, site_type="custom"):
         """create new site"""
@@ -908,26 +955,7 @@ class RESTResult:
 
     def validate_xsd(self, doc):
         """validate results using XML XSDs"""
-        try:
-            xmldoc = etree.fromstring(doc)
-        except BaseException:
-            return False
-
-        for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
-            xmlschema_doc = etree.parse(resource_filename(__name__, "schemas/%s" % xsd))
-
-            # one schema may throw an error while another will validate
-            try:
-                xmlschema = etree.XMLSchema(xmlschema_doc)
-            except etree.XMLSchemaParseError as err:
-                # this should only error if the XSD itself is malformed
-                besapi_logger.error("ERROR with `%s`: %s", xsd, err)
-                raise err
-
-            if xmlschema.validate(xmldoc):
-                return True
-
-        return False
+        return validate_xsd(doc)
 
     def xmlparse_text(self, text):
         """parse response text as xml"""
