@@ -12,6 +12,7 @@ Library for communicating with the BES (BigFix) REST API.
 import configparser
 import datetime
 import hashlib
+import io
 import json
 import logging
 import os
@@ -154,7 +155,7 @@ def validate_xsd(doc):
     """validate results using XML XSDs"""
     try:
         xmldoc = etree.fromstring(doc)
-    except BaseException:
+    except BaseException:  # pylint: disable=broad-except
         return False
 
     for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
@@ -197,17 +198,17 @@ def get_bes_conn_using_config_file(conf_file=None):
         print("Attempting BESAPI Connection using config file:", found_config_files)
         try:
             BES_ROOT_SERVER = configparser_instance.get("besapi", "BES_ROOT_SERVER")
-        except BaseException:
+        except BaseException:  # pylint: disable=broad-except
             BES_ROOT_SERVER = None
 
         try:
             BES_USER_NAME = configparser_instance.get("besapi", "BES_USER_NAME")
-        except BaseException:
+        except BaseException:  # pylint: disable=broad-except
             BES_USER_NAME = None
 
         try:
             BES_PASSWORD = configparser_instance.get("besapi", "BES_PASSWORD")
-        except BaseException:
+        except BaseException:  # pylint: disable=broad-except
             BES_PASSWORD = None
 
         if BES_ROOT_SERVER and BES_USER_NAME and BES_PASSWORD:
@@ -246,7 +247,7 @@ class BESConnection:
         try:
             # get root server port
             self.rootserver_port = int(rootserver.split("://", 1)[1].split(":", 1)[1])
-        except BaseException:
+        except BaseException:  # pylint: disable=broad-except
             # if error, assume default
             self.rootserver_port = 52311
 
@@ -414,18 +415,18 @@ class BESConnection:
                 if not check_site_exists:
                     # don't check if site exists first
                     return site_path
-                else:
-                    # check site exists first
-                    site_result = self.get(f"site/{site_path}")
-                    if site_result.request.status_code != 200:
-                        besapi_logger.info("Site `%s` does not exist", site_path)
-                        if not raise_error:
-                            return None
 
-                        raise ValueError(f"Site at path `{site_path}` does not exist!")
+                # check site exists first
+                site_result = self.get(f"site/{site_path}")
+                if site_result.request.status_code != 200:
+                    besapi_logger.info("Site `%s` does not exist", site_path)
+                    if not raise_error:
+                        return None
 
-                    # site_path is valid and exists:
-                    return site_path
+                    raise ValueError(f"Site at path `{site_path}` does not exist!")
+
+                # site_path is valid and exists:
+                return site_path
 
         # Invalid: No valid prefix found
         raise ValueError(
@@ -458,24 +459,24 @@ class BESConnection:
         """import bes file to site"""
 
         if not os.access(bes_file_path, os.R_OK):
-            besapi_logger.error(f"{bes_file_path} is not readable")
+            besapi_logger.error("%s is not readable", bes_file_path)
             raise FileNotFoundError(f"{bes_file_path} is not readable")
 
         site_path = self.get_current_site_path(site_path)
 
-        self.validate_site_path(site_path, True, True)
+        self.validate_site_path(site_path, False, True)
 
         with open(bes_file_path, "rb") as f:
             content = f.read()
 
             # validate BES File contents:
-            if validate_xsd(content):
-                # TODO: validate write access to site?
-                # https://developer.bigfix.com/rest-api/api/import.html
-                result = self.post(f"import/{site_path}", content)
-                return result
-            else:
-                besapi_logger.error(f"{bes_file_path} is not valid")
+            if not validate_xsd(content):
+                besapi_logger.error("%s is not valid", bes_file_path)
+                return None
+
+            # https://developer.bigfix.com/rest-api/api/import.html
+            result = self.post(f"import/{site_path}", content)
+            return result
 
     def create_site_from_file(self, bes_file_path, site_type="custom"):
         """create new site"""
@@ -608,7 +609,7 @@ class BESConnection:
         if file_hash:
             try:
                 check_upload = self.get_upload(str(file_name), str(file_hash))
-            except BaseException as err:
+            except BaseException as err:  # pylint: disable=broad-except
                 print(err)
 
             if check_upload:
@@ -668,6 +669,13 @@ class BESConnection:
         """update an item by name and last modified"""
         site_path = self.get_current_site_path(site_path)
         bes_tree = etree.parse(file_path)
+
+        with open(file_path, "rb") as f:
+            content = f.read()
+            if not validate_xsd(content):
+                besapi_logger.error("%s is not valid", file_path)
+                return None
+
         # get name of first child tag of BES
         # - https://stackoverflow.com/a/3601919/861745
         bes_type = str(bes_tree.xpath("name(/BES/*[1])"))
@@ -910,7 +918,7 @@ class RESTResult:
             # I think this is needed for python3 compatibility:
             try:
                 return self.besxml.decode("utf-8")
-            except BaseException:
+            except BaseException:  # pylint: disable=broad-except
                 return self.besxml
         else:
             return self.text
