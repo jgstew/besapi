@@ -18,11 +18,10 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    with open(BES_FILE_PATH) as f:
-        content = f.read()
-        # https://developer.bigfix.com/rest-api/api/import.html
-        result = bes_conn.post(f"import/{SITE_PATH}", content)
-        print(result)
+    # requires besapi 3.1.6
+    result = bes_conn.import_bes_to_site(BES_FILE_PATH, SITE_PATH)
+
+    print(result)
 
 
 if __name__ == "__main__":

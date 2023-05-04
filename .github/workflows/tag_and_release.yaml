@@ -35,7 +35,7 @@ jobs:
       #   what if no other tests?
       - name: Wait for tests to succeed
         if: steps.tagged.outputs.tagged == 1
-        uses: lewagon/wait-on-check-action@v0.2
+        uses: lewagon/wait-on-check-action@v1.3.1
         with:
           ref: master
           running-workflow-name: "Tag and Release"
@@ -66,6 +66,6 @@ jobs:
             ${{ steps.getwheelfile.outputs.wheelfile }}
       - name: Publish distribution to PyPI
         if: steps.tagged.outputs.tagged == 1
-        uses: pypa/gh-action-pypi-publish@master
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
