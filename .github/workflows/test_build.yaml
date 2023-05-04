@@ -4,7 +4,8 @@ name: test_build
 on:
   push:
     paths:
-      - "**.py"
+      - "src/**.py"
+      - "tests/**.py"
       - "setup.cfg"
       - "MANIFEST.in"
       - "pyproject.toml"
@@ -13,7 +14,8 @@ on:
       - ".github/workflows/tag_and_release.yaml"
   pull_request:
     paths:
-      - "**.py"
+      - "src/**.py"
+      - "tests/**.py"
       - "setup.cfg"
       - "MANIFEST.in"
       - "pyproject.toml"
