@@ -7,7 +7,7 @@ on:
       - master
     paths:
       - "src/besapi/__init__.py"
-      - ".github/workflows/tag_and_release.yaml"
+      # - ".github/workflows/tag_and_release.yaml"
 
 jobs:
   release_new_tag:
