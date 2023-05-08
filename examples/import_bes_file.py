@@ -15,6 +15,13 @@ BES_FILE_PATH = "examples/example.bes"
 def main():
     """Execution starts here"""
     print("main()")
+
+    print(f"besapi version: { besapi.__version__ }")
+
+    if not hasattr(besapi.besapi.BESConnection, "import_bes_to_site"):
+        print("version of besapi is too old, must be >= 3.1.6")
+        return None
+
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
