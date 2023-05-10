@@ -37,6 +37,7 @@ def main():
 
     # import all found BES files into site:
     for f in files:
+        print(f"Importing file: {f}")
         # requires besapi 3.1.6
         result = bes_conn.import_bes_to_site(f, SITE_PATH)
         print(result)
