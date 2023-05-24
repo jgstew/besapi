@@ -3,6 +3,8 @@ create baseline by session relevance result
 
 requires `besapi`, install with command `pip install besapi`
 """
+import os
+
 import besapi
 
 
@@ -17,8 +19,8 @@ def main():
     # change the relevance here to adjust which content gets put in a baseline:
     fixlets_rel = 'fixlets whose(name of it starts with "Update:") of bes sites whose( external site flag of it AND name of it = "Updates for Windows Applications Extended" )'
 
-    # this does not currently work with things in the actionsite:
-    session_relevance = f"""(it as string) of (url of site of it, ids of it, content id of default action of it) of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)" AND exists applicable computers of it) of {fixlets_rel}"""
+    # this gets the info needed from the items to make the baseline:
+    session_relevance = f"""(it as string) of (url of site of it, ids of it, content id of default action of it | "Action1") of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)" AND exists applicable computers of it) of {fixlets_rel}"""
 
     result = bes_conn.session_relevance_array(session_relevance)
 
@@ -31,7 +33,6 @@ def main():
         tuple_items = item.split(", ")
         baseline_components += f"""
         <BaselineComponent IncludeInRelevance="true" SourceSiteURL="{tuple_items[0]}" SourceID="{tuple_items[1]}" ActionName="{tuple_items[2]}" />"""
-        break
 
     # print(baseline_components)
 
@@ -48,12 +49,22 @@ def main():
   </Baseline>
 </BES>"""
 
-    print(baseline)
+    # print(baseline)
 
-    with open("baseline.bes", "w") as f:
+    file_path = "tmp_baseline.bes"
+
+    # Does not work through console import:
+    with open(file_path, "w") as f:
         f.write(baseline)
 
-    print("WARNING: Work In Progress, resulting baseline is not yet correct")
+    print("Importing generated baseline...")
+    import_result = bes_conn.import_bes_to_site(file_path, "custom/autopkg")
+
+    print(import_result)
+
+    os.remove(file_path)
+
+    print("Finished")
 
 
 if __name__ == "__main__":
