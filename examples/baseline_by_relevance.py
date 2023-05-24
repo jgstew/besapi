@@ -58,7 +58,7 @@ def main():
         f.write(baseline)
 
     print("Importing generated baseline...")
-    import_result = bes_conn.import_bes_to_site(file_path, "custom/autopkg")
+    import_result = bes_conn.import_bes_to_site(file_path, "custom/Demo")
 
     print(import_result)
 
