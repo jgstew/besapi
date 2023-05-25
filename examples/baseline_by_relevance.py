@@ -3,6 +3,7 @@ create baseline by session relevance result
 
 requires `besapi`, install with command `pip install besapi`
 """
+import datetime
 import os
 
 import besapi
@@ -22,7 +23,9 @@ def main():
     # this gets the info needed from the items to make the baseline:
     session_relevance = f"""(it as string) of (url of site of it, ids of it, content id of default action of it | "Action1") of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)" AND exists applicable computers of it) of {fixlets_rel}"""
 
+    print("getting items to add to baseline...")
     result = bes_conn.session_relevance_array(session_relevance)
+    print(f"{len(result)} items found")
 
     # print(result)
 
@@ -39,7 +42,7 @@ def main():
     baseline = f"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
   <Baseline>
-    <Title>Custom Patching Baseline</Title>
+    <Title>Custom Patching Baseline {datetime.datetime.today().strftime('%Y-%m-%d')}</Title>
     <Description />
     <Relevance>true</Relevance>
     <BaselineComponentCollection>
