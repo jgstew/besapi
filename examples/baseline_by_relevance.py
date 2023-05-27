@@ -39,6 +39,7 @@ def main():
 
     # print(baseline_components)
 
+    # generate XML for baseline with template:
     baseline = f"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
   <Baseline>
@@ -55,19 +56,57 @@ def main():
     # print(baseline)
 
     file_path = "tmp_baseline.bes"
+    site_name = "Demo"
+    site_path = f"custom/{site_name}"
 
     # Does not work through console import:
     with open(file_path, "w") as f:
         f.write(baseline)
 
     print("Importing generated baseline...")
-    import_result = bes_conn.import_bes_to_site(file_path, "custom/Demo")
+    import_result = bes_conn.import_bes_to_site(file_path, site_path)
 
     print(import_result)
 
     os.remove(file_path)
 
-    print("Finished")
+    # to automatically create an offer action, comment out the next line:
+    return True
+
+    baseline_id = import_result.besobj.Baseline.ID
+
+    print("creating baseline offer action...")
+
+    BES_SourcedFixletAction = f"""\
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+    <SourcedFixletAction>
+        <SourceFixlet>
+            <Sitename>{site_name}</Sitename>
+            <FixletID>{baseline_id}</FixletID>
+            <Action>Action1</Action>
+        </SourceFixlet>
+        <Target>
+            <AllComputers>true</AllComputers>
+        </Target>
+        <Settings>
+            <HasEndTime>true</HasEndTime>
+            <EndDateTimeLocalOffset>P10D</EndDateTimeLocalOffset>
+            <ContinueOnErrors>true</ContinueOnErrors>
+            <PostActionBehavior Behavior="Nothing"></PostActionBehavior>
+            <IsOffer>true</IsOffer>
+            <AnnounceOffer>false</AnnounceOffer>
+            <OfferCategory>Testing</OfferCategory>
+            <OfferDescriptionHTML><![CDATA[Offer to test automatically created content]]></OfferDescriptionHTML>
+        </Settings>
+    </SourcedFixletAction>
+</BES>
+"""
+
+    action_result = bes_conn.post("actions", BES_SourcedFixletAction)
+
+    print(action_result)
+
+    print("Finished!")
 
 
 if __name__ == "__main__":
