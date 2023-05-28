@@ -70,7 +70,7 @@ async def main():
     print("main()")
 
     # Create a semaphore with a maximum concurrent requests
-    semaphore = asyncio.Semaphore(4)
+    semaphore = asyncio.Semaphore(3)
 
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
@@ -78,7 +78,7 @@ async def main():
     print(bes_conn.last_connected)
 
     # change the relevance here to adjust which content gets exported:
-    fixlets_rel = 'fixlets whose(name of it starts with "Update") of bes custom sites whose(name of it = "autopkg")'
+    fixlets_rel = 'custom bes fixlets whose(name of it as lowercase contains "oracle")'
 
     # this does not currently work with things in the actionsite:
     session_relevance = f'(type of it as lowercase & "/custom/" & name of site of it & "/" & id of it as string) of {fixlets_rel}'
