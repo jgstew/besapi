@@ -50,9 +50,13 @@ async def fetch(session, url):
         response_text = await response.text()
 
         # Extract the filename from the URL
-        filename = url.split("/")[-1]
+        url_parts = url.split("/")
 
-        filename = "./tmp/" + filename
+        file_dir = "./tmp/" + url_parts[-2] + "/" + url_parts[-4]
+
+        os.makedirs(file_dir, exist_ok=True)
+
+        filename = file_dir + "/" + url_parts[-1] + ".bes"
 
         # Write the response to a file asynchronously
         async with aiofiles.open(filename, "w") as file:
@@ -66,7 +70,7 @@ async def main():
     print("main()")
 
     # Create a semaphore with a maximum concurrent requests
-    semaphore = asyncio.Semaphore(2)
+    semaphore = asyncio.Semaphore(4)
 
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
@@ -106,10 +110,6 @@ async def main():
 
         # Wait for all the coroutines to complete
         await asyncio.gather(*tasks)
-
-        # # Process the responses
-        # for response in responses:
-        #     print(response)
 
 
 if __name__ == "__main__":
