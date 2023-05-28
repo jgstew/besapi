@@ -72,6 +72,9 @@ async def main():
     # Create a semaphore with a maximum concurrent requests
     semaphore = asyncio.Semaphore(3)
 
+    # TODO: get max mod time of existing bes files:
+    # https://github.com/jgstew/tools/blob/master/Python/get_max_time_bes_files.py
+
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
@@ -84,6 +87,8 @@ async def main():
     session_relevance = f'(type of it as lowercase & "/custom/" & name of site of it & "/" & id of it as string) of {fixlets_rel}'
 
     result = bes_conn.session_relevance_array(session_relevance)
+
+    print(f"{len(result)} items to export...")
 
     absolute_urls = []
 
