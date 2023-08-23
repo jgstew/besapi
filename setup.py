@@ -16,7 +16,7 @@ setup(
     description="Library for working with the BigFix REST API",
     license="MIT",
     keywords="bigfix iem tem rest api",
-    url="https://github.com/CLCMacTeam/besapi",
+    url="https://github.com/jgstew/besapi",
     # long_description= moved to setup.cfg
     packages=["besapi", "bescli"],
     package_data={"besapi": ["schemas/*.xsd"]},
