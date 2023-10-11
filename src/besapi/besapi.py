@@ -591,6 +591,13 @@ class BESConnection:
         if not file_name:
             file_name = os.path.basename(file_path)
 
+        # files cannot contain spaces:
+        if " " in file_name:
+            besapi_logger.warning(
+                "Replacing spaces with underscores in `%s`", file_name
+            )
+            file_name = file_name.replace(" ", "_")
+
         if not file_hash:
             besapi_logger.warning(
                 "SHA1 hash of file to be uploaded not provided, calculating it."
