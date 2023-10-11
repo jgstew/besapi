@@ -19,6 +19,7 @@ def main(path_folder="./tmp"):
 
     for entry in os.scandir(path_folder):
         if entry.is_file() and "README.md" not in entry.path:
+            # this check for spaces is not required for besapi>=3.1.9
             if " " in os.path.basename(entry.path):
                 print(f"ERROR: files cannot contain spaces! skipping: {entry.path}")
                 continue
