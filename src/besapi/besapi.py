@@ -614,10 +614,7 @@ class BESConnection:
 
         check_upload = None
         if file_hash:
-            try:
-                check_upload = self.get_upload(str(file_name), str(file_hash))
-            except BaseException as err:  # pylint: disable=broad-except
-                print(err)
+            check_upload = self.get_upload(str(file_name), str(file_hash))
 
             if check_upload:
                 besapi_logger.warning(
