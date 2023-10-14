@@ -28,7 +28,7 @@ def main():
 
     computers = '"' + '";"'.join(comp_file_lines) + '"'
 
-    session_relevance = f"ids of bes computers whose(now - last report time of it > 90 * day AND exists elements of intersections of (it; sets of ({computers})) of sets of (name of it; id of it as string))"
+    session_relevance = f"unique values of ids of bes computers whose(now - last report time of it > 90 * day AND exists elements of intersections of (it; sets of ({computers})) of sets of (name of it; id of it as string))"
 
     results = bes_conn.session_relevance_array(session_relevance)
 
