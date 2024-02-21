@@ -1,8 +1,9 @@
 """
-Example session relevance results from a file
+Example session relevance results from a string
 
 requires `besapi`, install with command `pip install besapi`
 """
+
 import json
 
 import besapi
