@@ -5,6 +5,7 @@ This is much more fragile because it uses GET instead of POST
 
 requires `besapi`, install with command `pip install besapi`
 """
+
 import json
 
 import besapi
@@ -23,13 +24,15 @@ def main():
 
     result = bes_conn.post(bes_conn.url("query"), data)
 
-    print(result)
+    if __debug__:
+        print(result)
 
     json_result = json.loads(str(result))
 
     json_string = json.dumps(json_result, indent=2)
 
-    print(json_string)
+    if __debug__:
+        print(json_string)
 
     with open(
         "examples/session_relevance_query_from_file_output.json", "w"
