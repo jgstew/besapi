@@ -61,19 +61,34 @@ def main():
     # print(query_submit_result)
     # print(query_submit_result.besobj.ClientQuery.ID)
 
-    print("... waiting for results ...")
+    previous_result = ""
+    i = 0
+    try:
+        # loop ~90 second for results
+        while i < 9:
+            print("... waiting for results ... Ctrl+C to quit loop")
 
-    # TODO: loop this to keep getting more results until all return or any key pressed
-    time.sleep(20)
+            # TODO: loop this to keep getting more results until all return or any key pressed
+            time.sleep(10)
 
-    # get the actual results:
-    # NOTE: this might not return anything if no clients have returned results
-    #       this can be checked again and again for more results:
-    query_result = bes_conn.get(
-        bes_conn.url(f"clientqueryresults/{query_submit_result.besobj.ClientQuery.ID}")
-    )
+            # get the actual results:
+            # NOTE: this might not return anything if no clients have returned results
+            #       this can be checked again and again for more results:
+            query_result = bes_conn.get(
+                bes_conn.url(
+                    f"clientqueryresults/{query_submit_result.besobj.ClientQuery.ID}"
+                )
+            )
 
-    print(query_result)
+            if previous_result != str(query_result):
+                print(query_result)
+                previous_result = str(query_result)
+
+            i += 1
+    except KeyboardInterrupt:
+        print("loop interuppted")
+
+    print("script finished")
 
 
 if __name__ == "__main__":
