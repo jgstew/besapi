@@ -21,6 +21,7 @@ def main():
 
     data = {"output": "json", "relevance": session_relevance}
 
+    # submitting session relevance query using POST to reduce problems:
     result = bes_conn.post(bes_conn.url("query"), data)
 
     json_result = json.loads(str(result))
@@ -34,12 +35,14 @@ def main():
     # this is the client relevance we are going to get the results of:
     client_relevance = "(computer names, operating systems)"
 
+    # generate target XML substring from list of computer ids:
     target_xml = (
         "<ComputerID>"
         + "</ComputerID><ComputerID>".join(json_result["result"])
         + "</ComputerID>"
     )
 
+    # python template for ClientQuery BESAPI XML:
     query_payload = f"""<BESAPI>
 <ClientQuery>
     <ApplicabilityRelevance>true</ApplicabilityRelevance>
@@ -52,6 +55,7 @@ def main():
 
     # print(query_payload)
 
+    # send the client query: (need it's ID to get results)
     query_submit_result = bes_conn.post(bes_conn.url("clientquery"), data=query_payload)
 
     # print(query_submit_result)
@@ -62,6 +66,9 @@ def main():
     # TODO: loop this to keep getting more results until all return or any key pressed
     time.sleep(20)
 
+    # get the actual results:
+    # NOTE: this might not return anything if no clients have returned results
+    #       this can be checked again and again for more results:
     query_result = bes_conn.get(
         bes_conn.url(f"clientqueryresults/{query_submit_result.besobj.ClientQuery.ID}")
     )
