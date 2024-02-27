@@ -33,6 +33,7 @@ def main():
     for item in json_result["result"]:
         print(item)
 
+    # this is the client relevance we are going to get the results of:
     client_relevance = "(computer names, operating systems)"
 
     target_xml = (
