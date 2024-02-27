@@ -5,6 +5,7 @@ requires `besapi`, install with command `pip install besapi`
 """
 
 import json
+import sys
 import time
 
 import besapi
@@ -85,6 +86,12 @@ def main():
                 previous_result = str(query_result)
 
             i += 1
+
+            # if not running interactively:
+            # https://stackoverflow.com/questions/2356399/tell-if-python-is-in-interactive-mode
+            if not sys.__stdin__.isatty():
+                print("not interactive, stopping loop")
+                break
     except KeyboardInterrupt:
         print("loop interuppted")
 
