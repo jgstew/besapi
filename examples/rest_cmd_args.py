@@ -20,10 +20,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Provde command line arguments for REST URL, username, and password"
     )
-    parser.add_argument("-r", "--rest-url", help="Specify the REST URL", required=True)
     parser.add_argument(
         "-besserver", "--besserver", help="Specify the BES URL", required=False
     )
+    parser.add_argument("-r", "--rest-url", help="Specify the REST URL", required=True)
     parser.add_argument("-u", "--user", help="Specify the username", required=True)
     parser.add_argument("-p", "--password", help="Specify the password", required=True)
     # allow unknown args to be parsed instead of throwing an error:
@@ -31,6 +31,7 @@ def main():
 
     rest_url = args.rest_url
 
+    # normalize url to https://HostOrIP:52311
     if rest_url.endswith("/api"):
         rest_url = rest_url.replace("/api", "")
 
@@ -41,6 +42,7 @@ def main():
         # print(args.besserver)
         bes_conn = besapi.besapi.BESConnection(args.user, args.password, args.besserver)
 
+    # get unique device OSes
     session_relevance = 'unique values of (it as trimmed string) of (preceding text of last " (" of it | it) of operating systems of bes computers'
 
     data = {"output": "json", "relevance": session_relevance}
