@@ -29,7 +29,6 @@ import requests
 from lxml import etree, objectify
 from pkg_resources import resource_filename
 
-logging.basicConfig(level=logging.WARNING)
 besapi_logger = logging.getLogger("besapi")
 
 
