@@ -3,6 +3,7 @@ Add mime field to custom content
 
 Need to url escape site name https://bigfix:52311/api/sites
 """
+
 import lxml.etree
 
 import besapi

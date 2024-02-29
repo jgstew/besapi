@@ -3,6 +3,7 @@ Delete computers in file
 
 requires `besapi`, install with command `pip install besapi`
 """
+
 import os
 
 import besapi

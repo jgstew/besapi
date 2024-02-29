@@ -3,6 +3,7 @@ Example session relevance results from a file
 
 requires `besapi`, install with command `pip install besapi`
 """
+
 import besapi
 
 

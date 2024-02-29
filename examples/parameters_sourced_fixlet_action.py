@@ -3,6 +3,7 @@ Example sourced fixlet action with parameters
 
 requires `besapi`, install with command `pip install besapi`
 """
+
 import besapi
 
 # reference: https://software.bigfix.com/download/bes/100/util/BES10.0.7.52.xsd
