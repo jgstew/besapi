@@ -9,6 +9,7 @@ python rest_cmd_args.py -r https://localhost:52311/api -u API_USER -p API_PASSWO
 
 import argparse
 import json
+import logging
 
 import besapi
 
@@ -57,4 +58,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.WARNING)
     main()
