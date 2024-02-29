@@ -25,7 +25,7 @@ if not args.test_pip:
 
 import besapi
 
-print("besapi version: " + str(besapi.__version__))
+print("besapi version: " + str(besapi.besapi.__version__))
 
 assert 15 == len(besapi.besapi.rand_password(15))
 
@@ -124,7 +124,8 @@ if bigfix_cli.bes_conn:
     upload_result = bigfix_cli.bes_conn.upload(
         "./besapi/__init__.py", "test_besapi_upload.txt"
     )
-    print(upload_result)
+    # print(upload_result)
+    assert "test_besapi_upload.txt</URL>" in str(upload_result)
     print(bigfix_cli.bes_conn.parse_upload_result_to_prefetch(upload_result))
 
     if os.name == "nt":
@@ -134,3 +135,5 @@ if bigfix_cli.bes_conn:
         )
         bes_conn = besapi.besapi.get_bes_conn_using_config_file()
         print("login succeeded:", bes_conn.login())
+
+sys.exit(0)
