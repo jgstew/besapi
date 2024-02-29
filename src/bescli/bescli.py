@@ -28,7 +28,10 @@ except ImportError:
     # this is for the case in which we are calling bescli from besapi
     import besapi
 
-from besapi import __version__
+try:
+    from besapi.besapi import __version__
+except ImportError:
+    from besapi import __version__
 
 
 class BESCLInterface(Cmd):
