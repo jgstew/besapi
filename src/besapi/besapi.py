@@ -352,7 +352,9 @@ class BESConnection:
 
     def session_relevance_string(self, relevance, **kwargs):
         """Get Session Relevance Results string"""
-        rel_result_array = self.session_relevance_array("(it as string) of " + relevance, **kwargs)
+        rel_result_array = self.session_relevance_array(
+            "(it as string) of " + relevance, **kwargs
+        )
         return "\n".join(rel_result_array)
 
     def login(self):
