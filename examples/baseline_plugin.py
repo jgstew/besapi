@@ -94,16 +94,13 @@ def create_baseline_from_site(site):
 
     References:
     - https://github.com/jgstew/besapi/blob/master/examples/baseline_by_relevance.py"""
-    # fixlets of bes sites whose(exists (it as trimmed string as lowercase) whose(it = "Updates for Windows Applications Extended" as trimmed string as lowercase) of (display names of it; names of it))
 
     site_name = site["name"]
     logging.info("Create patching baseline for site: %s", site_name)
 
-    fixlets_rel = (
-        'fixlets of bes sites whose(exists (it as trimmed string as lowercase) whose(it = "'
-        + site_name
-        + '" as trimmed string as lowercase) of (display names of it; names of it))'
-    )
+    # Example:
+    # fixlets of bes sites whose(exists (it as trimmed string as lowercase) whose(it = "Updates for Windows Applications Extended" as trimmed string as lowercase) of (display names of it; names of it))
+    fixlets_rel = f'fixlets of bes sites whose(exists (it as trimmed string as lowercase) whose(it = "{site_name}" as trimmed string as lowercase) of (display names of it; names of it))'
 
     session_relevance = f"""(it as string) of (url of site of it, ids of it, content id of default action of it | "Action1") of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)" AND exists applicable computers whose(now - last report time of it < 60 * day) of it) of {fixlets_rel}"""
 
@@ -131,7 +128,11 @@ def create_baseline_from_site(site):
 
         logging.debug(baseline_components)
 
-        # baseline_rel = f"""exists relevant fixlets whose(id of it is contained by set of (296035803 ; 503585307)) of sites whose("Fixlet Site" = type of it AND "Enterprise Security" = name of it)"""
+        baseline_rel = "true"
+
+        # create baseline relevance such that only relevant if 1+ fixlet is relevant
+        if num_items > 100:
+            baseline_rel = f"""exists relevant fixlets whose(id of it is contained by set of ({ fixlet_ids_str })) of sites whose("Fixlet Site" = type of it AND "{ site_name }" = name of it)"""
 
         # generate XML for baseline with template:
         baseline_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -139,7 +140,7 @@ def create_baseline_from_site(site):
         <Baseline>
             <Title>Patches from {site_name} - {datetime.datetime.today().strftime('%Y-%m-%d')}</Title>
             <Description />
-            <Relevance>exists relevant fixlets whose(id of it is contained by set of ({ fixlet_ids_str })) of sites whose("Fixlet Site" = type of it AND "{ site_name }" = name of it)</Relevance>
+            <Relevance>{baseline_rel}</Relevance>
             <BaselineComponentCollection>
             <BaselineComponentGroup>{baseline_components}
             </BaselineComponentGroup>
@@ -272,7 +273,8 @@ def main():
         process_baselines(
             config_yaml["bigfix"]["content"]["Baselines"]["automation"]["sites"]
         )
-        # TODO: delete trigger file
+        # delete trigger file
+        os.remove(test_file_exists(trigger_path))
     else:
         logging.info(
             "Trigger File `%s` Does Not Exists, skipping execution!", trigger_path
