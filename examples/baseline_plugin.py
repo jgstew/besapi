@@ -130,9 +130,10 @@ def create_baseline_from_site(site):
 
         baseline_rel = "true"
 
-        # create baseline relevance such that only relevant if 1+ fixlet is relevant
-        if num_items > 100:
-            baseline_rel = f"""exists relevant fixlets whose(id of it is contained by set of ({ fixlet_ids_str })) of sites whose("Fixlet Site" = type of it AND "{ site_name }" = name of it)"""
+        # # This does not appear to work as expected:
+        # # create baseline relevance such that only relevant if 1+ fixlet is relevant
+        # if num_items > 100:
+        #     baseline_rel = f"""exists relevant fixlets whose(id of it is contained by set of ({ fixlet_ids_str })) of sites whose("Fixlet Site" = type of it AND "{ site_name }" = name of it)"""
 
         # generate XML for baseline with template:
         baseline_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
