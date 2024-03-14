@@ -160,8 +160,10 @@ def create_baseline_from_site(site):
         logging.debug("Baseline XML:\n%s", baseline_xml)
 
         file_path = "tmp_baseline.bes"
-        site_name = "Demo"
-        site_path = f"custom/{site_name}"
+
+        # the custom site to import the baseline into:
+        import_site_name = "Demo"
+        site_path = f"custom/{import_site_name}"
 
         # Does not work through console import:
         with open(file_path, "w", encoding="utf-8") as f:
