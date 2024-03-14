@@ -269,12 +269,15 @@ def main():
         "trigger_file_path"
     ]
 
-    if test_file_exists(trigger_path):
+    # check if file exists, if so, return path, else return false:
+    trigger_path = test_file_exists(trigger_path)
+
+    if trigger_path:
         process_baselines(
             config_yaml["bigfix"]["content"]["Baselines"]["automation"]["sites"]
         )
         # delete trigger file
-        os.remove(test_file_exists(trigger_path))
+        os.remove(trigger_path)
     else:
         logging.info(
             "Trigger File `%s` Does Not Exists, skipping execution!", trigger_path
