@@ -1,0 +1,9 @@
+---
+bigfix:
+  content:
+    Baselines:
+      automation:
+        trigger_file_path: baseline_plugin_run_now
+        sites:
+          - name: Updates for Windows Applications Extended
+          - name: Updates for Windows Applications
