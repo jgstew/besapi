@@ -128,7 +128,14 @@ def create_baseline_from_site(site):
 
         logging.debug(baseline_components)
 
-        baseline_rel = "true"
+        # only have the baseline be relevant for 60 days after creation:
+        baseline_rel = f'exists absolute values whose(it < 60 * day) of (current date - "{ datetime.datetime.today().strftime("%d %b %Y") }" as date)'
+
+        if num_items > 100:
+            site_rel_query = f"""unique value of site level relevances of bes sites whose(exists (it as trimmed string as lowercase) whose(it = "{site_name}" as trimmed string as lowercase) of (display names of it; names of it))"""
+            site_rel = bes_conn.session_relevance_string(site_rel_query)
+
+            baseline_rel = f"""( {baseline_rel} ) AND ( {site_rel} )"""
 
         # # This does not appear to work as expected:
         # # create baseline relevance such that only relevant if 1+ fixlet is relevant
@@ -141,7 +148,8 @@ def create_baseline_from_site(site):
         <Baseline>
             <Title>Patches from {site_name} - {datetime.datetime.today().strftime('%Y-%m-%d')}</Title>
             <Description />
-            <Relevance>{baseline_rel}</Relevance>
+            <Relevance><![CDATA[{baseline_rel}]]></Relevance>
+            <Delay>PT12H</Delay>
             <BaselineComponentCollection>
             <BaselineComponentGroup>{baseline_components}
             </BaselineComponentGroup>
