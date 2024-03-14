@@ -159,7 +159,7 @@ def create_baseline_from_site(site):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(baseline_xml)
 
-        logging.info("Importing generated baseline...")
+        logging.info("Importing generated baseline for %s ...", site_name)
         import_result = bes_conn.import_bes_to_site(file_path, site_path)
 
         logging.info("Result: Import XML:\n%s", import_result)
