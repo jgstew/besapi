@@ -279,9 +279,7 @@ def main():
         # delete trigger file
         os.remove(trigger_path)
     else:
-        logging.info(
-            "Trigger File `%s` Does Not Exists, skipping execution!", trigger_path
-        )
+        logging.info("Trigger File Does Not Exists, skipping execution!")
 
     logging.info("----- Ending Session ------")
 
