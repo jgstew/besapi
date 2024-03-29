@@ -186,7 +186,7 @@ def process_baselines(config):
 
 def main():
     """Execution starts here"""
-    print("main()")
+    print("main() start")
 
     parser = argparse.ArgumentParser(
         description="Provde command line arguments for REST URL, username, and password"
@@ -216,7 +216,7 @@ def main():
     invoke_folder = get_invoke_folder()
 
     # set different log levels:
-    log_level = logging.WARNING
+    log_level = logging.INFO
     if verbose:
         log_level = logging.INFO
     if verbose > 1:
@@ -224,6 +224,8 @@ def main():
 
     # get path to put log file in:
     log_filename = os.path.join(invoke_folder, "baseline_plugin.log")
+
+    print(f"Log File Path: {log_filename}")
 
     handlers = [
         logging.handlers.RotatingFileHandler(
@@ -245,7 +247,7 @@ def main():
     logging.info("----- Starting New Session ------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("Python version: %s", platform.sys.version)
-    logging.debug("BESAPI Module version: %s", besapi.__version__)
+    logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
     logging.debug("this plugin's version: %s", __version__)
 
     # process args, setup connection:
@@ -293,6 +295,7 @@ def main():
         logging.info("Trigger File Does Not Exists, skipping execution!")
 
     logging.info("----- Ending Session ------")
+    print("main() End")
 
 
 if __name__ == "__main__":
