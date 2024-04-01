@@ -33,7 +33,7 @@ jobs:
       # only make release if there is NOT a git tag for this version
       - name: "Check: package version has corresponding git tag"
         # this will prevent this from doing anything when run through ACT
-        if: ${{ !env.ACT AND contains(steps.getversion.outputs.version, '.') }}
+        if: ${{ !env.ACT }} && contains(steps.getversion.outputs.version, '.')
         id: tagged
         shell: bash
         run: git show-ref --tags --verify --quiet -- "refs/tags/v${{ steps.getversion.outputs.version }}" && echo "::set-output name=tagged::0" || echo "::set-output name=tagged::1"
