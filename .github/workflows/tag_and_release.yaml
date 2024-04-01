@@ -22,6 +22,10 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: 3.8
+
+      - name: Install requirements
+        run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
       - name: Read VERSION file
         id: getversion
         run: echo "::set-output name=version::$(python ./setup.py --version)"
@@ -42,9 +46,7 @@ jobs:
           running-workflow-name: "Tag and Release"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 30
-      - name: Install requirements
-        if: steps.tagged.outputs.tagged == 1
-        run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
       - name: Install build tools
         if: steps.tagged.outputs.tagged == 1
         run: pip install setuptools wheel build
