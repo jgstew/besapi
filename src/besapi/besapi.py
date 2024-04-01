@@ -29,7 +29,7 @@ import requests
 from lxml import etree, objectify
 from pkg_resources import resource_filename
 
-__version__ = "3.2.2"
+__version__ = "3.2.3"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -392,6 +392,34 @@ class BESConnection:
         """clear session and close it"""
         self.session.cookies.clear()
         self.session.close()
+
+    def set_dashboard_variable_value(
+        self, dashboard_name, var_name, var_value, private=False
+    ):
+        """set the variable value from a dashboard datastore"""
+
+        dash_var_xml = f"""<BESAPI xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BESAPI.xsd">
+            <DashboardData>
+                    <Dashboard>{dashboard_name}</Dashboard>
+                    <Name>{var_name}</Name>
+                    <IsPrivate>{str(private).lower()}</IsPrivate>
+                    <Value>{var_value}</Value>
+            </DashboardData>
+    </BESAPI>
+    """
+
+        return self.post(
+            f"dashboardvariable/{dashboard_name}/{var_name}", data=dash_var_xml
+        )
+
+    def get_dashboard_variable_value(self, dashboard_name, var_name):
+        """get the variable value from a dashboard datastore"""
+
+        return str(
+            self.get(
+                f"dashboardvariable/{dashboard_name}/{var_name}"
+            ).besobj.DashboardData.Value
+        )
 
     def validate_site_path(self, site_path, check_site_exists=True, raise_error=False):
         """make sure site_path is valid"""

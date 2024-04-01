@@ -5,6 +5,7 @@ Test besapi
 
 import argparse
 import os
+import random
 import subprocess
 import sys
 
@@ -127,6 +128,20 @@ if bigfix_cli.bes_conn:
     # print(upload_result)
     assert "test_besapi_upload.txt</URL>" in str(upload_result)
     print(bigfix_cli.bes_conn.parse_upload_result_to_prefetch(upload_result))
+
+    dashboard_name = "_PyBESAPI_tests.py"
+    var_name = "TestVarName"
+    var_value = "TestVarValue " + str(random.randint(0, 9999))
+
+    print(
+        bigfix_cli.bes_conn.set_dashboard_variable_value(
+            dashboard_name, var_name, var_value
+        )
+    )
+
+    assert var_value in str(
+        bigfix_cli.bes_conn.get_dashboard_variable_value(dashboard_name, var_name)
+    )
 
     if os.name == "nt":
         subprocess.run(
