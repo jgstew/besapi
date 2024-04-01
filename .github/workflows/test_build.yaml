@@ -41,6 +41,11 @@ jobs:
         run: pip install setuptools wheel build pyinstaller
       - name: Install requirements
         run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Read VERSION file
+        id: getversion
+        run: echo "$(python ./setup.py --version)"
+
       - name: Run Tests - Source
         run: python tests/tests.py
       - name: Run build
