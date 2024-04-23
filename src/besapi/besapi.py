@@ -29,7 +29,7 @@ import requests
 from lxml import etree, objectify
 from pkg_resources import resource_filename
 
-__version__ = "3.2.6"
+__version__ = "3.2.7"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -353,7 +353,7 @@ class BESConnection:
     def session_relevance_string(self, relevance, **kwargs):
         """Get Session Relevance Results string"""
         rel_result_array = self.session_relevance_array(
-            "(it as string) of " + relevance, **kwargs
+            "(it as string) of ( " + relevance + " )", **kwargs
         )
         return "\n".join(rel_result_array)
 
