@@ -14,6 +14,7 @@ References:
 
 import argparse
 import datetime
+import getpass
 import logging
 import logging.handlers
 import os
@@ -250,6 +251,13 @@ def main():
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
     logging.debug("this plugin's version: %s", __version__)
 
+    password = args.password
+
+    if not password:
+        logging.warning("Password was not provided, provide REST API password.")
+        print("Password was not provided, provide REST API password.")
+        password = getpass.getpass()
+
     # process args, setup connection:
     rest_url = args.rest_url
 
@@ -258,7 +266,7 @@ def main():
         rest_url = rest_url.replace("/api", "")
 
     try:
-        bes_conn = besapi.besapi.BESConnection(args.user, args.password, rest_url)
+        bes_conn = besapi.besapi.BESConnection(args.user, password, rest_url)
         # bes_conn.login()
     except (
         AttributeError,
@@ -267,9 +275,7 @@ def main():
     ):
         try:
             # print(args.besserver)
-            bes_conn = besapi.besapi.BESConnection(
-                args.user, args.password, args.besserver
-            )
+            bes_conn = besapi.besapi.BESConnection(args.user, password, args.besserver)
         # handle case where args.besserver is None
         # AttributeError: 'NoneType' object has no attribute 'startswith'
         except AttributeError:
