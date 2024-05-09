@@ -1,6 +1,9 @@
 """
 Set server settings like clientsettings.cfg
 
+See example serversettings.cfg file here:
+- https://github.com/jgstew/besapi/blob/master/examples/serversettings.cfg
+
 requires `besapi`, install with command `pip install besapi`
 
 Example Usage:
@@ -54,6 +57,8 @@ def get_invoke_folder():
 
 def get_config(path="serversettings.cfg"):
     """load config from ini file"""
+
+    # example config: https://github.com/jgstew/besapi/blob/master/examples/serversettings.cfg
 
     if not (os.path.isfile(path) and os.access(path, os.R_OK)):
         path = os.path.join(invoke_folder, path)
