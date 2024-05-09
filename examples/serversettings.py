@@ -10,6 +10,7 @@ Example Usage:
 python serversettings.py -r https://localhost:52311/api -u API_USER -p API_PASSWORD
 
 References:
+- https://developer.bigfix.com/rest-api/api/admin.html
 - https://github.com/jgstew/besapi/blob/master/examples/rest_cmd_args.py
 - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
 """
