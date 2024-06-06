@@ -106,7 +106,7 @@ def main():
         log_level = logging.DEBUG
 
     # get path to put log file in:
-    log_filename = os.path.join(invoke_folder, "serversettings.log")
+    log_filename = os.path.join(invoke_folder, "setup_server_plugin_service.log")
 
     print(f"Log File Path: {log_filename}")
 
@@ -173,37 +173,71 @@ def main():
 
     InstallPluginService_id = int(
         bes_conn.session_relevance_string(
-            'unique value of ids of fixlets whose(name of it contains "Install BES Server Plugin Service" AND exists applicable computers of it) of bes sites whose(name of it = "BES Support")'
+            'unique value of ids of fixlets whose(name of it contains "Install BES Server Plugin Service") of bes sites whose(name of it = "BES Support")'
         )
     )
 
-    # print(InstallPluginService_id)
-    BES_SourcedFixletAction = f"""\
-    <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
-        <SourcedFixletAction>
+    logging.info(
+        "Install BES Server Plugin Service content id: %s", InstallPluginService_id
+    )
+
+    ConfigureCredentials_id = int(
+        bes_conn.session_relevance_string(
+            'unique value of ids of fixlets whose(name of it contains "Configure REST API credentials for BES Server Plugin Service") of bes sites whose(name of it = "BES Support")'
+        )
+    )
+
+    logging.info(
+        "Configure REST API credentials for BES Server Plugin Service content id: %s",
+        ConfigureCredentials_id,
+    )
+
+    # NOTE: Work in progress
+    XML_String_MultiActionGroup = f"""<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<MultipleActionGroup>
+		<Title>Setup Server Plugin Service</Title>
+		<Relevance>exists main gather service</Relevance>
+		<MemberAction>
+			<Title>install initscripts</Title>
+			<Relevance><![CDATA[ unix of operating system ]]></Relevance>
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// start
+wait dnf -y install initscripts
+// End</ActionScript>
+			<SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
+			<IncludeInGroupRelevance>true</IncludeInGroupRelevance>
+		</MemberAction>
+        <SourcedMemberAction>
             <SourceFixlet>
                 <Sitename>BES Support</Sitename>
                 <FixletID>{InstallPluginService_id}</FixletID>
                 <Action>Action1</Action>
             </SourceFixlet>
-            <Target>
-                <ComputerID>{root_id}</ComputerID>
-            </Target>
-            <Settings>
-                <HasEndTime>true</HasEndTime>
-                <EndDateTimeLocalOffset>P10D</EndDateTimeLocalOffset>
-                <ContinueOnErrors>true</ContinueOnErrors>
-            </Settings>
-        </SourcedFixletAction>
-    </BES>
-    """
+        </SourcedMemberAction>
+        <SourcedMemberAction>
+            <SourceFixlet>
+                <Sitename>BES Support</Sitename>
+                <FixletID>{ConfigureCredentials_id}</FixletID>
+                <Action>Action1</Action>
+            </SourceFixlet>
+            <Parameter Name="RESTUsername">{args.user}</Parameter>
+            <Parameter Name="RESTURL"><![CDATA[https://localhost:52311/api]]></Parameter>
+            <SecureParameter Name="RESTPassword"><![CDATA[{password}]]></SecureParameter>
+        </SourcedMemberAction>
+        <Settings>
+			<HasEndTime>true</HasEndTime>
+			<EndDateTimeLocalOffset>P7D</EndDateTimeLocalOffset>
+		</Settings>
+        <Target>
+            <ComputerID>{root_id}</ComputerID>
+        </Target>
+	</MultipleActionGroup>
+</BES>"""
 
-    if InstallPluginService_id > 0:
-        # create action to setup server plugin service:
-        action_result = bes_conn.post("actions", BES_SourcedFixletAction)
-        print(action_result)
+    # create action to setup server plugin service:
+    action_result = bes_conn.post("actions", XML_String_MultiActionGroup)
 
-    # NOTE: Work in progress
+    logging.info(action_result)
 
     logging.info("----- Ending Session ------")
     print("main() End")
