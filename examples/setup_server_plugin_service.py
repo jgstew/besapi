@@ -92,7 +92,7 @@ def main():
     args, _unknown = parser.parse_known_args()
 
     # allow set global scoped vars
-    global bes_conn, verbose, config_ini, invoke_folder
+    global bes_conn, verbose, invoke_folder
     verbose = args.verbose
 
     # get folder the script was invoked from:
@@ -169,7 +169,7 @@ def main():
         )
     )
 
-    # print(root_id)
+    logging.info("Root server computer id: %s", root_id)
 
     InstallPluginService_id = int(
         bes_conn.session_relevance_string(
@@ -190,6 +190,17 @@ def main():
     logging.info(
         "Configure REST API credentials for BES Server Plugin Service content id: %s",
         ConfigureCredentials_id,
+    )
+
+    EnableWakeOnLAN_id = int(
+        bes_conn.session_relevance_string(
+            'unique value of ids of fixlets whose(name of it contains "Enable Wake-on-LAN Medic") of bes sites whose(name of it = "BES Support")'
+        )
+    )
+
+    logging.info(
+        "Enable Wake-on-LAN Medic content id: %s",
+        EnableWakeOnLAN_id,
     )
 
     # NOTE: Work in progress
@@ -223,6 +234,13 @@ wait dnf -y install initscripts
             <Parameter Name="RESTUsername">{args.user}</Parameter>
             <Parameter Name="RESTURL"><![CDATA[https://localhost:52311/api]]></Parameter>
             <SecureParameter Name="RESTPassword"><![CDATA[{password}]]></SecureParameter>
+        </SourcedMemberAction>
+        <SourcedMemberAction>
+            <SourceFixlet>
+                <Sitename>BES Support</Sitename>
+                <FixletID>{EnableWakeOnLAN_id}</FixletID>
+                <Action>Action1</Action>
+            </SourceFixlet>
         </SourcedMemberAction>
         <Settings>
 			<HasEndTime>true</HasEndTime>
