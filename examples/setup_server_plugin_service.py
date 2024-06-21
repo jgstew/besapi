@@ -211,7 +211,7 @@ def main():
 		<Relevance>exists main gather service</Relevance>
 		<MemberAction>
 			<Title>install initscripts</Title>
-			<Relevance><![CDATA[ unix of operating system ]]></Relevance>
+			<Relevance><![CDATA[ unix of operating system AND exists packages "dnf" of rpms AND not exists packages "initscripts" of rpms ]]></Relevance>
 			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// start
 wait dnf -y install initscripts
 // End</ActionScript>
