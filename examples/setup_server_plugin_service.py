@@ -13,7 +13,6 @@ References:
 """
 
 import argparse
-import configparser
 import getpass
 import logging
 import logging.handlers
