@@ -211,9 +211,9 @@ def main():
 		<MemberAction>
 			<Title>install initscripts</Title>
 			<Relevance><![CDATA[ unix of operating system AND exists packages "dnf" of rpms AND not exists packages "initscripts" of rpms ]]></Relevance>
-			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// start
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[// start
 wait dnf -y install initscripts
-// End</ActionScript>
+// End]]></ActionScript>
 			<SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
 			<IncludeInGroupRelevance>true</IncludeInGroupRelevance>
 		</MemberAction>
