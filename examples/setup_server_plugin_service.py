@@ -115,9 +115,8 @@ def main():
         )
     ]
 
-    # log output to console if arg provided:
-    if verbose:
-        handlers.append(logging.StreamHandler())
+    # log output to console:
+    handlers.append(logging.StreamHandler())
 
     # setup logging:
     logging.basicConfig(
