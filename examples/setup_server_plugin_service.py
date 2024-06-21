@@ -26,7 +26,6 @@ __version__ = "0.0.1"
 verbose = 0
 bes_conn = None
 invoke_folder = None
-config_ini = None
 
 
 def get_invoke_folder():
