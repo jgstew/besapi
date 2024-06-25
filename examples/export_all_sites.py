@@ -89,7 +89,13 @@ def main():
     parser.add_argument("-r", "--rest-url", help="Specify the REST URL", required=False)
     parser.add_argument("-u", "--user", help="Specify the username", required=False)
     parser.add_argument("-p", "--password", help="Specify the password", required=False)
-    parser.add_argument("-d", "--delete", help="delete previous export", required=False, action='store_true')
+    parser.add_argument(
+        "-d",
+        "--delete",
+        help="delete previous export",
+        required=False,
+        action="store_true",
+    )
     # allow unknown args to be parsed instead of throwing an error:
     args, _unknown = parser.parse_known_args()
 
@@ -164,16 +170,18 @@ def main():
         except AttributeError:
             bes_conn = besapi.besapi.get_bes_conn_using_config_file()
 
+    export_folder = os.path.join(invoke_folder, "export")
+
     # if --delete arg used, delete export folder:
     if args.delete:
-        shutil.rmtree("export", ignore_errors=True)
+        shutil.rmtree(export_folder, ignore_errors=True)
 
     try:
-        os.mkdir("export")
+        os.mkdir(export_folder)
     except FileExistsError:
         logging.warning("Folder already exists!")
 
-    os.chdir("export")
+    os.chdir(export_folder)
 
     bes_conn.export_all_sites()
 
