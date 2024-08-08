@@ -9,6 +9,8 @@ import os
 
 import besapi
 
+FIXLET_RELEVANCE = 'fixlets whose(name of it starts with "Update:") of bes sites whose( external site flag of it AND name of it = "Updates for Windows Applications Extended" )'
+
 
 def main():
     """Execution starts here"""
@@ -19,7 +21,7 @@ def main():
     print(bes_conn.last_connected)
 
     # change the relevance here to adjust which content gets put in a baseline:
-    fixlets_rel = 'fixlets whose(name of it starts with "Update:") of bes sites whose( external site flag of it AND name of it = "Updates for Windows Applications Extended" )'
+    fixlets_rel = FIXLET_RELEVANCE
 
     # this gets the info needed from the items to make the baseline:
     session_relevance = f"""(it as string) of (url of site of it, ids of it, content id of default action of it | "Action1") of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)" AND exists applicable computers whose(now - last report time of it < 60 * day) of it) of {fixlets_rel}"""
