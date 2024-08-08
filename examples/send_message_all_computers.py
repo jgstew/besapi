@@ -1,17 +1,24 @@
+"""
+This will send a BigFix UI message to ALL computers!
+"""
+
 import besapi
 
-CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
+MESSAGE_TITLE = """Test message from besapi"""
+MESSAGE = MESSAGE_TITLE
+
+CONTENT_XML = rf"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
     <SingleAction>
-        <Title>Test message from besapi</Title>
+        <Title>Send Message: {MESSAGE_TITLE}</Title>
         <Relevance><![CDATA[(if (windows of operating system) then (exists key whose ((it as string = "IBM BigFix Self Service Application" OR it as string = "IBM BigFix Self-Service Application" OR it as string = "BigFix Self-Service Application") of value "DisplayName" of it AND value "DisplayVersion" of it as string as version >= ("3.1.0" as version)) of key "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall" of x32 registry) else if (mac of operating system) then (exists application "BigFixSSA.app" whose (version of it >= "3.1.0")) else false) AND (exists line whose (it = "disableMessagesTab: false") of file (if (windows of operating system) then (pathname of parent folder of parent folder of client) & "\BigFix Self Service Application\resources\ssa.config" else "/Library/Application Support/BigFix/BigFixSSA/ssa.config"))]]></Relevance>
         <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">//Nothing to do</ActionScript>
         <SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
         <Settings>
-            <ActionUITitle>Test message from besapi</ActionUITitle>
+            <ActionUITitle>{MESSAGE_TITLE}</ActionUITitle>
             <PreActionShowUI>true</PreActionShowUI>
             <PreAction>
-                <Text><![CDATA[<p>Test message from besapi</p>]]></Text>
+                <Text><![CDATA[<p>{MESSAGE}</p>]]></Text>
                 <AskToSaveWork>false</AskToSaveWork>
                 <ShowActionButton>false</ShowActionButton>
                 <ShowCancelButton>false</ShowCancelButton>
@@ -87,7 +94,7 @@ CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
         </Target>
         <MIMEFieldSingleAction>
             <Name>action-ui-metadata</Name>
-            <Value>{"type":"notification","sender":"broadcast","expirationDays":3}</Value>
+            <Value>{{"type":"notification","sender":"broadcast","expirationDays":3}}</Value>
         </MIMEFieldSingleAction>
     </SingleAction>
 </BES>
