@@ -5,6 +5,7 @@ requires `besapi`, install with command `pip install besapi`
 
 Related:
 
+- https://support.hcltechsw.com/csm?id=kb_article&sysparm_article=KB0023378
 - http://localhost:__WebReportsPort__/json/wakeonlan?cid=_ComputerID_&cid=_NComputerID_
 - POST(binary) http://localhost:52311/data/wake-on-lan
 - https://localhost:52311/rd-proxy?RequestUrl=cgi-bin/bfenterprise/BESGatherMirrorNew.exe/-triggergatherdb?forwardtrigger
@@ -15,6 +16,11 @@ Related:
 """
 
 import besapi
+
+SESSION_RELEVANCE_COMPUTER_IDS = """
+    ids of bes computers
+        whose(root server flag of it AND now - last report time of it < 10 * day)
+"""
 
 
 def main():
@@ -27,10 +33,7 @@ def main():
     # SessionRelevance for computer ids you wish to wake:
     # this currently returns the root server itself, which should have no real effect.
     # change this to a singular or plural result of computer ids you wish to wake.
-    session_relevance = """
-    ids of bes computers
-     whose(root server flag of it AND now - last report time of it < 10 * day)
-    """
+    session_relevance = SESSION_RELEVANCE_COMPUTER_IDS
 
     computer_id_array = bes_conn.session_relevance_array(session_relevance)
 
