@@ -82,7 +82,9 @@ def main():
 """
     )
 
-    result = bes_conn.session.post(f"{bes_conn.rootserver}/WakeOnLan", data=soap_xml)
+    result = bes_conn.session.post(
+        f"{bes_conn.rootserver}/WakeOnLan", data=soap_xml, verify=False
+    )
 
     print(result)
     print(result.text)
