@@ -10,6 +10,8 @@ import time
 
 import besapi
 
+CLIENT_RELEVANCE = "(computer names, model name of main processor, (it as string) of (it / (1024 * 1024 * 1024)) of total amount of ram)"
+
 
 def main():
     """Execution starts here"""
@@ -34,7 +36,7 @@ def main():
     #     print(item)
 
     # this is the client relevance we are going to get the results of:
-    client_relevance = "(computer names, operating systems)"
+    client_relevance = CLIENT_RELEVANCE
 
     # generate target XML substring from list of computer ids:
     target_xml = (
@@ -93,7 +95,7 @@ def main():
                 print("not interactive, stopping loop")
                 break
     except KeyboardInterrupt:
-        print("loop interuppted")
+        print("\nloop interuppted")
 
     print("script finished")
 
