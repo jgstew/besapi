@@ -37,8 +37,12 @@ def main():
     for item in result:
         # print(item)
         tuple_items = item.split(", ")
-        baseline_components += f"""
-        <BaselineComponent IncludeInRelevance="true" SourceSiteURL="{tuple_items[0]}" SourceID="{tuple_items[1]}" ActionName="{tuple_items[2]}" />"""
+        try:
+            baseline_components += f"""
+            <BaselineComponent IncludeInRelevance="true" SourceSiteURL="{tuple_items[0]}" SourceID="{tuple_items[1]}" ActionName="{tuple_items[2]}" />"""
+        except IndexError:
+            print("ERROR: a component was missing a key item.")
+            continue
 
     # print(baseline_components)
 
