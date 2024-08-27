@@ -29,7 +29,7 @@ import requests
 from lxml import etree, objectify
 from pkg_resources import resource_filename
 
-__version__ = "3.2.7"
+__version__ = "3.3.1"
 
 besapi_logger = logging.getLogger("besapi")
 
