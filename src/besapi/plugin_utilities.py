@@ -1,12 +1,12 @@
 """This is a set of utility functions for use in multiple plugins"""
 
 import argparse
+import getpass
 import logging
 import logging.handlers
 import ntpath
 import os
 import sys
-import getpass
 
 import besapi
 

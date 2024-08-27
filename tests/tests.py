@@ -155,7 +155,8 @@ if bigfix_cli.bes_conn:
 # test plugin_utilities:
 print(besapi.plugin_utilities.get_invoke_folder())
 print(besapi.plugin_utilities.get_invoke_file_name())
-besapi.plugin_utilities.setup_plugin_logging(console=True)
+# the following doesn't seem to work in python 3.7:
+# besapi.plugin_utilities.setup_plugin_logging(console=True)
 parser = besapi.plugin_utilities.setup_plugin_argparse(plugin_args_required=False)
 # allow unknown args to be parsed instead of throwing an error:
 args, _unknown = parser.parse_known_args()
