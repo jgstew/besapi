@@ -25,6 +25,7 @@ if not args.test_pip:
     sys.path.reverse()
 
 import besapi
+import besapi.plugin_utilities
 
 print("besapi version: " + str(besapi.besapi.__version__))
 
@@ -150,5 +151,13 @@ if bigfix_cli.bes_conn:
         )
         bes_conn = besapi.besapi.get_bes_conn_using_config_file()
         print("login succeeded:", bes_conn.login())
+
+# test plugin_utilities:
+print(besapi.plugin_utilities.get_invoke_folder())
+print(besapi.plugin_utilities.get_invoke_file_name())
+besapi.plugin_utilities.setup_plugin_logging(console=True)
+parser = besapi.plugin_utilities.setup_plugin_argparse(plugin_args_required=False)
+# allow unknown args to be parsed instead of throwing an error:
+args, _unknown = parser.parse_known_args()
 
 sys.exit(0)

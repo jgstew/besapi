@@ -6,6 +6,9 @@ import logging.handlers
 import ntpath
 import os
 import sys
+import getpass
+
+import besapi
 
 
 def get_invoke_folder(verbose=0):
@@ -120,13 +123,44 @@ def setup_plugin_logging(log_file_name="", verbose=0, console=True):
     )
 
 
-# if __name__ == "__main__":
-#     print(get_invoke_folder())
-#     print(get_invoke_file_name())
-#     setup_plugin_logging(console=True)
-#     logging.error("test logging")
-#     parser = setup_plugin_argparse()
-#     # allow unknown args to be parsed instead of throwing an error:
-#     args, _unknown = parser.parse_known_args()
+def get_besapi_connection(args):
+    """get connection to besapi using either args or config file if args not provided"""
 
-#     logging.error(args)
+    password = args.password
+
+    # if user was provided as arg but password was not:
+    if args.user and not password:
+        logging.warning("Password was not provided, provide REST API password.")
+        print("Password was not provided, provide REST API password:")
+        password = getpass.getpass()
+
+    # process args, setup connection:
+    rest_url = args.rest_url
+
+    # normalize url to https://HostOrIP:52311
+    if rest_url and rest_url.endswith("/api"):
+        rest_url = rest_url.replace("/api", "")
+
+    # attempt bigfix connection with provided args:
+    if args.user and password:
+        try:
+            bes_conn = besapi.besapi.BESConnection(args.user, password, rest_url)
+            # bes_conn.login()
+        except (
+            AttributeError,
+            ConnectionRefusedError,
+            besapi.besapi.requests.exceptions.ConnectionError,
+        ):
+            try:
+                # print(args.besserver)
+                bes_conn = besapi.besapi.BESConnection(
+                    args.user, password, args.besserver
+                )
+            # handle case where args.besserver is None
+            # AttributeError: 'NoneType' object has no attribute 'startswith'
+            except AttributeError:
+                bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    else:
+        bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+
+    return bes_conn
