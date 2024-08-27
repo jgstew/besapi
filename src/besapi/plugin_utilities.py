@@ -1,10 +1,10 @@
 """This is a set of utility functions for use in multiple plugins"""
 
 import argparse
-import os
 import logging
 import logging.handlers
 import ntpath
+import os
 import sys
 
 
