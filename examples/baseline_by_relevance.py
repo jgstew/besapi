@@ -9,6 +9,7 @@ import os
 
 import besapi
 
+# This relevance string must start with `fixlets` and return the set of fixlets you wish to turn into a baseline
 FIXLET_RELEVANCE = 'fixlets whose(name of it starts with "Update:") of bes sites whose( external site flag of it AND name of it = "Updates for Windows Applications Extended" )'
 
 
