@@ -115,14 +115,14 @@ def setup_plugin_logging(log_file_path="", verbose=0, console=True):
         handlers.append(logging.StreamHandler())
         print("INFO: also logging to console")
 
-    # setup logging:
-    logging.basicConfig(
-        encoding="utf-8",
-        level=log_level,
-        format="%(asctime)s %(levelname)s:%(message)s",
-        handlers=handlers,
-        force=True,
-    )
+    # return logging config:
+    return {
+        "encoding": "utf-8",
+        "level": log_level,
+        "format": "%(asctime)s %(levelname)s:%(message)s",
+        "handlers": handlers,
+        "force": True,
+    }
 
 
 def get_besapi_connection(args):
