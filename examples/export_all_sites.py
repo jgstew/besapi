@@ -18,8 +18,8 @@ import argparse
 import getpass
 import logging
 import logging.handlers
-import os
 import ntpath
+import os
 import platform
 import shutil
 import sys

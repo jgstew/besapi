@@ -6,7 +6,7 @@
 # https://github.com/pre-commit/pre-commit-hooks
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v4.6.0
     hooks:
       - id: check-yaml
       - id: check-json
@@ -36,6 +36,6 @@ repos:
     hooks:
       - id: isort
   - repo: https://github.com/psf/black
-    rev: 24.2.0
+    rev: 24.8.0
     hooks:
       - id: black
