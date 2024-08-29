@@ -91,7 +91,7 @@ def setup_plugin_logging(log_file_path="", verbose=0, console=True):
 
     if not log_file_path or log_file_path == "":
         log_file_path = os.path.join(
-            get_invoke_folder(verbose), get_invoke_file_name() + ".log"
+            get_invoke_folder(verbose), get_invoke_file_name(verbose) + ".log"
         )
 
     # set different log levels:
