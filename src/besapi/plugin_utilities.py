@@ -11,6 +11,7 @@ import sys
 import besapi
 
 
+# NOTE: This does not work as expected when run from plugin_utilities
 def get_invoke_folder(verbose=0):
     """Get the folder the script was invoked from"""
     # using logging here won't actually log it to the file:
@@ -30,6 +31,7 @@ def get_invoke_folder(verbose=0):
     return invoke_folder
 
 
+# NOTE: This does not work as expected when run from plugin_utilities
 def get_invoke_file_name(verbose=0):
     """Get the filename the script was invoked from"""
     # using logging here won't actually log it to the file:
@@ -98,7 +100,7 @@ def setup_plugin_logging(log_file_path="", verbose=0, console=True):
     log_level = logging.WARNING
     if verbose:
         log_level = logging.INFO
-        print("INFO: Log File Path: %s", log_file_path)
+        print("INFO: Log File Path:", log_file_path)
     if verbose > 1:
         log_level = logging.DEBUG
 
@@ -111,6 +113,7 @@ def setup_plugin_logging(log_file_path="", verbose=0, console=True):
     # log output to console if arg provided:
     if console:
         handlers.append(logging.StreamHandler())
+        print("INFO: also logging to console")
 
     # setup logging:
     logging.basicConfig(
@@ -118,6 +121,7 @@ def setup_plugin_logging(log_file_path="", verbose=0, console=True):
         level=log_level,
         format="%(asctime)s %(levelname)s:%(message)s",
         handlers=handlers,
+        force=True,
     )
 
 

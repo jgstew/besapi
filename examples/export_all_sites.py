@@ -98,7 +98,11 @@ def main():
     # get folder the script was invoked from:
     invoke_folder = get_invoke_folder()
 
-    log_file_path = invoke_folder + get_invoke_file_name() + ".log"
+    log_file_path = os.path.join(
+        get_invoke_folder(verbose), get_invoke_file_name(verbose) + ".log"
+    )
+
+    print(log_file_path)
 
     besapi.plugin_utilities.setup_plugin_logging(log_file_path)
 
