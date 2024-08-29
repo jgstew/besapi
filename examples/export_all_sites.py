@@ -19,6 +19,7 @@ import getpass
 import logging
 import logging.handlers
 import os
+import ntpath
 import platform
 import shutil
 import sys
@@ -30,6 +31,45 @@ __version__ = "0.0.1"
 verbose = 0
 bes_conn = None
 invoke_folder = None
+
+
+def get_invoke_folder(verbose=0):
+    """Get the folder the script was invoked from"""
+    # using logging here won't actually log it to the file:
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        if verbose:
+            print("running in a PyInstaller bundle")
+        invoke_folder = os.path.abspath(os.path.dirname(sys.executable))
+    else:
+        if verbose:
+            print("running in a normal Python process")
+        invoke_folder = os.path.abspath(os.path.dirname(__file__))
+
+    if verbose:
+        print(f"invoke_folder = {invoke_folder}")
+
+    return invoke_folder
+
+
+def get_invoke_file_name(verbose=0):
+    """Get the filename the script was invoked from"""
+    # using logging here won't actually log it to the file:
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        if verbose:
+            print("running in a PyInstaller bundle")
+        invoke_file_path = sys.executable
+    else:
+        if verbose:
+            print("running in a normal Python process")
+        invoke_file_path = __file__
+
+    if verbose:
+        print(f"invoke_file_path = {invoke_file_path}")
+
+    # get just the file name, return without file extension:
+    return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
 def main():
@@ -56,9 +96,11 @@ def main():
     verbose = args.verbose
 
     # get folder the script was invoked from:
-    invoke_folder = besapi.plugin_utilities.get_invoke_folder()
+    invoke_folder = get_invoke_folder()
 
-    besapi.plugin_utilities.setup_plugin_logging()
+    log_file_path = invoke_folder + get_invoke_file_name() + ".log"
+
+    besapi.plugin_utilities.setup_plugin_logging(log_file_path)
 
     logging.info("----- Starting New Session ------")
     logging.debug("invoke folder: %s", invoke_folder)

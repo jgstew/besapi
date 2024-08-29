@@ -86,27 +86,25 @@ def setup_plugin_argparse(plugin_args_required=False):
     return arg_parser
 
 
-def setup_plugin_logging(log_file_name="", verbose=0, console=True):
+def setup_plugin_logging(log_file_path="", verbose=0, console=True):
     """setup logging for plugin use"""
-    # get folder the script was invoked from:
-    invoke_folder = get_invoke_folder(verbose)
 
-    if not log_file_name or log_file_name == "":
-        log_file_name = get_invoke_file_name() + ".log"
+    if not log_file_path or log_file_path == "":
+        log_file_path = os.path.join(
+            get_invoke_folder(verbose), get_invoke_file_name() + ".log"
+        )
 
     # set different log levels:
     log_level = logging.WARNING
     if verbose:
         log_level = logging.INFO
+        print("INFO: Log File Path: %s", log_file_path)
     if verbose > 1:
         log_level = logging.DEBUG
 
-    # get path to put log file in:
-    log_filename = os.path.join(invoke_folder, log_file_name)
-
     handlers = [
         logging.handlers.RotatingFileHandler(
-            log_filename, maxBytes=5 * 1024 * 1024, backupCount=1
+            log_file_path, maxBytes=5 * 1024 * 1024, backupCount=1
         )
     ]
 
