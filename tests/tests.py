@@ -164,10 +164,13 @@ args, _unknown = parser.parse_known_args()
 import logging
 
 logging_config = besapi.plugin_utilities.get_plugin_logging_config("./tests.log")
-# logging.basicConfig(**logging_config)
 
-# logging.warning("Just testing to see if logging is working!")
+# this use of logging.basicConfig requires python >= 3.9
+if sys.version_info >= (3, 9):
+    logging.basicConfig(**logging_config)
 
-# assert os.path.isfile("./tests.log")
+    logging.warning("Just testing to see if logging is working!")
+
+    assert os.path.isfile("./tests.log")
 
 sys.exit(0)
