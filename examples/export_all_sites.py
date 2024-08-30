@@ -27,7 +27,7 @@ import sys
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.0.1"
+__version__ = "1.1.1"
 verbose = 0
 bes_conn = None
 invoke_folder = None
