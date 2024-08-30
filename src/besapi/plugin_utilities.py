@@ -88,8 +88,8 @@ def setup_plugin_argparse(plugin_args_required=False):
     return arg_parser
 
 
-def setup_plugin_logging(log_file_path="", verbose=0, console=True):
-    """setup logging for plugin use"""
+def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
+    """get config for logging for plugin use"""
 
     if not log_file_path or log_file_path == "":
         log_file_path = os.path.join(

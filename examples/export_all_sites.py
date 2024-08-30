@@ -104,7 +104,11 @@ def main():
 
     print(log_file_path)
 
-    besapi.plugin_utilities.setup_plugin_logging(log_file_path)
+    logging_config = besapi.plugin_utilities.get_plugin_logging_config(
+        log_file_path, verbose, args.console
+    )
+
+    logging.basicConfig(**logging_config)
 
     logging.info("----- Starting New Session ------")
     logging.debug("invoke folder: %s", invoke_folder)
