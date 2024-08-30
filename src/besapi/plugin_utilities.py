@@ -1,4 +1,7 @@
-"""This is a set of utility functions for use in multiple plugins"""
+"""This is a set of utility functions for use in multiple plugins
+
+see example here: https://github.com/jgstew/besapi/blob/master/examples/export_all_sites.py
+"""
 
 import argparse
 import getpass
@@ -89,7 +92,9 @@ def setup_plugin_argparse(plugin_args_required=False):
 
 
 def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
-    """get config for logging for plugin use"""
+    """get config for logging for plugin use
+
+    use this like: logging.basicConfig(**logging_config)"""
 
     if not log_file_path or log_file_path == "":
         log_file_path = os.path.join(
@@ -149,6 +154,8 @@ def get_besapi_connection(args):
     # attempt bigfix connection with provided args:
     if args.user and password:
         try:
+            if not rest_url:
+                raise AttributeError
             bes_conn = besapi.besapi.BESConnection(args.user, password, rest_url)
         except (
             AttributeError,
@@ -161,7 +168,8 @@ def get_besapi_connection(args):
                 args.besserver,
             )
             try:
-                # print(args.besserver)
+                if not args.besserver:
+                    raise AttributeError
                 bes_conn = besapi.besapi.BESConnection(
                     args.user, password, args.besserver
                 )
