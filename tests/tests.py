@@ -172,5 +172,6 @@ if sys.version_info >= (3, 9):
     logging.warning("Just testing to see if logging is working!")
 
     assert os.path.isfile("./tests.log")
+    os.remove("./tests.log")
 
 sys.exit(0)
