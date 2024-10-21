@@ -54,6 +54,9 @@ class BESCLInterface(Cmd):
     def do_get(self, line):
         """Perform get request to BigFix server using provided api endpoint argument"""
 
+        # remove any extra whitespace
+        line = line.strip()
+
         # Remove root server prefix:
         # if root server prefix is not removed
         # and root server is given as IP Address,
@@ -77,6 +80,26 @@ class BESCLInterface(Cmd):
                 print(output_item)
                 # print(output_item.besdict)
                 # print(output_item.besjson)
+        else:
+            self.pfeedback("Not currently logged in. Type 'login'.")
+
+    def do_delete(self, line):
+        """Perform delete request to BigFix server using provided api endpoint argument"""
+
+        # remove any extra whitespace
+        line = line.strip()
+
+        # Remove root server prefix:
+        if "/api/" in line:
+            line = str(line).split("/api/", 1)[1]
+            self.pfeedback("get " + line)
+
+        if self.bes_conn:
+            output_item = self.bes_conn.delete(line)
+
+            print(output_item)
+            # print(output_item.besdict)
+            # print(output_item.besjson)
         else:
             self.pfeedback("Not currently logged in. Type 'login'.")
 
@@ -366,9 +389,13 @@ class BESCLInterface(Cmd):
     def do_import_bes(self, statement):
         """import bes file"""
 
-        self.poutput(f"Import file: {statement.args}")
+        bes_file_path = str(statement.args).strip()
 
-        self.poutput(self.bes_conn.import_bes_to_site(str(statement.args)))
+        site_path = self.bes_conn.get_current_site_path(None)
+
+        self.poutput(f"Import file: {bes_file_path}")
+
+        self.poutput(self.bes_conn.import_bes_to_site(bes_file_path, site_path))
 
     complete_upload = Cmd.path_complete
 
