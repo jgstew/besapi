@@ -200,7 +200,7 @@ def main():
         EnableWakeOnLAN_id,
     )
 
-    # NOTE: Work in progress
+    # Build the XML for the Multi Action Group to setup the plugin service:
     XML_String_MultiActionGroup = f"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<MultipleActionGroup>
