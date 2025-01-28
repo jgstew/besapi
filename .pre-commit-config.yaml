@@ -45,3 +45,7 @@ repos:
       - id: check-github-workflows
         args: ["--verbose"]
       - id: check-dependabot
+  - repo: meta
+    hooks:
+      - id: check-useless-excludes
+      - id: check-hooks-apply
