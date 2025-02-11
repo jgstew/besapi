@@ -29,7 +29,7 @@ import requests
 from lxml import etree, objectify
 from pkg_resources import resource_filename
 
-__version__ = "3.7.4"
+__version__ = "3.7.5"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -345,8 +345,11 @@ class BESConnection:
                         besapi_logger.info("Query did not return any results")
                     else:
                         besapi_logger.error("%s\n%s", err2, rel_result.text)
+                        result.append("ERROR: " + rel_result.text)
                         raise
             else:
+                besapi_logger.error("%s\n%s", err, rel_result.text)
+                result.append("ERROR: " + rel_result.text)
                 raise
         return result
 
