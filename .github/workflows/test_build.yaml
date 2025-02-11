@@ -60,6 +60,12 @@ jobs:
       - name: Test invoke directly src/besapi/besapi.py
         run: python src/besapi/besapi.py ls logout clear error_count version exit
 
+      - name: Test invoke directly -m besapi
+        run: cd src && python -m besapi ls logout clear error_count version exit
+
+      - name: Test invoke directly -m bescli
+        run: cd src && python -m bescli ls logout clear error_count version exit
+
       - name: Run build
         run: python3 -m build
 
@@ -92,9 +98,3 @@ jobs:
 
       - name: Test bescli binary
         run: ./dist/bescli ls logout clear error_count version exit
-
-      - name: Test invoke directly -m besapi
-        run: cd src && python -m besapi ls logout clear error_count version exit
-
-      - name: Test invoke directly -m bescli
-        run: cd src && python -m bescli ls logout clear error_count version exit
