@@ -84,7 +84,7 @@ jobs:
 
       - name: Test python import bescli
         shell: bash
-        run: python -c "import bescli"
+        run: python -c "import bescli;bescli.bescli.BESCLInterface().do_version()"
 
       - name: Test python bescli
         shell: bash
