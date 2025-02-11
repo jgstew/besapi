@@ -80,7 +80,7 @@ jobs:
 
       - name: Test python import besapi
         shell: bash
-        run: python -c "import besapi"
+        run: python -c "import besapi;print(besapi.besapi.__version__)"
 
       - name: Test python import bescli
         shell: bash
