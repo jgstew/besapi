@@ -107,7 +107,9 @@ bigfix_cli.do_conf()
 # this should really only run if the config file is present:
 if bigfix_cli.bes_conn:
     # session relevance tests require functioning web reports server
-    print(bigfix_cli.bes_conn.session_relevance_string("number of bes computers"))
+    assert (
+        int(bigfix_cli.bes_conn.session_relevance_string("number of bes computers")) > 0
+    )
     assert (
         "test session relevance string result"
         in bigfix_cli.bes_conn.session_relevance_string(
@@ -134,7 +136,7 @@ if bigfix_cli.bes_conn:
     var_name = "TestVarName"
     var_value = "TestVarValue " + str(random.randint(0, 9999))
 
-    print(
+    assert var_value in str(
         bigfix_cli.bes_conn.set_dashboard_variable_value(
             dashboard_name, var_name, var_value
         )

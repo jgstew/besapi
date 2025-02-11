@@ -39,6 +39,13 @@ class BESCLInterface(Cmd):
 
     def __init__(self, **kwargs):
         Cmd.__init__(self, **kwargs)
+
+        # set an intro message
+        self.intro = (
+            f"\nWelcome to the BigFix REST API Interactive Python Module v{__version__}"
+        )
+
+        # sets the prompt look:
         self.prompt = "BigFix> "
 
         self.num_errors = 0
