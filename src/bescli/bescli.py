@@ -57,7 +57,48 @@ class BESCLInterface(Cmd):
         # set default config file path
         self.conf_path = os.path.expanduser("~/.besapi.conf")
         self.CONFPARSER = SafeConfigParser()
+        # for completion:
+        self.api_resources = []
         self.do_conf()
+
+    def parse_help_resources(self):
+        """get api resources from help"""
+        if self.bes_conn:
+            help_result = self.bes_conn.get("help")
+            help_result = help_result.text.split("\n")
+            # print(help_result)
+            help_resources = []
+            for item in help_result:
+                if "/api/" in item:
+                    _, _, res = item.partition("/api/")
+                    help_resources.append(res)
+
+            return help_resources
+        else:
+            return [
+                "actions",
+                "clientqueryresults",
+                "dashboardvariables",
+                "help",
+                "login",
+                "query",
+                "relaysites",
+                "serverinfo",
+                "sites",
+            ]
+
+    def complete_api_resources(self, text, line, begidx, endidx):
+        """define completion for apis"""
+
+        # only initialize once
+        if not self.api_resources:
+            self.api_resources = self.parse_help_resources()
+
+        # TODO: make this work to complete only the first word after get/post/delete
+        # return the matching subset:
+        return [name for name in self.api_resources if name.startswith(text)]
+
+    complete_get = complete_api_resources
 
     def do_get(self, line):
         """Perform get request to BigFix server using provided api endpoint argument"""
@@ -91,6 +132,8 @@ class BESCLInterface(Cmd):
         else:
             self.pfeedback("Not currently logged in. Type 'login'.")
 
+    complete_delete = complete_api_resources
+
     def do_delete(self, line):
         """Perform delete request to BigFix server using provided api endpoint argument"""
 
@@ -110,6 +153,8 @@ class BESCLInterface(Cmd):
             # self.poutput(output_item.besjson)
         else:
             self.pfeedback("Not currently logged in. Type 'login'.")
+
+    complete_post = complete_api_resources
 
     def do_post(self, statement):
         """post file as data to path"""
