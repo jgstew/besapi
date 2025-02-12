@@ -71,7 +71,8 @@ class BESCLInterface(Cmd):
             for item in help_result:
                 if "/api/" in item:
                     _, _, res = item.partition("/api/")
-                    help_resources.append(res)
+                    # strip whitespace just in case:
+                    help_resources.append(res.strip())
 
             return help_resources
         else:
