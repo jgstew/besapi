@@ -73,6 +73,9 @@ def main():
     print("main() start")
 
     print("NOTE: this script requires besapi v3.3.3+ due to besapi.plugin_utilities")
+    print(
+        "WARNING: results may be incorrect if not run as a MO or an account without scope of all computers"
+    )
 
     parser = besapi.plugin_utilities.setup_plugin_argparse()
 
