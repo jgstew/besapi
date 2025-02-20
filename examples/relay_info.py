@@ -138,6 +138,7 @@ def main():
 
     logging.info("Relay name override values:\n%s", results)
 
+    # this should require MO:
     results = bes_conn.get("admin/masthead/parameters")
 
     logging.info(
