@@ -4,7 +4,7 @@ This will get info about relays in the environment
 requires `besapi`, install with command `pip install besapi`
 
 Example Usage:
-python relay_info.py -r https://localhost:52311/api -u API_USER -p API_PASSWORD
+python relay_info.py -r https://localhost:52311/api -u API_USER --days 90 -p API_PASSWORD
 
 References:
 - https://developer.bigfix.com/rest-api/api/admin.html
