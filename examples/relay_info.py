@@ -131,7 +131,7 @@ def main():
 
     logging.info("Info on Relays:\n" + results)
 
-    session_relevance = """unique values of values of client settings whose(name of it = "_BESClient_Relay_NameOverride") of bes computers"""
+    session_relevance = f"""unique values of values of client settings whose(name of it = "_BESClient_Relay_NameOverride") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
     logging.info("Relay name override values:\n" + results)
