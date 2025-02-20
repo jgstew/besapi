@@ -12,6 +12,7 @@ References:
 - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
 """
 
+import json
 import logging
 import logging.handlers
 import ntpath
@@ -125,17 +126,24 @@ def main():
     session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayHostname") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
-    logging.info("Relay Info:\n" + results)
+    logging.info("Relay Info:\n%s", results)
 
     session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayServer", relay hostname of it | "NoRelayHostname") of bes computers whose(now - last report time of it < {last_report_days_filter} * day AND relay server flag of it)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
-    logging.info("Info on Relays:\n" + results)
+    logging.info("Info on Relays:\n%s", results)
 
     session_relevance = f"""unique values of values of client settings whose(name of it = "_BESClient_Relay_NameOverride") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
-    logging.info("Relay name override values:\n" + results)
+    logging.info("Relay name override values:\n%s", results)
+
+    results = bes_conn.get("admin/masthead/parameters")
+
+    logging.info(
+        "masthead parameters:\n%s",
+        json.dumps(results.besdict["MastheadParameters"], indent=2),
+    )
 
     logging.info("---------- Ending Session -----------")
 
