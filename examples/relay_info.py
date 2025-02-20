@@ -131,6 +131,11 @@ def main():
 
     logging.info("Info on Relays:\n" + results)
 
+    session_relevance = """unique values of values of client settings whose(name of it = "_BESClient_Relay_NameOverride") of bes computers"""
+    results = bes_conn.session_relevance_string(session_relevance)
+
+    logging.info("Relay name override values:\n" + results)
+
     logging.info("---------- Ending Session -----------")
 
 
