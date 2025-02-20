@@ -118,9 +118,10 @@ def main():
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
-    # get relay info:
+    # defaults to 900 days:
     last_report_days_filter = args.days
 
+    # get relay info:
     session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayHostname") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
