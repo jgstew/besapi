@@ -110,7 +110,7 @@ def main():
 
     logging.basicConfig(**logging_config)
 
-    logging.info("----- Starting New Session ------")
+    logging.info("---------- Starting New Session -----------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("Python version: %s", platform.sys.version)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -130,6 +130,8 @@ def main():
     results = bes_conn.session_relevance_string(session_relevance)
 
     logging.info("Info on Relays:\n" + results)
+
+    logging.info("---------- Ending Session -----------")
 
 
 if __name__ == "__main__":
