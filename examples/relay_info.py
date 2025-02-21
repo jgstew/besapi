@@ -146,6 +146,28 @@ def main():
         json.dumps(results.besdict["MastheadParameters"], indent=2),
     )
 
+    # this should require MO:
+    results = bes_conn.get("admin/fields")
+
+    logging.info(
+        "Admin Fields:\n%s", json.dumps(results.besdict["AdminField"], indent=2)
+    )
+
+    # this should require MO:
+    results = bes_conn.get("admin/options")
+
+    logging.info(
+        "Admin Options:\n%s", json.dumps(results.besdict["SystemOptions"], indent=2)
+    )
+
+    # this should require MO:
+    results = bes_conn.get("admin/reports")
+
+    logging.info(
+        "Admin Report Options:\n%s",
+        json.dumps(results.besdict["ClientReports"], indent=2),
+    )
+
     logging.info("---------- Ending Session -----------")
 
 
