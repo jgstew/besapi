@@ -5,19 +5,108 @@ requires `besapi`, install with command `pip install besapi`
 """
 
 import json
+import logging
+import ntpath
+import os
+import platform
 import sys
 import time
 
 import besapi
+import besapi.plugin_utilities
 
 CLIENT_RELEVANCE = "(computer names, model name of main processor, (it as string) of (it / (1024 * 1024 * 1024)) of total amount of ram)"
+__version__ = "1.0.1"
+verbose = 0
+bes_conn = None
+invoke_folder = None
+
+
+def get_invoke_folder(verbose=0):
+    """Get the folder the script was invoked from"""
+    # using logging here won't actually log it to the file:
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        if verbose:
+            print("running in a PyInstaller bundle")
+        invoke_folder = os.path.abspath(os.path.dirname(sys.executable))
+    else:
+        if verbose:
+            print("running in a normal Python process")
+        invoke_folder = os.path.abspath(os.path.dirname(__file__))
+
+    if verbose:
+        print(f"invoke_folder = {invoke_folder}")
+
+    return invoke_folder
+
+
+def get_invoke_file_name(verbose=0):
+    """Get the filename the script was invoked from"""
+    # using logging here won't actually log it to the file:
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        if verbose:
+            print("running in a PyInstaller bundle")
+        invoke_file_path = sys.executable
+    else:
+        if verbose:
+            print("running in a normal Python process")
+        invoke_file_path = __file__
+
+    if verbose:
+        print(f"invoke_file_path = {invoke_file_path}")
+
+    # get just the file name, return without file extension:
+    return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
 def main():
     """Execution starts here"""
     print("main()")
-    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
-    bes_conn.login()
+
+    print("NOTE: this script requires besapi v3.3.3+ due to besapi.plugin_utilities")
+
+    parser = besapi.plugin_utilities.setup_plugin_argparse()
+
+    # add additonal arg specific to this script:
+    parser.add_argument(
+        "-q",
+        "--query",
+        help="client query relevance",
+        required=False,
+        type=str,
+        default=CLIENT_RELEVANCE,
+    )
+    # allow unknown args to be parsed instead of throwing an error:
+    args, _unknown = parser.parse_known_args()
+
+    # allow set global scoped vars
+    global bes_conn, verbose, invoke_folder
+    verbose = args.verbose
+
+    # get folder the script was invoked from:
+    invoke_folder = get_invoke_folder()
+
+    log_file_path = os.path.join(
+        get_invoke_folder(verbose), get_invoke_file_name(verbose) + ".log"
+    )
+
+    print(log_file_path)
+
+    logging_config = besapi.plugin_utilities.get_plugin_logging_config(
+        log_file_path, verbose, args.console
+    )
+
+    logging.basicConfig(**logging_config)
+
+    logging.info("---------- Starting New Session -----------")
+    logging.debug("invoke folder: %s", invoke_folder)
+    logging.debug("Python version: %s", platform.sys.version)
+    logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
+    logging.debug("this plugin's version: %s", __version__)
+
+    bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
     # get the ~10 most recent computers to report into BigFix:
     session_relevance = 'tuple string items (integers in (0,9)) of concatenations ", " of (it as string) of ids of bes computers whose(now - last report time of it < 25 * minute)'
@@ -36,7 +125,7 @@ def main():
     #     print(item)
 
     # this is the client relevance we are going to get the results of:
-    client_relevance = CLIENT_RELEVANCE
+    client_relevance = args.query
 
     # generate target XML substring from list of computer ids:
     target_xml = (
