@@ -61,7 +61,7 @@ def get_invoke_file_name(verbose=0):
     return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
-def get_action_relevance(relevances):
+def get_action_combined_relevance(relevances):
     """take array of ordered relevance clauses and return relevance string for action"""
 
     relevance = ""
@@ -151,7 +151,7 @@ def main():
 
     logging.debug("Relevances: %s", relevance_clauses)
 
-    relevance_clauses_combined = get_action_relevance(relevance_clauses)
+    relevance_clauses_combined = get_action_combined_relevance(relevance_clauses)
 
     logging.debug("Relevance Combined: %s", relevance_clauses_combined)
 
@@ -165,7 +165,7 @@ def main():
 // End]]></ActionScript>
 		<SuccessCriteria Option="{success_criteria}"></SuccessCriteria>
 		<Target>
-            <AllComputers>false</AllComputers>
+            <AllComputers>true</AllComputers>
         </Target>
 	</SingleAction>
 </BES>
@@ -177,56 +177,50 @@ def main():
 
     logging.debug("Action Result:/n%s", action_result)
 
-    logging.debug("Action ID: %s", action_result.besobj.Action.ID)
+    action_id = action_result.besobj.Action.ID
 
-    logging.info("work in progress! Need to monitor results of action!")
+    logging.debug("Action ID: %s", action_id)
 
-    # work in progress, haulting here:
-    return None
-    # TODO: do the stuff:
-
-    # print(query_payload)
-
-    # send the client query: (need it's ID to get results)
-    query_submit_result = bes_conn.post(bes_conn.url("clientquery"), data=query_payload)
-
-    # print(query_submit_result)
-    # print(query_submit_result.besobj.ClientQuery.ID)
+    logging.info("Monitoring action results:")
 
     previous_result = ""
     i = 0
     try:
-        # loop ~120 second for results
-        while i < 12:
+        # loop ~300 second for results
+        while i < 30:
             print("... waiting for results ... Ctrl+C to quit loop")
 
-            # TODO: loop this to keep getting more results until all return or any key pressed
             time.sleep(10)
 
             # get the actual results:
+            # api/action/ACTION_ID/status?fields=ActionID,Status,DateIssued,DateStopped,StoppedBy,Computer(Status,State,StartTime)
             # NOTE: this might not return anything if no clients have returned results
             #       this can be checked again and again for more results:
-            query_result = bes_conn.get(
+            action_status_result = bes_conn.get(
                 bes_conn.url(
-                    f"clientqueryresults/{query_submit_result.besobj.ClientQuery.ID}"
+                    f"action/{action_id}/status?fields=ActionID,Status,DateIssued,DateStopped,StoppedBy,Computer(Status,State,StartTime)"
                 )
             )
 
-            if previous_result != str(query_result):
-                print(query_result)
-                previous_result = str(query_result)
+            if previous_result != str(action_status_result):
+                logging.info(action_status_result)
+                previous_result = str(action_status_result)
 
             i += 1
+
+            if action_status_result.besobj.ActionResults.Status == "Stopped":
+                logging.info("Action is stopped, halting monitoring loop")
+                break
 
             # if not running interactively:
             # https://stackoverflow.com/questions/2356399/tell-if-python-is-in-interactive-mode
             if not sys.__stdin__.isatty():
-                print("not interactive, stopping loop")
+                logging.warning("not interactive, stopping loop")
                 break
     except KeyboardInterrupt:
         print("\nloop interuppted")
 
-    print("script finished")
+    logging.info("---------- END -----------")
 
 
 if __name__ == "__main__":
