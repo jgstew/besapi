@@ -1,5 +1,5 @@
 """
-Create an action and monitor it's results for ~120 seconds
+Create an action from fixlet/task xml bes file and monitor it's results for ~300 seconds
 
 requires `besapi`, install with command `pip install besapi`
 """
@@ -175,11 +175,11 @@ def main():
 
     action_result = bes_conn.post(bes_conn.url("actions"), data=action_xml)
 
-    logging.debug("Action Result:/n%s", action_result)
+    logging.info("Action Result:/n%s", action_result)
 
     action_id = action_result.besobj.Action.ID
 
-    logging.debug("Action ID: %s", action_id)
+    logging.info("Action ID: %s", action_id)
 
     logging.info("Monitoring action results:")
 
