@@ -151,8 +151,11 @@ def main():
             f"//BES/{bes_type}/DefaultAction/SuccessCriteria/@Option"
         )[0]
     except IndexError:
-        # TODO: check if task or fixlet first?
+        # set success criteria if missing: (default)
         success_criteria = "RunToCompletion"
+        if bes_type == "Fixlet":
+            # set success criteria if missing: (Fixlet)
+            success_criteria = "OriginalRelevance"
 
     if success_criteria == "CustomRelevance":
         custom_relevance = tree.xpath(
@@ -205,7 +208,7 @@ def main():
         while i < 30:
             print("... waiting for results ... Ctrl+C to quit loop")
 
-            time.sleep(10)
+            time.sleep(15)
 
             # get the actual results:
             # api/action/ACTION_ID/status?fields=ActionID,Status,DateIssued,DateStopped,StoppedBy,Computer(Status,State,StartTime)
