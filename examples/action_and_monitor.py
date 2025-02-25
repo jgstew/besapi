@@ -90,7 +90,58 @@ def get_action_combined_relevance(relevances: typing.List[str]):
     return relevance_combined
 
 
-def action_from_bes_file(bes_conn, file_path):
+def get_target_xml(targets="<AllComputers>"):
+    """get target xml based upon input
+
+    Input can be a single string:
+        - starts with "<AllComputers>" if all computers should be targeted
+        - Otherwise will be interpreted as custom relevance
+
+    Input can be a single int:
+        - Single Computer ID Target
+
+    Input can be an array:
+        - Array of Strings: ComputerName
+        - Array of Integers: ComputerID
+    """
+
+    # if targets is int:
+    if isinstance(targets, int):
+        return f"<ComputerID>{targets}</ComputerID>"
+
+    # if targets is str:
+    if isinstance(targets, str):
+        # if targets string starts with "<AllComputers>":
+        if targets.startswith("<AllComputers>"):
+            return "<AllComputers>true</AllComputers>"
+        # treat as custom relevance:
+        return f"<CustomRelevance><![CDATA[{targets}]]></CustomRelevance>"
+
+    # if targets is array:
+    if isinstance(targets, list):
+        element_type = type(targets[0])
+        if element_type is int:
+            # array of computer ids
+            return (
+                "<ComputerID>"
+                + "</ComputerID><ComputerID>".join(map(str, targets))
+                + "</ComputerID>"
+            )
+        if element_type is str:
+            # array of computer names
+            return (
+                "<ComputerName>"
+                + "</ComputerName><ComputerName>".join(targets)
+                + "</ComputerName>"
+            )
+
+    logging.warning("No valid targeting found, will target no computers.")
+
+    # default if invalid:
+    return "<CustomRelevance>False</CustomRelevance>"
+
+
+def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
     """create action from bes file with fixlet or task"""
     # TODO: allow input variable for custom targeting
     # default to empty string:
@@ -148,7 +199,7 @@ def action_from_bes_file(bes_conn, file_path):
 // End]]></ActionScript>
 		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>
 		<Target>
-            <AllComputers>true</AllComputers>
+            { get_target_xml(targets) }
         </Target>
 	</SingleAction>
 </BES>
@@ -209,11 +260,11 @@ def action_monitor_results(bes_conn, action_id, iterations=30, sleep_time=15):
     return previous_result
 
 
-def action_and_monitor(bes_conn, file_path):
+def action_and_monitor(bes_conn, file_path, targets="<AllComputers>"):
     """Take action from bes xml file
     monitor results of action"""
 
-    action_id = action_from_bes_file(bes_conn, file_path)
+    action_id = action_from_bes_file(bes_conn, file_path, targets)
 
     logging.info("Start monitoring action results:")
 
