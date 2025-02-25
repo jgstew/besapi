@@ -128,35 +128,41 @@ def main():
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
+    # default to empty string:
+    custom_relevance_xml = ""
+
     tree = lxml.etree.parse(args.file)
-    title = tree.xpath("//BES/*[self::Task or self::Fixlet]/Title/text()")[0]
+
+    # //BES/*[self::Task or self::Fixlet]/*[@id='elid']/name()
+    bes_type = str(tree.xpath("//BES/*[self::Task or self::Fixlet]")[0].tag)
+
+    logging.debug("BES Type: %s", bes_type)
+
+    title = tree.xpath(f"//BES/{bes_type}/Title/text()")[0]
 
     logging.debug("Title: %s", title)
 
-    actionscript = tree.xpath(
-        "//BES/*[self::Task or self::Fixlet]/DefaultAction/ActionScript/text()"
-    )[0]
+    actionscript = tree.xpath(f"//BES/{bes_type}/DefaultAction/ActionScript/text()")[0]
 
     logging.debug("ActionScript: %s", actionscript)
 
     try:
         success_criteria = tree.xpath(
-            "//BES/*[self::Task or self::Fixlet]/DefaultAction/SuccessCriteria/@Option"
+            f"//BES/{bes_type}/DefaultAction/SuccessCriteria/@Option"
         )[0]
     except IndexError:
         # TODO: check if task or fixlet first?
         success_criteria = "RunToCompletion"
 
     if success_criteria == "CustomRelevance":
-        # TODO: add handling for CustomRelevance case?
-        logging.error("SuccessCriteria = %s is not handled!", success_criteria)
-        sys.exit(1)
+        custom_relevance = tree.xpath(
+            f"//BES/{bes_type}/DefaultAction/SuccessCriteria/text()"
+        )[0]
+        custom_relevance_xml = f"<![CDATA[{custom_relevance}]]>"
 
     logging.debug("success_criteria: %s", success_criteria)
 
-    relevance_clauses = tree.xpath(
-        "//BES/*[self::Task or self::Fixlet]/Relevance/text()"
-    )
+    relevance_clauses = tree.xpath(f"//BES/{bes_type}/Relevance/text()")
 
     logging.debug("Relevances: %s", relevance_clauses)
 
@@ -172,7 +178,7 @@ def main():
 		<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[// Start:
 {actionscript}
 // End]]></ActionScript>
-		<SuccessCriteria Option="{success_criteria}"></SuccessCriteria>
+		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>
 		<Target>
             <AllComputers>true</AllComputers>
         </Target>
