@@ -147,7 +147,6 @@ def get_target_xml(targets="<AllComputers>"):
 
 def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
     """create action from bes file with fixlet or task"""
-    # TODO: allow input variable for custom targeting
     # default to empty string:
     custom_relevance_xml = ""
 
