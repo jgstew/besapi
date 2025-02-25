@@ -5,6 +5,9 @@ and monitor it's results for ~300 seconds
 requires `besapi`, install with command `pip install besapi`
 
 NOTE: this script requires besapi v3.3.3+ due to use of besapi.plugin_utilities
+
+Example Usage:
+python3 examples/action_and_monitor.py -c -vv --file './examples/content/Test Echo - Universal.bes'
 """
 
 import logging
