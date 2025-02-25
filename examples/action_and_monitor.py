@@ -16,6 +16,7 @@ import os
 import platform
 import sys
 import time
+import typing
 
 import lxml.etree
 
@@ -66,7 +67,7 @@ def get_invoke_file_name(verbose=0):
     return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
-def get_action_combined_relevance(relevances):
+def get_action_combined_relevance(relevances: typing.List[str]):
     """take array of ordered relevance clauses and return relevance string for action"""
 
     relevance_combined = ""
