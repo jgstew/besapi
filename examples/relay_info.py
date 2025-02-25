@@ -123,12 +123,12 @@ def main():
     last_report_days_filter = args.days
 
     # get relay info:
-    session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayHostname") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
+    session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayServer") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
     logging.info("Relay Info:\n%s", results)
 
-    session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayServer", relay hostname of it | "NoRelayHostname") of bes computers whose(now - last report time of it < {last_report_days_filter} * day AND relay server flag of it)"""
+    session_relevance = f"""(multiplicity of it, it) of unique values of (it as string) of (relay selection method of it | "NoRelayMethod" , relay server of it | "NoRelayServer", relay hostname of it | "NoRelayHostname", id of it | 0) of bes computers whose(now - last report time of it < {last_report_days_filter} * day AND relay server flag of it)"""
     results = bes_conn.session_relevance_string(session_relevance)
 
     logging.info("Info on Relays:\n%s", results)
