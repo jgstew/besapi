@@ -7,7 +7,9 @@ requires `besapi`, install with command `pip install besapi`
 NOTE: this script requires besapi v3.3.3+ due to use of besapi.plugin_utilities
 
 Example Usage:
-python3 examples/action_and_monitor.py -c -vv --file './examples/content/Test Echo - Universal.bes'
+python3 examples/action_and_monitor.py -c -vv --file './examples/content/TestEcho-Universal.bes'
+
+Inspect examples/action_and_monitor.log for results
 """
 
 import logging
