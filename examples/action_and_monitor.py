@@ -261,9 +261,9 @@ def main():
 
     logging.info("---------- Starting New Session -----------")
     logging.debug("invoke folder: %s", invoke_folder)
-    logging.debug("Python version: %s", platform.sys.version)
+    logging.debug("%s's version: %s", get_invoke_file_name(verbose), __version__)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
-    logging.debug("this plugin's version: %s", __version__)
+    logging.debug("Python version: %s", platform.sys.version)
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
