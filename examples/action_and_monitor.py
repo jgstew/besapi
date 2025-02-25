@@ -139,9 +139,18 @@ def main():
 
     logging.debug("ActionScript: %s", actionscript)
 
-    success_criteria = tree.xpath(
-        "//BES/*[self::Task or self::Fixlet]/DefaultAction/SuccessCriteria/@Option"
-    )[0]
+    try:
+        success_criteria = tree.xpath(
+            "//BES/*[self::Task or self::Fixlet]/DefaultAction/SuccessCriteria/@Option"
+        )[0]
+    except IndexError:
+        # TODO: check if task or fixlet first?
+        success_criteria = "RunToCompletion"
+
+    if success_criteria == "CustomRelevance":
+        # TODO: add handling for CustomRelevance case?
+        logging.error("SuccessCriteria = %s is not handled!", success_criteria)
+        sys.exit(1)
 
     logging.debug("success_criteria: %s", success_criteria)
 
