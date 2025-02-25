@@ -19,9 +19,8 @@ import lxml.etree
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "1.0.1"
+__version__ = "1.2.1"
 verbose = 0
-bes_conn = None
 invoke_folder = None
 
 
@@ -87,9 +86,8 @@ def get_action_combined_relevance(relevances):
     return relevance_combined
 
 
-def action_and_monitor(bes_conn, file_path):
-    """Take action from bes xml file
-    monitor results of action"""
+def action_from_bes_file(bes_conn, file_path):
+    """create action from bes file with fixlet or task"""
     # TODO: allow input variable for custom targeting
     # default to empty string:
     custom_relevance_xml = ""
@@ -162,16 +160,19 @@ def action_and_monitor(bes_conn, file_path):
 
     logging.info("Action ID: %s", action_id)
 
-    logging.info("Monitoring action results:")
+    return action_id
 
+
+def action_monitor_results(bes_conn, action_id, iterations=30, sleep_time=15):
+    """monitor the results of an action if interactive"""
     previous_result = ""
     i = 0
     try:
         # loop ~300 second for results
-        while i < 30:
+        while i < iterations:
             print("... waiting for results ... Ctrl+C to quit loop")
 
-            time.sleep(15)
+            time.sleep(sleep_time)
 
             # get the actual results:
             # api/action/ACTION_ID/status?fields=ActionID,Status,DateIssued,DateStopped,StoppedBy,Computer(Status,State,StartTime)
@@ -204,6 +205,19 @@ def action_and_monitor(bes_conn, file_path):
     return previous_result
 
 
+def action_and_monitor(bes_conn, file_path):
+    """Take action from bes xml file
+    monitor results of action"""
+
+    action_id = action_from_bes_file(bes_conn, file_path)
+
+    logging.info("Start monitoring action results:")
+
+    results_action = action_monitor_results(bes_conn, action_id)
+
+    logging.info("End monitoring, Last Result:\n%s", results_action)
+
+
 def main():
     """Execution starts here"""
     print("main()")
@@ -224,7 +238,7 @@ def main():
     args, _unknown = parser.parse_known_args()
 
     # allow set global scoped vars
-    global bes_conn, verbose, invoke_folder
+    global verbose, invoke_folder
     verbose = args.verbose
 
     # get folder the script was invoked from:
