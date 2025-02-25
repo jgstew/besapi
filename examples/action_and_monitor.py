@@ -323,7 +323,7 @@ def main():
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
-    # set targeting criteria:
+    # set targeting criteria to computer id int or "<AllComputers>" or array
     targets = 0
 
     action_and_monitor(bes_conn, args.file, targets)
