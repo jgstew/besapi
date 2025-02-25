@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Fixlet>
+		<Title>set relay name override</Title>
+		<Description><![CDATA[ set relay name override ]]></Description>
+		<Relevance>exists relay service</Relevance>
+		<Relevance>not exists main gather service</Relevance>
+		<Relevance>not exists settings "_BESClient_Relay_NameOverride" of client</Relevance>
+		<Category></Category>
+		<Source>Internal</Source>
+		<SourceID>jgstew</SourceID>
+		<SourceReleaseDate></SourceReleaseDate>
+		<SourceSeverity></SourceSeverity>
+		<CVENames></CVENames>
+		<SANSID></SANSID>
+		<MIMEField>
+			<Name>x-fixlet-modification-time</Name>
+			<Value>Tue, 03 Aug 2021 15:18:27 +0000</Value>
+		</MIMEField>
+		<Domain>BESC</Domain>
+		<DefaultAction ID="Action1">
+			<Description>
+				<PreLink>Click </PreLink>
+				<Link>here</Link>
+				<PostLink> to deploy this action.</PostLink>
+			</Description>
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[
+setting "_BESClient_Relay_NameOverride"="FQDNorPublicIP" on "{ now }" for client
+]]></ActionScript>
+		</DefaultAction>
+	</Fixlet>
+</BES>

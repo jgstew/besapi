@@ -107,6 +107,10 @@ def get_target_xml(targets="<AllComputers>"):
 
     # if targets is int:
     if isinstance(targets, int):
+        if targets == 0:
+            raise ValueError(
+                "Int 0 is not valid Computer ID, set targets to an array of strings of computer names or an array of ints of computer ids or custom relevance string or <AllComputers>"
+            )
         return f"<ComputerID>{targets}</ComputerID>"
 
     # if targets is str:
@@ -319,7 +323,10 @@ def main():
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
-    action_and_monitor(bes_conn, args.file)
+    # set targeting criteria:
+    targets = 0
+
+    action_and_monitor(bes_conn, args.file, targets)
 
     logging.info("---------- END -----------")
 
