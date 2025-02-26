@@ -143,6 +143,11 @@ def main():
 
     logging.info("Relay_Register_Affiliation values:\n%s", results)
 
+    session_relevance = f"""(multiplicity of it, it) of unique values of values of client settings whose(name of it = "_BESClient_Register_Affiliation_SeekList") of bes computers whose(now - last report time of it < {last_report_days_filter} * day)"""
+    results = bes_conn.session_relevance_string(session_relevance)
+
+    logging.info("Client_Register_Affiliation_Seek values:\n%s", results)
+
     # this should require MO:
     results = bes_conn.get("admin/masthead/parameters")
 
