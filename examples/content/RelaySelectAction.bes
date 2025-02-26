@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<SingleAction>
+		<Title>Relay Select</Title>
+		<Relevance><![CDATA[ exists (it as integer) whose(it = 1) of values of settings "__RelaySelect_Automatic" of client ]]></Relevance>
+		<ActionScript MIMEType="application/x-Fixlet-Windows-Shell">relay select</ActionScript>
+		<SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
+		<IsUrgent>false</IsUrgent>
+	</SingleAction>
+</BES>

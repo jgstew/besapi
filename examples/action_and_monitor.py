@@ -155,7 +155,9 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
     tree = lxml.etree.parse(file_path)
 
     # //BES/*[self::Task or self::Fixlet]/*[@id='elid']/name()
-    bes_type = str(tree.xpath("//BES/*[self::Task or self::Fixlet]")[0].tag)
+    bes_type = str(
+        tree.xpath("//BES/*[self::Task or self::Fixlet or self::SingleAction]")[0].tag
+    )
 
     logging.debug("BES Type: %s", bes_type)
 
@@ -163,14 +165,25 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
 
     logging.debug("Title: %s", title)
 
-    actionscript = tree.xpath(f"//BES/{bes_type}/DefaultAction/ActionScript/text()")[0]
+    try:
+        actionscript = tree.xpath(
+            f"//BES/{bes_type}/DefaultAction/ActionScript/text()"
+        )[0]
+    except IndexError:
+        # handle SingleAction case:
+        actionscript = tree.xpath(f"//BES/{bes_type}/ActionScript/text()")[0]
 
     logging.debug("ActionScript: %s", actionscript)
 
     try:
-        success_criteria = tree.xpath(
-            f"//BES/{bes_type}/DefaultAction/SuccessCriteria/@Option"
-        )[0]
+        if bes_type != "SingleAction":
+            success_criteria = tree.xpath(
+                f"//BES/{bes_type}/DefaultAction/SuccessCriteria/@Option"
+            )[0]
+        else:
+            success_criteria = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/@Option")[
+                0
+            ]
     except IndexError:
         # set success criteria if missing: (default)
         success_criteria = "RunToCompletion"
@@ -179,9 +192,13 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
             success_criteria = "OriginalRelevance"
 
     if success_criteria == "CustomRelevance":
-        custom_relevance = tree.xpath(
-            f"//BES/{bes_type}/DefaultAction/SuccessCriteria/text()"
-        )[0]
+        if bes_type != "SingleAction":
+            custom_relevance = tree.xpath(
+                f"//BES/{bes_type}/DefaultAction/SuccessCriteria/text()"
+            )[0]
+        else:
+            custom_relevance = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/text()")[0]
+
         custom_relevance_xml = f"<![CDATA[{custom_relevance}]]>"
 
     logging.debug("success_criteria: %s", success_criteria)
