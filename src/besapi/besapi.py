@@ -927,7 +927,7 @@ class RESTResult:
                     f"\n - HTTP Response Status Code: `403` Forbidden\n - ERROR: `{self.text}`\n - URL: `{self.request.url}`"
                 )
 
-            besapi_logger.info(
+            besapi_logger.debug(
                 "HTTP Request Status Code `%d` from URL `%s`",
                 self.request.status_code,
                 self.request.url,
