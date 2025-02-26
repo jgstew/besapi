@@ -3,6 +3,8 @@
 	<Task>
 		<Title>RelaySelect</Title>
 		<Description><![CDATA[ RelaySelect ]]></Description>
+		<Relevance>not exists relay service</Relevance>
+		<Relevance>not exists main gather service</Relevance>
 		<Relevance><![CDATA[ exists (it as integer) whose(it = 1) of values of settings "__RelaySelect_Automatic" of client ]]></Relevance>
 		<Category></Category>
 		<Source>Internal</Source>
