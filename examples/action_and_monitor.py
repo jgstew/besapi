@@ -106,6 +106,10 @@ def get_target_xml(targets="<AllComputers>"):
         - Array of Strings: ComputerName
         - Array of Integers: ComputerID
     """
+    if targets is None or not targets:
+        logging.warning("No valid targeting found, will target no computers.")
+        # default if invalid:
+        return "<CustomRelevance>False</CustomRelevance>"
 
     # if targets is int:
     if isinstance(targets, int):
@@ -119,6 +123,10 @@ def get_target_xml(targets="<AllComputers>"):
     if isinstance(targets, str):
         # if targets string starts with "<AllComputers>":
         if targets.startswith("<AllComputers>"):
+            if "false" in targets.lower():
+                # In my testing, <AllComputers>false</AllComputers> does not work correctly
+                return "<CustomRelevance>False</CustomRelevance>"
+                # return "<AllComputers>false</AllComputers>"
             return "<AllComputers>true</AllComputers>"
         # treat as custom relevance:
         return f"<CustomRelevance><![CDATA[{targets}]]></CustomRelevance>"
