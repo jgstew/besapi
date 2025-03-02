@@ -12,13 +12,13 @@ Library for communicating with the BES (BigFix) REST API.
 import configparser
 import datetime
 import hashlib
-import io
 import json
 import logging
 import os
 import random
 import site
 import string
+import typing
 
 try:
     from urllib import parse
@@ -150,6 +150,92 @@ def parse_bes_modtime(string_datetime):
 #             strict=True,
 #             **pool_kwargs,
 #         )
+
+
+def get_action_combined_relevance(relevances: typing.List[str]):
+    """take array of ordered relevance clauses and return relevance string for action"""
+
+    relevance_combined = ""
+
+    if not relevances:
+        return "False"
+    if len(relevances) == 0:
+        return "False"
+    if len(relevances) == 1:
+        return relevances[0]
+    if len(relevances) > 0:
+        for clause in relevances:
+            if len(relevance_combined) == 0:
+                relevance_combined = clause
+            else:
+                relevance_combined = (
+                    "( " + relevance_combined + " ) AND ( " + clause + " )"
+                )
+
+    return relevance_combined
+
+
+def get_target_xml(targets=None):
+    """get target xml based upon input
+
+    Input can be a single string:
+        - starts with "<AllComputers>" if all computers should be targeted
+        - Otherwise will be interpreted as custom relevance
+
+    Input can be a single int:
+        - Single Computer ID Target
+
+    Input can be an array:
+        - Array of Strings: ComputerName
+        - Array of Integers: ComputerID
+    """
+    if targets is None or not targets:
+        logging.warning("No valid targeting found, will target no computers.")
+        # default if invalid:
+        return "<CustomRelevance>False</CustomRelevance>"
+
+    # if targets is int:
+    if isinstance(targets, int):
+        if targets == 0:
+            raise ValueError(
+                "Int 0 is not valid Computer ID, set targets to an array of strings of computer names or an array of ints of computer ids or custom relevance string or <AllComputers>"
+            )
+        return f"<ComputerID>{targets}</ComputerID>"
+
+    # if targets is str:
+    if isinstance(targets, str):
+        # if targets string starts with "<AllComputers>":
+        if targets.startswith("<AllComputers>"):
+            if "false" in targets.lower():
+                # In my testing, <AllComputers>false</AllComputers> does not work correctly
+                return "<CustomRelevance>False</CustomRelevance>"
+                # return "<AllComputers>false</AllComputers>"
+            return "<AllComputers>true</AllComputers>"
+        # treat as custom relevance:
+        return f"<CustomRelevance><![CDATA[{targets}]]></CustomRelevance>"
+
+    # if targets is array:
+    if isinstance(targets, list):
+        element_type = type(targets[0])
+        if element_type is int:
+            # array of computer ids
+            return (
+                "<ComputerID>"
+                + "</ComputerID><ComputerID>".join(map(str, targets))
+                + "</ComputerID>"
+            )
+        if element_type is str:
+            # array of computer names
+            return (
+                "<ComputerName>"
+                + "</ComputerName><ComputerName>".join(targets)
+                + "</ComputerName>"
+            )
+
+    logging.warning("No valid targeting found, will target no computers.")
+
+    # default if invalid:
+    return "<CustomRelevance>False</CustomRelevance>"
 
 
 def validate_xsd(doc):

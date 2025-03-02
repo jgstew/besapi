@@ -91,6 +91,37 @@ assert b"<BES>Example</BES>" in rest_result.xmlparse_text("<BES>Example</BES>")
 
 assert rest_result.text == "this is just a test"
 
+# test date parsing function:
+assert 2017 == besapi.besapi.parse_bes_modtime("Tue, 05 Sep 2017 23:31:48 +0000").year
+
+# test action combined relevance
+assert (
+    "( ( True ) AND ( windows of operating system ) ) AND ( False )"
+    == besapi.besapi.get_action_combined_relevance(
+        ["True", "windows of operating system", "False"]
+    )
+)
+
+# test target xml
+assert "<CustomRelevance>False</CustomRelevance>" == besapi.besapi.get_target_xml()
+assert "<AllComputers>true</AllComputers>" == besapi.besapi.get_target_xml(
+    "<AllComputers>"
+)
+assert "<ComputerID>1</ComputerID>" == besapi.besapi.get_target_xml(1)
+assert (
+    "<CustomRelevance><![CDATA[not windows of operating system]]></CustomRelevance>"
+    == besapi.besapi.get_target_xml("not windows of operating system")
+)
+assert (
+    "<ComputerID>1</ComputerID><ComputerID>2</ComputerID>"
+    == besapi.besapi.get_target_xml([1, 2])
+)
+assert (
+    "<ComputerName>Computer 1</ComputerName><ComputerName>Another Computer</ComputerName>"
+    == besapi.besapi.get_target_xml(["Computer 1", "Another Computer"])
+)
+
+# test bescli:
 import bescli
 
 bigfix_cli = bescli.bescli.BESCLInterface()
@@ -151,8 +182,10 @@ if bigfix_cli.bes_conn:
             'CMD /C python -m besapi ls clear ls conf "query number of bes computers" version error_count exit',
             check=True,
         )
-        bes_conn = besapi.besapi.get_bes_conn_using_config_file()
-        print("login succeeded:", bes_conn.login())
+
+    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    print("login succeeded:", bes_conn.login())
+    assert bes_conn.login()
 
 # test plugin_utilities:
 print(besapi.plugin_utilities.get_invoke_folder())
