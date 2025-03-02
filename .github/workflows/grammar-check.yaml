@@ -1,7 +1,7 @@
 ---
 name: grammar-check
 
-on: [pull_request, push]
+on: workflow_dispatch
 
 jobs:
   grammar-check:

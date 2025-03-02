@@ -120,7 +120,7 @@ def parse_bes_modtime(string_datetime):
 #     """custom HTTPAdapter for requests to override blocksize
 #     for Uploading or Downloading large files"""
 
-#     # override inti_poolmanager from regular HTTPAdapter
+#     # override init_poolmanager from regular HTTPAdapter
 #     # https://stackoverflow.com/questions/22915295/python-requests-post-and-big-content/22915488#comment125583017_22915488
 #     def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
 #         """Initializes a urllib3 PoolManager.
@@ -669,7 +669,7 @@ class BESConnection:
         file_url = str(result_upload.besobj.FileUpload.URL)
         if use_https:
             file_url = file_url.replace("http://", "https://")
-        # there are 3 different posibilities for the server FQDN
+        # there are 3 different possibilities for the server FQDN
         # localhost
         # self.rootserver (without port number)
         # the returned value from the upload result
