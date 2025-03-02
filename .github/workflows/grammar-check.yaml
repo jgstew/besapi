@@ -17,4 +17,4 @@ jobs:
         run: cargo install --locked --git https://github.com/Automattic/harper.git --branch master --tag v0.23.0 harper-cli
 
       - name: run harper grammar checker
-        run: harper-cli lint --help
+        run: harper-cli lint src\besapi\besapi.py
