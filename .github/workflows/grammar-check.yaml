@@ -1,0 +1,15 @@
+---
+name: grammar-check
+
+on: [pull_request, push]
+
+jobs:
+  grammar-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: install harper grammar checker
+        run: cargo install --git https://github.com/Automattic/harper.git --branch master harper-cli
+      - name: run harper grammar checker
+        run: harper-cli lint *
