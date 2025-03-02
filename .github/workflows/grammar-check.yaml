@@ -14,7 +14,7 @@ jobs:
           target: wasm32-unknown-unknown
 
       - name: install harper grammar checker
-        run: cargo install --git https://github.com/Automattic/harper.git --branch master harper-cli
+        run: cargo install --locked --git https://github.com/Automattic/harper.git --branch master --tag v0.23.0 harper-cli
 
       - name: run harper grammar checker
         run: harper-cli lint *
