@@ -94,7 +94,7 @@ def elem2dict(node):
 def replace_text_between(
     original_text, first_delimiter, second_delimiter, replacement_text
 ):
-    """Replace text between delimeters. Each delimiter should only appear once."""
+    """Replace text between delimiters. Each delimiter should only appear once."""
     leading_text = original_text.split(first_delimiter)[0]
     trailing_text = original_text.split(second_delimiter)[1]
 
@@ -343,7 +343,7 @@ class BESConnection:
     def __repr__(self):
         """object representation"""
         # https://stackoverflow.com/a/2626364/861745
-        return f"Object: besapi.BESConnction( username={self.username}, rootserver={self.rootserver} )"
+        return f"Object: besapi.BESConnection( username={self.username}, rootserver={self.rootserver} )"
 
     def __eq__(self, other):
         if (

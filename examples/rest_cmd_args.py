@@ -19,7 +19,7 @@ def main():
     print("main()")
 
     parser = argparse.ArgumentParser(
-        description="Provde command line arguments for REST URL, username, and password"
+        description="Provide command line arguments for REST URL, username, and password"
     )
     parser.add_argument(
         "-besserver", "--besserver", help="Specify the BES URL", required=False

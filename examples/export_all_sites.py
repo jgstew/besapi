@@ -80,7 +80,7 @@ def main():
 
     parser = besapi.plugin_utilities.setup_plugin_argparse()
 
-    # add additonal arg specific to this script:
+    # add additional arg specific to this script:
     parser.add_argument(
         "-d",
         "--delete",

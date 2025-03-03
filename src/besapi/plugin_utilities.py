@@ -58,7 +58,7 @@ def get_invoke_file_name(verbose=0):
 def setup_plugin_argparse(plugin_args_required=False):
     """setup argparse for plugin use"""
     arg_parser = argparse.ArgumentParser(
-        description="Provde command line arguments for REST URL, username, and password"
+        description="Provide command line arguments for REST URL, username, and password"
     )
     arg_parser.add_argument(
         "-v",

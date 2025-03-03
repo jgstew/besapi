@@ -134,7 +134,7 @@ def main():
     print("main() start")
 
     parser = argparse.ArgumentParser(
-        description="Provde command line arguments for REST URL, username, and password"
+        description="Provide command line arguments for REST URL, username, and password"
     )
     parser.add_argument(
         "-v",
