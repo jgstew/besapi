@@ -52,7 +52,6 @@ jobs:
       - name: echo tagged value
         run: |
           echo ${{ steps.tagged.outputs.tagged }}
-          exit 1
 
       # wait for all other tests to succeed
       #   what if no other tests?
