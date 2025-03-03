@@ -46,6 +46,11 @@ jobs:
             echo "tagged=1" >> $GITHUB_OUTPUT
           fi
 
+      - name: echo tagged value
+        run: |
+          echo ${{ steps.tagged.outputs.tagged }}
+          exit 1
+
       # wait for all other tests to succeed
       #   what if no other tests?
       - name: Wait for tests to succeed
