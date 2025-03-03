@@ -21,6 +21,9 @@ jobs:
         with:
           fetch-tags: true
 
+      - name: git pull tags
+        run: git pull --tags
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
