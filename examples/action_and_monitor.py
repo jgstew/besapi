@@ -69,6 +69,14 @@ def get_invoke_file_name(verbose=0):
     return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
+def validate_xml_bes_file(file_path):
+    """Take a file path as input, read as binary data, validate against xml schema"""
+    with open(file_path, "rb") as file:
+        file_data = file.read()
+
+    return besapi.besapi.validate_xsd(file_data)
+
+
 def get_action_combined_relevance(relevances: typing.List[str]):
     """take array of ordered relevance clauses and return relevance string for action"""
 
@@ -160,6 +168,11 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
     # default to empty string:
     custom_relevance_xml = ""
 
+    if not validate_xml_bes_file(file_path):
+        err_msg = "bes file is not valid according to XML Schema!"
+        logging.error(err_msg)
+        raise ValueError(err_msg)
+
     tree = lxml.etree.parse(file_path)
 
     # //BES/*[self::Task or self::Fixlet]/*[@id='elid']/name()
@@ -236,6 +249,11 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
 """
 
     logging.debug("Action XML:\n%s", action_xml)
+
+    if not besapi.besapi.validate_xsd(action_xml):
+        err_msg = "Action XML is not valid!"
+        logging.error(err_msg)
+        raise ValueError(err_msg)
 
     action_result = bes_conn.post(bes_conn.url("actions"), data=action_xml)
 
