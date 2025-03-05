@@ -262,6 +262,19 @@ def validate_xsd(doc):
     return False
 
 
+def validate_xml_bes_file(file_path):
+    """Take a file path as input,
+    read as binary data,
+    validate against xml schema
+
+    returns True for valid xml
+    returns False for invalid xml (or if file is not xml)"""
+    with open(file_path, "rb") as file:
+        file_data = file.read()
+
+    return validate_xsd(file_data)
+
+
 def get_bes_conn_using_config_file(conf_file=None):
     """
     read connection values from config file
@@ -379,16 +392,42 @@ class BESConnection:
             self.session.get(self.url(path), verify=self.verify, **kwargs)
         )
 
-    def post(self, path, data, **kwargs):
+    def post(self, path, data, validate_xml=None, **kwargs):
         """HTTP POST request"""
+
+        # if validate_xml is true, data must validate to xml schema
+        # if validate_xml is false, no schema check will be made
+        if validate_xml:
+            if not validate_xsd(data):
+                err_msg = "data being posted did not validate to XML schema. If expected, consider setting validate_xml to false."
+                if validate_xml:
+                    logging.error(err_msg)
+                    raise ValueError(err_msg)
+                else:
+                    # this is intended it validate_xml is None, but not used currently
+                    logging.warning(err_msg)
+
         self.last_connected = datetime.datetime.now()
         return RESTResult(
             self.session.post(self.url(path), data=data, verify=self.verify, **kwargs)
         )
 
-    def put(self, path, data, **kwargs):
+    def put(self, path, data, validate_xml=None, **kwargs):
         """HTTP PUT request"""
         self.last_connected = datetime.datetime.now()
+
+        # if validate_xml is true, data must validate to xml schema
+        # if validate_xml is false, no schema check will be made
+        if validate_xml:
+            if not validate_xsd(data):
+                err_msg = "data being put did not validate to XML schema. If expected, consider setting validate_xml to false."
+                if validate_xml:
+                    logging.error(err_msg)
+                    raise ValueError(err_msg)
+                else:
+                    # this is intended it validate_xml is None, but not used currently
+                    logging.warning(err_msg)
+
         return RESTResult(
             self.session.put(self.url(path), data=data, verify=self.verify, **kwargs)
         )
@@ -1000,6 +1039,7 @@ class RESTResult:
     def __init__(self, request):
         self.request = request
         self.text = request.text
+        self.valid = None
         self._besxml = None
         self._besobj = None
         self._besdict = None
@@ -1034,7 +1074,9 @@ class RESTResult:
             if self.validate_xsd(request.text):
                 self.valid = True
             else:
-                # print("WARNING: response appears invalid")
+                logging.debug(
+                    "INFO: REST API Result does not appear to be XML, this could be expected."
+                )
                 self.valid = False
 
     def __str__(self):
@@ -1087,6 +1129,9 @@ class RESTResult:
 
     def validate_xsd(self, doc):
         """validate results using XML XSDs"""
+        # return self.valid if already set
+        if self.valid is not None and isinstance(self.valid, bool):
+            return self.valid
         return validate_xsd(doc)
 
     def xmlparse_text(self, text):
