@@ -15,7 +15,10 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    os.mkdir("export")
+    try:
+        os.mkdir("export")
+    except FileExistsError:
+        pass
 
     os.chdir("export")
 
