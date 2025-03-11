@@ -1,11 +1,7 @@
 ---
 name: grammar-check
 
-on:
-  push:
-    paths:
-      - ".github/workflows/grammar-check.yaml"
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
   grammar-check:
@@ -20,8 +16,11 @@ jobs:
       - name: install harper grammar checker
         run: cargo install --locked --git https://github.com/Automattic/harper.git --branch master --tag v0.23.0 harper-cli
 
-      - name: run harper-cli help
-        run: harper-cli --help
+      - name: run harper-cli config help
+        run: harper-cli config --help
+
+      - name: run harper-cli lint help
+        run: harper-cli lint --help
 
       - name: run harper grammar checker
         run: harper-cli lint src/besapi/besapi.py
