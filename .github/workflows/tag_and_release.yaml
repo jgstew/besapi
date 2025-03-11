@@ -27,7 +27,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.8
+          python-version: 3.12
 
       - name: Install requirements
         run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
@@ -52,6 +52,15 @@ jobs:
       - name: echo tagged value
         run: |
           echo ${{ steps.tagged.outputs.tagged }}
+
+      - name: Run pre-commit all-files
+        if: steps.tagged.outputs.tagged == 1
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: >-
+            --color=always
+            --all-files
+            --hook-stage manual
 
       # wait for all other tests to succeed
       #   what if no other tests?
