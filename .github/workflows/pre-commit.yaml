@@ -25,3 +25,4 @@ jobs:
             --color=always
             --from-ref ${{ github.event.pull_request.base.sha || github.event.before }}
             --to-ref ${{ github.event.pull_request.head.sha || github.sha }}
+            --hook-stage manual
