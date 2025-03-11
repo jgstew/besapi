@@ -8,7 +8,7 @@ import besapi
 
 
 def validate_xml_bes_file(file_path):
-    """Take a file path as input, read as binary data, validate against xml schema"""
+    """Take a file path as input, read as binary data, validate against xml schema."""
     with open(file_path, "rb") as file:
         file_data = file.read()
 
@@ -16,7 +16,7 @@ def validate_xml_bes_file(file_path):
 
 
 def main(file_path):
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
 
     print(validate_xml_bes_file(file_path))

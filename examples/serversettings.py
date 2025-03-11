@@ -1,5 +1,5 @@
 """
-Set server settings like clientsettings.cfg
+Set server settings like clientsettings.cfg does for client settings.
 
 See example serversettings.cfg file here:
 - https://github.com/jgstew/besapi/blob/master/examples/serversettings.cfg
@@ -34,7 +34,7 @@ config_ini = None
 
 
 def get_invoke_folder():
-    """Get the folder the script was invoked from
+    """Get the folder the script was invoked from.
 
     References:
     - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
@@ -57,7 +57,7 @@ def get_invoke_folder():
 
 
 def get_config(path="serversettings.cfg"):
-    """load config from ini file"""
+    """Load config from ini file."""
 
     # example config: https://github.com/jgstew/besapi/blob/master/examples/serversettings.cfg
 
@@ -90,7 +90,7 @@ def get_config(path="serversettings.cfg"):
 
 
 def test_file_exists(path):
-    """return true if file exists"""
+    """Return true if file exists."""
 
     if not (os.path.isfile(path) and os.access(path, os.R_OK)):
         path = os.path.join(invoke_folder, path)
@@ -104,7 +104,7 @@ def test_file_exists(path):
 
 
 def get_settings_xml(config):
-    """turn config into settings xml"""
+    """Turn config into settings xml."""
 
     settings_xml = ""
 
@@ -124,13 +124,13 @@ def get_settings_xml(config):
 
 
 def post_settings(settings_xml):
-    """post settings to server"""
+    """Post settings to server."""
 
     return bes_conn.post("admin/fields", settings_xml)
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main() start")
 
     parser = argparse.ArgumentParser(

@@ -66,7 +66,13 @@ repos:
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --install-types, --non-interactive]
-        stages: [push, manual]
+        stages: [manual]
+
+  - repo: https://github.com/DanielNoord/pydocstringformatter
+    rev: v0.7.3
+    hooks:
+      - id: pydocstringformatter
+        args: ["--max-summary-lines=2", "--linewrap-full-docstring"]
 
   # - repo: https://github.com/RobertCraigie/pyright-python
   #   rev: v1.1.396

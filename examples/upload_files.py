@@ -10,7 +10,7 @@ import besapi
 
 
 def main(path_folder="./tmp"):
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()

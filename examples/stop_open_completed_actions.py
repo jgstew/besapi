@@ -7,7 +7,7 @@ SESSION_RELEVANCE = """ids of bes actions whose( (targeted by list flag of it OR
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()

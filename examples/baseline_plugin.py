@@ -1,5 +1,5 @@
 """
-Generate patching baselines from sites
+Generate patching baselines from sites.
 
 requires `besapi`, install with command `pip install besapi`
 
@@ -33,7 +33,7 @@ config_yaml = None
 
 
 def get_invoke_folder():
-    """Get the folder the script was invoked from
+    """Get the folder the script was invoked from.
 
     References:
     - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
@@ -56,7 +56,7 @@ def get_invoke_folder():
 
 
 def get_config(path="baseline_plugin.config.yaml"):
-    """load config from yaml file"""
+    """Load config from yaml file."""
 
     if not (os.path.isfile(path) and os.access(path, os.R_OK)):
         path = os.path.join(invoke_folder, path)
@@ -77,7 +77,7 @@ def get_config(path="baseline_plugin.config.yaml"):
 
 
 def test_file_exists(path):
-    """return true if file exists"""
+    """Return true if file exists."""
 
     if not (os.path.isfile(path) and os.access(path, os.R_OK)):
         path = os.path.join(invoke_folder, path)
@@ -91,10 +91,11 @@ def test_file_exists(path):
 
 
 def create_baseline_from_site(site):
-    """create a patching baseline from a site name
+    """Create a patching baseline from a site name.
 
     References:
-    - https://github.com/jgstew/besapi/blob/master/examples/baseline_by_relevance.py"""
+    - https://github.com/jgstew/besapi/blob/master/examples/baseline_by_relevance.py
+    """
 
     site_name = site["name"]
     logging.info("Create patching baseline for site: %s", site_name)
@@ -179,14 +180,14 @@ def create_baseline_from_site(site):
 
 
 def process_baselines(config):
-    """generate baselines"""
+    """Generate baselines."""
 
     for site in config:
         create_baseline_from_site(site)
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main() start")
 
     parser = argparse.ArgumentParser(

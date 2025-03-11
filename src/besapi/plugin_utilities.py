@@ -1,4 +1,4 @@
-"""This is a set of utility functions for use in multiple plugins
+"""This is a set of utility functions for use in multiple plugins.
 
 see example here: https://github.com/jgstew/besapi/blob/master/examples/export_all_sites.py
 """
@@ -16,7 +16,7 @@ import besapi
 
 # NOTE: This does not work as expected when run from plugin_utilities
 def get_invoke_folder(verbose=0):
-    """Get the folder the script was invoked from"""
+    """Get the folder the script was invoked from."""
     # using logging here won't actually log it to the file:
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -36,7 +36,7 @@ def get_invoke_folder(verbose=0):
 
 # NOTE: This does not work as expected when run from plugin_utilities
 def get_invoke_file_name(verbose=0):
-    """Get the filename the script was invoked from"""
+    """Get the filename the script was invoked from."""
     # using logging here won't actually log it to the file:
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -56,7 +56,7 @@ def get_invoke_file_name(verbose=0):
 
 
 def setup_plugin_argparse(plugin_args_required=False):
-    """setup argparse for plugin use"""
+    """Setup argparse for plugin use."""
     arg_parser = argparse.ArgumentParser(
         description="Provide command line arguments for REST URL, username, and password"
     )
@@ -92,9 +92,10 @@ def setup_plugin_argparse(plugin_args_required=False):
 
 
 def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
-    """get config for logging for plugin use
+    """Get config for logging for plugin use.
 
-    use this like: logging.basicConfig(**logging_config)"""
+    use this like: logging.basicConfig(**logging_config)
+    """
 
     if not log_file_path or log_file_path == "":
         log_file_path = os.path.join(
@@ -131,7 +132,9 @@ def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
 
 
 def get_besapi_connection(args):
-    """get connection to besapi using either args or config file if args not provided"""
+    """Get connection to besapi using either args or config file if args not
+    provided.
+    """
 
     password = args.password
 

@@ -1,7 +1,5 @@
 #!/usr/bin/env python
-"""
-Test besapi
-"""
+"""Test besapi."""
 
 import argparse
 import os

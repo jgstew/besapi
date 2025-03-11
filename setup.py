@@ -1,7 +1,5 @@
 #!/usr/bin/env python
-"""
-file to configure python build and packaging for pip
-"""
+"""File to configure python build and packaging for pip."""
 
 try:
     from setuptools import setup

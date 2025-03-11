@@ -1,6 +1,4 @@
-"""
-To run this module directly
-"""
+"""To run this module directly."""
 
 import logging
 

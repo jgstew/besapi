@@ -1,6 +1,6 @@
 """
 Create an action from a fixlet or task xml bes file
-and monitor it's results for ~300 seconds
+and monitor it's results for ~300 seconds.
 
 requires `besapi`, install with command `pip install besapi`
 
@@ -31,7 +31,7 @@ invoke_folder = None
 
 
 def get_invoke_folder(verbose=0):
-    """Get the folder the script was invoked from"""
+    """Get the folder the script was invoked from."""
     # using logging here won't actually log it to the file:
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -50,7 +50,7 @@ def get_invoke_folder(verbose=0):
 
 
 def get_invoke_file_name(verbose=0):
-    """Get the filename the script was invoked from"""
+    """Get the filename the script was invoked from."""
     # using logging here won't actually log it to the file:
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -70,7 +70,7 @@ def get_invoke_file_name(verbose=0):
 
 
 def validate_xml_bes_file(file_path):
-    """Take a file path as input, read as binary data, validate against xml schema"""
+    """Take a file path as input, read as binary data, validate against xml schema."""
     with open(file_path, "rb") as file:
         file_data = file.read()
 
@@ -78,7 +78,9 @@ def validate_xml_bes_file(file_path):
 
 
 def get_action_combined_relevance(relevances: typing.List[str]):
-    """take array of ordered relevance clauses and return relevance string for action"""
+    """Take array of ordered relevance clauses and return relevance string for
+    action.
+    """
 
     relevance_combined = ""
 
@@ -101,7 +103,7 @@ def get_action_combined_relevance(relevances: typing.List[str]):
 
 
 def get_target_xml(targets="<AllComputers>"):
-    """get target xml based upon input
+    """Get target xml based upon input.
 
     Input can be a single string:
         - starts with "<AllComputers>" if all computers should be targeted
@@ -164,7 +166,7 @@ def get_target_xml(targets="<AllComputers>"):
 
 
 def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
-    """create action from bes file with fixlet or task"""
+    """Create action from bes file with fixlet or task."""
     # default to empty string:
     custom_relevance_xml = ""
 
@@ -267,7 +269,7 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
 
 
 def action_monitor_results(bes_conn, action_id, iterations=30, sleep_time=15):
-    """monitor the results of an action if interactive"""
+    """Monitor the results of an action if interactive."""
     previous_result = ""
     i = 0
     try:
@@ -310,7 +312,8 @@ def action_monitor_results(bes_conn, action_id, iterations=30, sleep_time=15):
 
 def action_and_monitor(bes_conn, file_path, targets="<AllComputers>"):
     """Take action from bes xml file
-    monitor results of action"""
+    monitor results of action.
+    """
 
     action_id = action_from_bes_file(bes_conn, file_path, targets)
 
@@ -322,7 +325,7 @@ def action_and_monitor(bes_conn, file_path, targets="<AllComputers>"):
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
 
     print("NOTE: this script requires besapi v3.3.3+ due to besapi.plugin_utilities")

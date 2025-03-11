@@ -1,5 +1,5 @@
 """
-Example export bes files by session relevance result
+Example export bes files by session relevance result.
 
 requires `besapi`, install with command `pip install besapi`
 """
@@ -17,8 +17,8 @@ import besapi
 
 def get_bes_pass_using_config_file(conf_file=None):
     """
-    read connection values from config file
-    return besapi connection
+    Read connection values from config file
+    return besapi connection.
     """
     config_paths = [
         "/etc/besapi.conf",
@@ -46,7 +46,7 @@ def get_bes_pass_using_config_file(conf_file=None):
 
 
 async def fetch(session, url):
-    """get items async"""
+    """Get items async."""
     async with session.get(url) as response:
         response_text = await response.text()
 
@@ -67,7 +67,7 @@ async def fetch(session, url):
 
 
 async def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
 
     # Create a semaphore with a maximum concurrent requests

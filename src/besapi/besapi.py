@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-besapi.py
+This module besapi provides a simple interface to the BigFix REST API.
 
 MIT License
 Copyright (c) 2014 Matt Hansen
@@ -37,7 +37,7 @@ besapi_logger = logging.getLogger("besapi")
 
 
 def rand_password(length=20):
-    """get a random password"""
+    """Get a random password."""
 
     all_safe_chars = string.ascii_letters + string.digits + "!#()*+,-.:;<=>?[]^_|~"
 
@@ -68,6 +68,7 @@ def sanitize_txt(*args):
 def elem2dict(node):
     """
     Convert an lxml.etree node tree into a dict.
+
     https://gist.github.com/jacobian/795571?permalink_comment_id=2981870#gistcomment-2981870
     """
     result = {}
@@ -96,7 +97,10 @@ def elem2dict(node):
 def replace_text_between(
     original_text, first_delimiter, second_delimiter, replacement_text
 ):
-    """Replace text between delimiters. Each delimiter should only appear once."""
+    """Replace text between delimiters.
+
+    Each delimiter should only appear once.
+    """
     leading_text = original_text.split(first_delimiter)[0]
     trailing_text = original_text.split(second_delimiter)[1]
 
@@ -111,7 +115,7 @@ def replace_text_between(
 
 # https://github.com/jgstew/generate_bes_from_template/blob/bcc6c79632dd375c2861608ded3ae5872801a669/src/generate_bes_from_template/generate_bes_from_template.py#L87-L92
 def parse_bes_modtime(string_datetime):
-    """parse datetime string to object"""
+    """Parse datetime string to object."""
     # ("%a, %d %b %Y %H:%M:%S %z")
     return datetime.datetime.strptime(string_datetime, "%a, %d %b %Y %H:%M:%S %z")
 
@@ -155,7 +159,9 @@ def parse_bes_modtime(string_datetime):
 
 
 def get_action_combined_relevance(relevances: typing.List[str]):
-    """take array of ordered relevance clauses and return relevance string for action"""
+    """Take array of ordered relevance clauses and return relevance string for
+    action.
+    """
 
     relevance_combined = ""
 
@@ -178,7 +184,7 @@ def get_action_combined_relevance(relevances: typing.List[str]):
 
 
 def get_target_xml(targets=None):
-    """get target xml based upon input
+    """Get target xml based upon input.
 
     Input can be a single string:
         - starts with "<AllComputers>" if all computers should be targeted
@@ -241,7 +247,7 @@ def get_target_xml(targets=None):
 
 
 def validate_xsd(doc):
-    """validate results using XML XSDs"""
+    """Validate results using XML XSDs."""
     try:
         xmldoc = etree.fromstring(doc)
     except BaseException:  # pylint: disable=broad-except
@@ -266,11 +272,13 @@ def validate_xsd(doc):
 
 def validate_xml_bes_file(file_path):
     """Take a file path as input,
-    read as binary data,
+    read as binary data,.
+
     validate against xml schema
 
     returns True for valid xml
-    returns False for invalid xml (or if file is not xml)"""
+    returns False for invalid xml (or if file is not xml)
+    """
     with open(file_path, "rb") as file:
         file_data = file.read()
 
@@ -279,7 +287,8 @@ def validate_xml_bes_file(file_path):
 
 def get_bes_conn_using_config_file(conf_file=None):
     """
-    read connection values from config file
+    Read connection values from config file.
+
     return besapi connection
     """
     config_paths = [
@@ -320,7 +329,7 @@ def get_bes_conn_using_config_file(conf_file=None):
 
 
 class BESConnection:
-    """BigFix RESTAPI connection abstraction class"""
+    """BigFix RESTAPI connection abstraction class."""
 
     def __init__(self, username, password, rootserver, verify=False):
         if not verify:
@@ -356,7 +365,7 @@ class BESConnection:
         self.login()
 
     def __repr__(self):
-        """object representation"""
+        """Object representation."""
         # https://stackoverflow.com/a/2626364/861745
         return f"Object: besapi.BESConnection( username={self.username}, rootserver={self.rootserver} )"
 
@@ -370,16 +379,16 @@ class BESConnection:
         return False
 
     def __del__(self):
-        """cleanup on deletion of instance"""
+        """Cleanup on deletion of instance."""
         self.logout()
         self.session.auth = None
 
     def __bool__(self):
-        """get true or false"""
+        """Get true or false."""
         return self.login()
 
     def url(self, path):
-        """get absolute url"""
+        """Get absolute url."""
         if path.startswith(self.rootserver):
             url = path
         else:
@@ -388,14 +397,14 @@ class BESConnection:
         return url
 
     def get(self, path="help", **kwargs):
-        """HTTP GET request"""
+        """HTTP GET request."""
         self.last_connected = datetime.datetime.now()
         return RESTResult(
             self.session.get(self.url(path), verify=self.verify, **kwargs)
         )
 
     def post(self, path, data, validate_xml=None, **kwargs):
-        """HTTP POST request"""
+        """HTTP POST request."""
 
         # if validate_xml is true, data must validate to xml schema
         # if validate_xml is false, no schema check will be made
@@ -415,7 +424,7 @@ class BESConnection:
         )
 
     def put(self, path, data, validate_xml=None, **kwargs):
-        """HTTP PUT request"""
+        """HTTP PUT request."""
         self.last_connected = datetime.datetime.now()
 
         # if validate_xml is true, data must validate to xml schema
@@ -435,14 +444,14 @@ class BESConnection:
         )
 
     def delete(self, path, **kwargs):
-        """HTTP DELETE request"""
+        """HTTP DELETE request."""
         self.last_connected = datetime.datetime.now()
         return RESTResult(
             self.session.delete(self.url(path), verify=self.verify, **kwargs)
         )
 
     def session_relevance_xml(self, relevance, **kwargs):
-        """Get Session Relevance Results XML"""
+        """Get Session Relevance Results XML."""
         self.last_connected = datetime.datetime.now()
         return RESTResult(
             self.session.post(
@@ -454,7 +463,7 @@ class BESConnection:
         )
 
     def session_relevance_array(self, relevance, **kwargs):
-        """Get Session Relevance Results array"""
+        """Get Session Relevance Results array."""
         rel_result = self.session_relevance_xml(relevance, **kwargs)
         # print(rel_result)
         result = []
@@ -481,14 +490,14 @@ class BESConnection:
         return result
 
     def session_relevance_string(self, relevance, **kwargs):
-        """Get Session Relevance Results string"""
+        """Get Session Relevance Results string."""
         rel_result_array = self.session_relevance_array(
             "(it as string) of ( " + relevance + " )", **kwargs
         )
         return "\n".join(rel_result_array)
 
     def login(self):
-        """do login"""
+        """Do login."""
         if bool(self.last_connected):
             duration_obj = datetime.datetime.now() - self.last_connected
             duration_minutes = duration_obj / datetime.timedelta(minutes=1)
@@ -519,14 +528,14 @@ class BESConnection:
         return bool(self.last_connected)
 
     def logout(self):
-        """clear session and close it"""
+        """Clear session and close it."""
         self.session.cookies.clear()
         self.session.close()
 
     def set_dashboard_variable_value(
         self, dashboard_name, var_name, var_value, private=False
     ):
-        """set the variable value from a dashboard datastore"""
+        """Set the variable value from a dashboard datastore."""
 
         dash_var_xml = f"""<BESAPI xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BESAPI.xsd">
             <DashboardData>
@@ -543,7 +552,7 @@ class BESConnection:
         )
 
     def get_dashboard_variable_value(self, dashboard_name, var_name):
-        """get the variable value from a dashboard datastore"""
+        """Get the variable value from a dashboard datastore."""
 
         return str(
             self.get(
@@ -552,7 +561,7 @@ class BESConnection:
         )
 
     def validate_site_path(self, site_path, check_site_exists=True, raise_error=False):
-        """make sure site_path is valid"""
+        """Make sure site_path is valid."""
 
         if site_path is None:
             if not raise_error:
@@ -595,8 +604,9 @@ class BESConnection:
         )
 
     def get_current_site_path(self, site_path=None):
-        """if site_path is none, get current instance site_path,
-        otherwise validate and return provided site_path"""
+        """If site_path is none, get current instance site_path,
+        otherwise validate and return provided site_path.
+        """
 
         # use instance site_path context if none provided:
         if site_path is None or str(site_path).strip() == "":
@@ -610,14 +620,14 @@ class BESConnection:
         return self.validate_site_path(site_path, check_site_exists=False)
 
     def set_current_site_path(self, site_path):
-        """set current site path context"""
+        """Set current site path context."""
 
         if self.validate_site_path(site_path):
             self.site_path = site_path
             return self.site_path
 
     def import_bes_to_site(self, bes_file_path, site_path=None):
-        """import bes file to site"""
+        """Import bes file to site."""
 
         if not os.access(bes_file_path, os.R_OK):
             besapi_logger.error("%s is not readable", bes_file_path)
@@ -640,7 +650,7 @@ class BESConnection:
             return result
 
     def create_site_from_file(self, bes_file_path, site_type="custom"):
-        """create new site"""
+        """Create new site."""
         xml_parsed = etree.parse(bes_file_path)
         new_site_name = xml_parsed.xpath("/BES/CustomSite/Name/text()")[0]
 
@@ -657,7 +667,7 @@ class BESConnection:
         return result_site
 
     def get_user(self, user_name):
-        """get a user"""
+        """Get a user."""
 
         result_users = self.get(f"operator/{user_name}")
 
@@ -667,7 +677,7 @@ class BESConnection:
         besapi_logger.info("User `%s` Not Found!", user_name)
 
     def create_user_from_file(self, bes_file_path):
-        """create user from xml"""
+        """Create user from xml."""
         xml_parsed = etree.parse(bes_file_path)
         new_user_name = xml_parsed.xpath("/BESAPI/Operator/Name/text()")[0]
         result_user = self.get_user(new_user_name)
@@ -681,7 +691,7 @@ class BESConnection:
         return self.get_user(new_user_name)
 
     def get_computergroup(self, group_name, site_path=None):
-        """get computer group resource URI"""
+        """Get computer group resource URI."""
 
         site_path = self.get_current_site_path(site_path)
         result_groups = self.get(f"computergroups/{site_path}")
@@ -696,7 +706,7 @@ class BESConnection:
         besapi_logger.info("Group `%s` Not Found!", group_name)
 
     def create_group_from_file(self, bes_file_path, site_path=None):
-        """create a new group"""
+        """Create a new group."""
         site_path = self.get_current_site_path(site_path)
         xml_parsed = etree.parse(bes_file_path)
         new_group_name = xml_parsed.xpath("/BES/ComputerGroup/Title/text()")[0]
@@ -715,7 +725,7 @@ class BESConnection:
 
     def get_upload(self, file_name, file_hash):
         """
-        check for a specific file upload reference
+        Check for a specific file upload reference.
 
         each upload is uniquely identified by sha1 and filename
 
@@ -741,7 +751,8 @@ class BESConnection:
 
     def upload(self, file_path, file_name=None, file_hash=None):
         """
-        upload a single file
+        Upload a single file.
+
         https://developer.bigfix.com/rest-api/api/upload.html
         """
         if not os.access(file_path, os.R_OK):
@@ -792,7 +803,7 @@ class BESConnection:
     def parse_upload_result_to_prefetch(
         self, result_upload, use_localhost=True, use_https=True
     ):
-        """take a rest response from an upload and parse into prefetch"""
+        """Take a rest response from an upload and parse into prefetch."""
         file_url = str(result_upload.besobj.FileUpload.URL)
         if use_https:
             file_url = file_url.replace("http://", "https://")
@@ -813,7 +824,7 @@ class BESConnection:
         return f"prefetch {file_name} sha1:{file_sha1} size:{file_size} {file_url} sha256:{file_sha256}"
 
     def get_content_by_resource(self, resource_url):
-        """get a single content item by resource"""
+        """Get a single content item by resource."""
         # Get Specific Content
         content = None
         try:
@@ -831,7 +842,7 @@ class BESConnection:
         return content
 
     def update_item_from_file(self, file_path, site_path=None):
-        """update an item by name and last modified"""
+        """Update an item by name and last modified."""
         site_path = self.get_current_site_path(site_path)
         bes_tree = etree.parse(file_path)
 
@@ -864,7 +875,7 @@ class BESConnection:
         export_folder="./",
         name_trim=100,
     ):
-        """save an xml string to bes file"""
+        """Save an xml string to bes file."""
         item_folder = export_folder
         if not os.path.exists(item_folder):
             os.makedirs(item_folder)
@@ -892,8 +903,10 @@ class BESConnection:
         include_item_type_folder=False,
         include_item_id=False,
     ):
-        """export a single item by resource
+        """Export a single item by resource.
+
         example resources:
+
          - content_type/site_type/site/id
          - https://localhost:52311/api/content_type/site_type/site/id
         """
@@ -940,8 +953,10 @@ class BESConnection:
         include_site_folder=True,
         include_item_ids=True,
     ):
-        """export contents of site
+        """Export contents of site.
+
         Originally here:
+
         - https://gist.github.com/jgstew/1b2da12af59b71c9f88a
         - https://bigfix.me/fixlet/details/21282
         """
@@ -1017,7 +1032,7 @@ class BESConnection:
     def export_all_sites(
         self, include_external=False, export_folder="./", name_trim=70, verbose=False
     ):
-        """export all bigfix sites to a folder"""
+        """Export all bigfix sites to a folder."""
         results_sites = self.get("sites")
         if verbose:
             print(results_sites)
@@ -1036,7 +1051,7 @@ class BESConnection:
 
 
 class RESTResult:
-    """BigFix REST API Result Abstraction Class"""
+    """BigFix REST API Result Abstraction Class."""
 
     def __init__(self, request):
         self.request = request
@@ -1096,7 +1111,7 @@ class RESTResult:
 
     @property
     def besxml(self):
-        """property for parsed xml representation"""
+        """Property for parsed xml representation."""
         if self.valid and self._besxml is None:
             self._besxml = self.xmlparse_text(self.text)
 
@@ -1104,7 +1119,7 @@ class RESTResult:
 
     @property
     def besobj(self):
-        """property for xml object representation"""
+        """Property for xml object representation."""
         if self.valid and self._besobj is None:
             self._besobj = self.objectify_text(self.text)
 
@@ -1112,7 +1127,7 @@ class RESTResult:
 
     @property
     def besdict(self):
-        """property for python dict representation"""
+        """Property for python dict representation."""
         if self._besdict is None:
             if self.valid:
                 self._besdict = elem2dict(etree.fromstring(self.besxml))
@@ -1123,21 +1138,21 @@ class RESTResult:
 
     @property
     def besjson(self):
-        """property for json representation"""
+        """Property for json representation."""
         if self._besjson is None:
             self._besjson = json.dumps(self.besdict, indent=2)
 
         return self._besjson
 
     def validate_xsd(self, doc):
-        """validate results using XML XSDs"""
+        """Validate results using XML XSDs."""
         # return self.valid if already set
         if self.valid is not None and isinstance(self.valid, bool):
             return self.valid
         return validate_xsd(doc)
 
     def xmlparse_text(self, text):
-        """parse response text as xml"""
+        """Parse response text as xml."""
         if type(text) is str:
             root_xml = etree.fromstring(text.encode("utf-8"))
         else:
@@ -1146,7 +1161,7 @@ class RESTResult:
         return etree.tostring(root_xml, encoding="utf-8", xml_declaration=True)
 
     def objectify_text(self, text):
-        """parse response text as objectified xml"""
+        """Parse response text as objectified xml."""
         if type(text) is str:
             root_xml = text.encode("utf-8")
         else:
@@ -1156,7 +1171,7 @@ class RESTResult:
 
 
 def main():
-    """if invoked directly, run bescli command loop"""
+    """If invoked directly, run bescli command loop."""
     # pylint: disable=import-outside-toplevel
     try:
         from bescli import bescli

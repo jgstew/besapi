@@ -1,5 +1,5 @@
 """
-Example session relevance results from a string
+Example session relevance results from a string.
 
 requires `besapi`, install with command `pip install besapi`
 
@@ -15,7 +15,7 @@ import besapi
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
 
     parser = argparse.ArgumentParser(

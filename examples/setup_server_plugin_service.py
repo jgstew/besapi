@@ -1,5 +1,5 @@
 """
-Setup the root server server plugin service with creds provided
+Setup the root server server plugin service with creds provided.
 
 requires `besapi`, install with command `pip install besapi`
 
@@ -29,7 +29,7 @@ invoke_folder = None
 
 
 def get_invoke_folder():
-    """Get the folder the script was invoked from
+    """Get the folder the script was invoked from.
 
     References:
     - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
@@ -52,7 +52,7 @@ def get_invoke_folder():
 
 
 def test_file_exists(path):
-    """return true if file exists"""
+    """Return true if file exists."""
 
     if not (os.path.isfile(path) and os.access(path, os.R_OK)):
         path = os.path.join(invoke_folder, path)
@@ -66,7 +66,7 @@ def test_file_exists(path):
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main() start")
 
     parser = argparse.ArgumentParser(

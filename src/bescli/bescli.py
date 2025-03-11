@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-bescli.py
+This bescli module provides a command line interface to interact with besapi.
 
 MIT License
 Copyright (c) 2014 Matt Hansen
@@ -62,7 +62,7 @@ class BESCLInterface(Cmd):
         self.do_conf()
 
     def parse_help_resources(self):
-        """get api resources from help"""
+        """Get api resources from help."""
         if self.bes_conn:
             help_result = self.bes_conn.get("help")
             help_result = help_result.text.split("\n")
@@ -89,7 +89,7 @@ class BESCLInterface(Cmd):
             ]
 
     def complete_api_resources(self, text, line, begidx, endidx):
-        """define completion for apis"""
+        """Define completion for apis."""
 
         # only initialize once
         if not self.api_resources:
@@ -102,7 +102,9 @@ class BESCLInterface(Cmd):
     complete_get = complete_api_resources
 
     def do_get(self, line):
-        """Perform get request to BigFix server using provided api endpoint argument"""
+        """Perform get request to BigFix server using provided api endpoint
+        argument.
+        """
 
         # remove any extra whitespace
         line = line.strip()
@@ -136,7 +138,9 @@ class BESCLInterface(Cmd):
     complete_delete = complete_api_resources
 
     def do_delete(self, line):
-        """Perform delete request to BigFix server using provided api endpoint argument"""
+        """Perform delete request to BigFix server using provided api endpoint
+        argument.
+        """
 
         # remove any extra whitespace
         line = line.strip()
@@ -158,20 +162,20 @@ class BESCLInterface(Cmd):
     complete_post = complete_api_resources
 
     def do_post(self, statement):
-        """post file as data to path"""
+        """Post file as data to path."""
         self.poutput(statement)
         self.poutput("not yet implemented")
 
     def do_config(self, conf_file=None):
-        """Attempt to load config info from file and login"""
+        """Attempt to load config info from file and login."""
         self.do_conf(conf_file)
 
     def do_loadconfig(self, conf_file=None):
-        """Attempt to load config info from file and login"""
+        """Attempt to load config info from file and login."""
         self.do_conf(conf_file)
 
     def do_conf(self, conf_file=None):
-        """Attempt to load config info from file and login"""
+        """Attempt to load config info from file and login."""
         config_path = [
             "/etc/besapi.conf",
             os.path.expanduser("~/besapi.conf"),
@@ -213,7 +217,7 @@ class BESCLInterface(Cmd):
             self.do_login()
 
     def do_login(self, user=None):
-        """Login to BigFix Server"""
+        """Login to BigFix Server."""
 
         if not user:
             if self.BES_USER_NAME:
@@ -292,7 +296,7 @@ class BESCLInterface(Cmd):
             self.perror("Login Error!")
 
     def do_logout(self, _=None):
-        """Logout and clear session"""
+        """Logout and clear session."""
         if self.bes_conn:
             self.bes_conn.logout()
             # del self.bes_conn
@@ -300,7 +304,7 @@ class BESCLInterface(Cmd):
         self.pfeedback("Logout Complete!")
 
     def do_debug(self, setting):
-        """Enable or Disable Debug Mode"""
+        """Enable or Disable Debug Mode."""
         self.poutput(bool(setting))
         self.debug = bool(setting)
         self.echo = bool(setting)
@@ -312,7 +316,7 @@ class BESCLInterface(Cmd):
             logging.getLogger("besapi").setLevel(logging.WARNING)
 
     def do_clear(self, arg=None):
-        """clear current config and logout"""
+        """Clear current config and logout."""
         if self.bes_conn:
             self.bes_conn.logout()
             # self.bes_conn = None
@@ -332,11 +336,11 @@ class BESCLInterface(Cmd):
             self.BES_PASSWORD = None
 
     def do_saveconfig(self, arg=None):
-        """save current config to file"""
+        """Save current config to file."""
         self.do_saveconf(arg)
 
     def do_saveconf(self, _=None):
-        """save current config to file"""
+        """Save current config to file."""
         if not self.bes_conn:
             self.do_login()
         if not self.bes_conn:
@@ -348,11 +352,11 @@ class BESCLInterface(Cmd):
                 self.CONFPARSER.write(configfile)
 
     def do_showconfig(self, arg=None):
-        """List the current settings and connection status"""
+        """List the current settings and connection status."""
         self.do_ls(arg)
 
     def do_ls(self, _=None):
-        """List the current settings and connection status"""
+        """List the current settings and connection status."""
         self.poutput("        Connected: " + str(bool(self.bes_conn)))
         self.poutput(
             "  BES_ROOT_SERVER: "
@@ -372,17 +376,17 @@ class BESCLInterface(Cmd):
             )
 
     def do_error_count(self, _=None):
-        """Output the number of errors"""
+        """Output the number of errors."""
         self.poutput(f"Error Count: {self.num_errors}")
 
     def do_exit(self, _=None):
-        """Exit this application"""
+        """Exit this application."""
         self.exit_code = self.num_errors
         # no matter what I try I can't get anything but exit code 0 on windows
         return self.do_quit("")
 
     def do_query(self, statement):
-        """Get Session Relevance Results"""
+        """Get Session Relevance Results."""
         if not self.bes_conn:
             self.do_login()
         if not self.bes_conn:
@@ -397,53 +401,53 @@ class BESCLInterface(Cmd):
                 self.poutput(rel_result)
 
     def do_version(self, _=None):
-        """output version of besapi"""
+        """Output version of besapi."""
         self.poutput(f"besapi version: {__version__}")
 
     def do_get_action(self, statement=None):
-        """usage: get_action 123"""
+        """Usage: get_action 123."""
         result_op = self.bes_conn.get(f"action/{statement}")
         self.poutput(result_op)
 
     def do_get_operator(self, statement=None):
-        """usage: get_operator ExampleOperatorName"""
+        """Usage: get_operator ExampleOperatorName."""
         result_op = self.bes_conn.get_user(statement)
         self.poutput(result_op)
 
     def do_get_current_site(self, _=None):
-        """output current site path context"""
+        """Output current site path context."""
         self.poutput(
             f"Current Site Path: `{self.bes_conn.get_current_site_path(None)}`"
         )
 
     def do_set_current_site(self, statement=None):
-        """set current site path context"""
+        """Set current site path context."""
         self.poutput(
             f"New Site Path: `{self.bes_conn.set_current_site_path(statement)}`"
         )
 
     def do_get_content(self, resource_url):
-        """get a specific item by resource url"""
+        """Get a specific item by resource url."""
         self.poutput(self.bes_conn.get_content_by_resource(resource_url))
 
     def do_export_item_by_resource(self, statement):
-        """export content itemb to current folder"""
+        """Export content itemb to current folder."""
         self.poutput(self.bes_conn.export_item_by_resource(statement))
 
     def do_export_site(self, site_path):
-        """export site contents to current folder"""
+        """Export site contents to current folder."""
         self.bes_conn.export_site_contents(
             site_path, verbose=True, include_site_folder=False, include_item_ids=False
         )
 
     def do_export_all_sites(self, _=None):
-        """export site contents to current folder"""
+        """Export site contents to current folder."""
         self.bes_conn.export_all_sites(verbose=False)
 
     complete_import_bes = Cmd.path_complete
 
     def do_import_bes(self, statement):
-        """import bes file"""
+        """Import bes file."""
 
         bes_file_path = str(statement.args).strip()
 
@@ -456,7 +460,7 @@ class BESCLInterface(Cmd):
     complete_upload = Cmd.path_complete
 
     def do_upload(self, file_path):
-        """upload file to root server"""
+        """Upload file to root server."""
         if not os.access(file_path, os.R_OK):
             self.poutput(file_path, "is not a readable file")
         else:
@@ -467,7 +471,7 @@ class BESCLInterface(Cmd):
     complete_create_group = Cmd.path_complete
 
     def do_create_group(self, file_path):
-        """create bigfix group from bes file"""
+        """Create bigfix group from bes file."""
         if not os.access(file_path, os.R_OK):
             self.poutput(file_path, "is not a readable file")
         else:
@@ -476,7 +480,7 @@ class BESCLInterface(Cmd):
     complete_create_user = Cmd.path_complete
 
     def do_create_user(self, file_path):
-        """create bigfix user from bes file"""
+        """Create bigfix user from bes file."""
         if not os.access(file_path, os.R_OK):
             self.poutput(file_path, "is not a readable file")
         else:
@@ -485,7 +489,7 @@ class BESCLInterface(Cmd):
     complete_create_site = Cmd.path_complete
 
     def do_create_site(self, file_path):
-        """create bigfix site from bes file"""
+        """Create bigfix site from bes file."""
         if not os.access(file_path, os.R_OK):
             self.poutput(file_path, "is not a readable file")
         else:
@@ -494,14 +498,14 @@ class BESCLInterface(Cmd):
     complete_update_item = Cmd.path_complete
 
     def do_update_item(self, file_path):
-        """update bigfix content item from bes file"""
+        """Update bigfix content item from bes file."""
         if not os.access(file_path, os.R_OK):
             self.poutput(file_path, "is not a readable file")
         else:
             self.poutput(self.bes_conn.update_item_from_file(file_path))
 
     def do_serverinfo(self, _=None):
-        """get server info and return formatted"""
+        """Get server info and return formatted."""
 
         # not sure what the minimum version for this is:
         result = self.bes_conn.get("serverinfo")
@@ -513,7 +517,7 @@ class BESCLInterface(Cmd):
 
 
 def main():
-    """Run the command loop if invoked"""
+    """Run the command loop if invoked."""
     BESCLInterface().cmdloop()
 
 

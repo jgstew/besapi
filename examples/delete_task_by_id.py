@@ -1,5 +1,6 @@
 """
-delete tasks by id
+Delete tasks by id.
+
 - https://developer.bigfix.com/rest-api/api/task.html
 
 requires `besapi`, install with command `pip install besapi`
@@ -9,7 +10,7 @@ import besapi
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()

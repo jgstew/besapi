@@ -1,5 +1,5 @@
 """
-Example sourced fixlet action with parameters
+Example sourced fixlet action with parameters.
 
 requires `besapi`, install with command `pip install besapi`
 """
@@ -29,7 +29,7 @@ CONTENT_XML = r"""<?xml version="1.0" encoding="UTF-8"?>
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()

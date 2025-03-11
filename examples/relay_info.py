@@ -1,5 +1,5 @@
 """
-This will get info about relays in the environment
+This will get info about relays in the environment.
 
 requires `besapi`, install with command `pip install besapi`
 
@@ -31,7 +31,7 @@ invoke_folder = None
 
 
 def get_invoke_folder(verbose=0):
-    """Get the folder the script was invoked from"""
+    """Get the folder the script was invoked from."""
     # using logging here won't actually log it to the file:
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -50,7 +50,7 @@ def get_invoke_folder(verbose=0):
 
 
 def get_invoke_file_name(verbose=0):
-    """Get the filename the script was invoked from"""
+    """Get the filename the script was invoked from."""
     # using logging here won't actually log it to the file:
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -70,7 +70,7 @@ def get_invoke_file_name(verbose=0):
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main() start")
 
     print("NOTE: this script requires besapi v3.3.3+ due to besapi.plugin_utilities")

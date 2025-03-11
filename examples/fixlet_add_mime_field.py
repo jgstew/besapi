@@ -1,5 +1,5 @@
 """
-Add mime field to custom content
+Add mime field to custom content.
 
 Need to url escape site name https://bigfix:52311/api/sites
 """
@@ -20,7 +20,7 @@ session_relevance = (
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()

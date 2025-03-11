@@ -1,6 +1,4 @@
-"""
-This will send a BigFix UI message to ALL computers!
-"""
+"""This will send a BigFix UI message to ALL computers!"""
 
 import besapi
 
@@ -102,7 +100,7 @@ CONTENT_XML = rf"""<?xml version="1.0" encoding="UTF-8"?>
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()

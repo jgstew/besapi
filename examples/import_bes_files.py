@@ -1,5 +1,5 @@
 """
-import bes file into site
+Import bes file into site.
 
 - https://developer.bigfix.com/rest-api/api/import.html
 
@@ -17,7 +17,7 @@ BES_FOLDER_GLOB = "./examples/*.bes"
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
 
     print(f"besapi version: {besapi.__version__}")

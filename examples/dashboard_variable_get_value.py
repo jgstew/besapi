@@ -1,5 +1,5 @@
 """
-get dashboard variable value
+Get dashboard variable value.
 
 requires `besapi` v3.2.6+
 
@@ -10,7 +10,7 @@ import besapi
 
 
 def main():
-    """Execution starts here"""
+    """Execution starts here."""
     print("main()")
 
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
