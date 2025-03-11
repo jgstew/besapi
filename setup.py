@@ -1,12 +1,9 @@
 #!/usr/bin/env python
 """File to configure python build and packaging for pip."""
 
-try:
-    from setuptools import setup
-except (ImportError, ModuleNotFoundError):
-    from distutils.core import setup  # type: ignore[no-redef,import-not-found]
+import setuptools
 
-setup(
+setuptools.setup(
     name="besapi",
     # version= moved to setup.cfg
     author="Matt Hansen, James Stewart",
