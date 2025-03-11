@@ -33,6 +33,8 @@ __version__ = "3.8.1"
 
 besapi_logger = logging.getLogger("besapi")
 
+# pylint: disable=consider-using-f-string
+
 
 def rand_password(length=20):
     """get a random password"""
