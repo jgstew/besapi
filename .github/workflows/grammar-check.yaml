@@ -16,8 +16,8 @@ jobs:
       - name: install harper grammar checker
         run: cargo install --locked --git https://github.com/Automattic/harper.git --branch master --tag v0.23.0 harper-cli
 
-      - name: run harper-cli config help
-        run: harper-cli config --help
+      - name: run harper-cli config
+        run: harper-cli config
 
       - name: run harper-cli lint help
         run: harper-cli lint --help
