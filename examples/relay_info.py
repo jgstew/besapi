@@ -18,7 +18,6 @@ import logging.handlers
 import ntpath
 import os
 import platform
-import shutil
 import sys
 
 import besapi

@@ -14,8 +14,6 @@ References:
 - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
 """
 
-import argparse
-import getpass
 import logging
 import logging.handlers
 import ntpath
