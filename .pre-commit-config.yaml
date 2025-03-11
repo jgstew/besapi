@@ -74,6 +74,11 @@ repos:
       - id: pydocstringformatter
         args: ["--max-summary-lines=2", "--linewrap-full-docstring"]
 
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+
   # - repo: https://github.com/RobertCraigie/pyright-python
   #   rev: v1.1.396
   #   hooks:

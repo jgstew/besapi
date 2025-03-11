@@ -184,7 +184,7 @@ def main():
                 print("not interactive, stopping loop")
                 break
     except KeyboardInterrupt:
-        print("\nloop interuppted")
+        print("\nloop interrupted by user")
 
     print("script finished")
 

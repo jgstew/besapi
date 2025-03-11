@@ -305,7 +305,7 @@ def action_monitor_results(bes_conn, action_id, iterations=30, sleep_time=15):
                 logging.warning("not interactive, stopping loop")
                 break
     except KeyboardInterrupt:
-        print("\nloop interuppted")
+        print("\nloop interrupted by user")
 
     return previous_result
 
