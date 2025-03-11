@@ -61,6 +61,11 @@ repos:
       - id: flake8
         args: ['--ignore=W191,E101,E501,E402 tests/tests.py']
 
+  # - repo: https://github.com/RobertCraigie/pyright-python
+  #   rev: v1.1.396
+  #   hooks:
+  #     - id: pyright
+
   # - repo: https://github.com/crate-ci/typos
   #   rev: v1.30.0
   #   hooks:
