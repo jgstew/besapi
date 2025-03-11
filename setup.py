@@ -6,7 +6,7 @@ file to configure python build and packaging for pip
 try:
     from setuptools import setup
 except (ImportError, ModuleNotFoundError):
-    from distutils.core import setup
+    from distutils.core import setup  # type: ignore[no-redef,import-not-found]
 
 setup(
     name="besapi",

@@ -27,12 +27,12 @@ except ModuleNotFoundError:
     from besapi import besapi
 except ImportError:
     # this is for the case in which we are calling bescli from besapi
-    import besapi
+    import besapi  # type: ignore[no-redef]
 
 try:
     from besapi.besapi import __version__
 except ImportError:
-    from besapi import __version__
+    from besapi import __version__  # type: ignore
 
 
 class BESCLInterface(Cmd):

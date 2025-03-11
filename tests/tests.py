@@ -9,6 +9,8 @@ import random
 import subprocess
 import sys
 
+# mypy: disable-error-code="arg-type"
+
 # check for --test_pip arg
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -79,7 +81,7 @@ assert raised_errors == 4
 
 class RequestResult(object):
     text = "this is just a test"
-    headers = []
+    headers = []  # type: ignore
 
 
 request_result = RequestResult()

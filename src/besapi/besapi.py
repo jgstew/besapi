@@ -23,7 +23,7 @@ import typing
 try:
     from urllib import parse
 except ImportError:
-    from urlparse import parse_qs as parse
+    from urlparse import parse_qs as parse  # type: ignore[no-redef,import-not-found]
 
 import requests
 from lxml import etree, objectify
