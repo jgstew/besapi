@@ -26,29 +26,41 @@ repos:
       - id: detect-private-key
       # - id: no-commit-to-branch
       #   args: [--branch, main]
+
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.35.1
     hooks:
       - id: yamllint
         args: [-c=.yamllint.yaml]
+
   - repo: https://github.com/pre-commit/mirrors-isort
     rev: v5.10.1
     hooks:
       - id: isort
+
   - repo: https://github.com/psf/black
     rev: 25.1.0
     hooks:
       - id: black
+
   - repo: https://github.com/python-jsonschema/check-jsonschema
     rev: 0.31.2
     hooks:
       - id: check-github-workflows
         args: ["--verbose"]
       - id: check-dependabot
+
   - repo: meta
     hooks:
       - id: check-useless-excludes
       - id: check-hooks-apply
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.2
+    hooks:
+      - id: flake8
+        args: ['--ignore=W191,E101,E501,E402 tests/tests.py']
+
   # - repo: https://github.com/crate-ci/typos
   #   rev: v1.30.0
   #   hooks:

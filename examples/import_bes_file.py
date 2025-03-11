@@ -16,7 +16,7 @@ def main():
     """Execution starts here"""
     print("main()")
 
-    print(f"besapi version: { besapi.__version__ }")
+    print(f"besapi version: {besapi.__version__}")
 
     if not hasattr(besapi.besapi.BESConnection, "import_bes_to_site"):
         print("version of besapi is too old, must be >= 3.1.6")

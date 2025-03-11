@@ -242,7 +242,7 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
 // End]]></ActionScript>
 		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>
 		<Target>
-            { get_target_xml(targets) }
+            {get_target_xml(targets)}
         </Target>
 	</SingleAction>
 </BES>

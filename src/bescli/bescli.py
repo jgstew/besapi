@@ -413,13 +413,13 @@ class BESCLInterface(Cmd):
     def do_get_current_site(self, _=None):
         """output current site path context"""
         self.poutput(
-            f"Current Site Path: `{ self.bes_conn.get_current_site_path(None) }`"
+            f"Current Site Path: `{self.bes_conn.get_current_site_path(None)}`"
         )
 
     def do_set_current_site(self, statement=None):
         """set current site path context"""
         self.poutput(
-            f"New Site Path: `{ self.bes_conn.set_current_site_path(statement) }`"
+            f"New Site Path: `{self.bes_conn.set_current_site_path(statement)}`"
         )
 
     def do_get_content(self, resource_url):
