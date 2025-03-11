@@ -18,7 +18,7 @@ setup(
     # long_description= moved to setup.cfg
     packages=["besapi", "bescli"],
     package_data={"besapi": ["schemas/*.xsd"]},
-    install_requires=["requests", "lxml", "cmd2"],
+    install_requires=["requests", "lxml", "cmd2", "setuptools"],
     include_package_data=True,
     package_dir={"": "src"},
 )
