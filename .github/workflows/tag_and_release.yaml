@@ -34,7 +34,7 @@ jobs:
 
       - name: Read VERSION file
         id: getversion
-        run: echo "version='$(python ./setup.py --version | grep -o -e "[0-9]*\.[0-9]*\.[0-9]*" )'" >> $GITHUB_OUTPUT
+        run: echo "version=$(python ./setup.py --version | grep -o -e "[0-9]*\.[0-9]*\.[0-9]*" )" >> $GITHUB_OUTPUT
 
       # only make release if there is NOT a git tag for this version
       - name: "Check: package version has corresponding git tag"
