@@ -46,6 +46,10 @@ assert "operator/" in besapi.besapi.BESConnection.validate_site_path(
     "", "operator/Example", False
 )
 
+assert besapi.besapi.validate_xml_bes_file("tests/good/RelaySelectTask.bes") is True
+
+assert besapi.besapi.validate_xml_bes_file("tests/bad/RelaySelectTask_BAD.bes") is False
+
 # start failing tests:
 raised_errors = 0
 
@@ -207,11 +211,5 @@ if sys.version_info >= (3, 9):
     logging.warning("Just testing to see if logging is working!")
 
     assert os.path.isfile("./tests.log")
-
-# assert besapi.besapi.validate_xml_bes_file("../tests/good/RelaySelectTask.bes") is True
-
-# assert (
-#     besapi.besapi.validate_xml_bes_file("../tests/bad/RelaySelectTask_BAD.bes") is False
-# )
 
 sys.exit(0)
