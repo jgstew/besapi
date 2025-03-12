@@ -10,7 +10,7 @@ Usage:
 
 ```
 import besapi
-b = besapi.BESConnection('my_username', 'my_password', 'https://rootserver.domain.org:52311')
+b = besapi.besapi.BESConnection('my_username', 'my_password', 'https://rootserver.domain.org:52311')
 rr = b.get('sites')
 
 # rr.request contains the original request object
