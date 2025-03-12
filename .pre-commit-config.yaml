@@ -2,6 +2,7 @@
 # run on only items staged in git:  pre-commit
 # automatically run on commit:      pre-commit install
 # check all files in repo:          pre-commit run --all-files
+# check all files manual stage:     pre-commit run --all-files --hook-stage manual
 # update all checks to latest:      pre-commit autoupdate
 # https://github.com/pre-commit/pre-commit-hooks
 repos:
