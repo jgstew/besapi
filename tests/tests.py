@@ -77,7 +77,7 @@ assert raised_errors == 4
 # end failing tests
 
 
-class RequestResult(object):
+class RequestResult:
     text = "this is just a test"
     headers = []  # type: ignore
 

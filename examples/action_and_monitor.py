@@ -77,7 +77,7 @@ def validate_xml_bes_file(file_path):
     return besapi.besapi.validate_xsd(file_data)
 
 
-def get_action_combined_relevance(relevances: typing.List[str]):
+def get_action_combined_relevance(relevances: list[str]):
     """Take array of ordered relevance clauses and return relevance string for
     action.
     """

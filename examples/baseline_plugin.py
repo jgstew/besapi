@@ -66,7 +66,7 @@ def get_config(path="baseline_plugin.config.yaml"):
     if not (os.path.isfile(path) and os.access(path, os.R_OK)):
         raise FileNotFoundError(path)
 
-    with open(path, "r", encoding="utf-8") as stream:
+    with open(path, encoding="utf-8") as stream:
         yaml = ruamel.yaml.YAML(typ="safe", pure=True)
         config_yaml = yaml.load(stream)
 

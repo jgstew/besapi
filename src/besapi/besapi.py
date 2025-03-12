@@ -48,7 +48,7 @@ def rand_password(length=20):
 
 def sanitize_txt(*args):
     """Clean arbitrary text for safe file system usage."""
-    valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
 
     sani_args = []
     for arg in args:
@@ -158,7 +158,7 @@ def parse_bes_modtime(string_datetime):
 #         )
 
 
-def get_action_combined_relevance(relevances: typing.List[str]):
+def get_action_combined_relevance(relevances: list[str]):
     """Take array of ordered relevance clauses and return relevance string for
     action.
     """
@@ -392,7 +392,7 @@ class BESConnection:
         if path.startswith(self.rootserver):
             url = path
         else:
-            url = "%s/api/%s" % (self.rootserver, path)
+            url = f"{self.rootserver}/api/{path}"
 
         return url
 

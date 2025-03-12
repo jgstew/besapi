@@ -21,7 +21,7 @@ def main():
     comp_file_path = os.path.join(script_dir, "computers_delete_by_file.txt")
 
     comp_file_lines = []
-    with open(comp_file_path, "r") as comp_file:
+    with open(comp_file_path) as comp_file:
         for line in comp_file:
             line = line.strip()
             if line != "":
