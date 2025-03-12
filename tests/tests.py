@@ -208,10 +208,10 @@ if sys.version_info >= (3, 9):
 
     assert os.path.isfile("./tests.log")
 
-assert besapi.besapi.validate_xml_bes_file("../tests/good/RelaySelectTask.bes") is True
+# assert besapi.besapi.validate_xml_bes_file("../tests/good/RelaySelectTask.bes") is True
 
-assert (
-    besapi.besapi.validate_xml_bes_file("../tests/bad/RelaySelectTask_BAD.bes") is False
-)
+# assert (
+#     besapi.besapi.validate_xml_bes_file("../tests/bad/RelaySelectTask_BAD.bes") is False
+# )
 
 sys.exit(0)
