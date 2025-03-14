@@ -1,0 +1,6 @@
+
+The sanitize_txt function makes it so the text is safe for use as file names.
+
+>>> import besapi
+>>> print(besapi.besapi.sanitize_txt("-/abc?defg^&*()"))
+('--abcdefg()',)
