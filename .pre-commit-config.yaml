@@ -142,3 +142,8 @@ repos:
   #   rev: v1.1.396
   #   hooks:
   #     - id: pyright
+
+  # - repo: https://github.com/sirosen/slyp
+  #   rev: 0.8.2
+  #   hooks:
+  #     - id: slyp
