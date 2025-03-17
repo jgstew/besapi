@@ -47,6 +47,9 @@ assert "operator/" in besapi.besapi.BESConnection.validate_site_path(
 )
 
 assert besapi.besapi.validate_xml_bes_file("tests/good/RelaySelectTask.bes") is True
+assert (
+    besapi.besapi.validate_xml_bes_file("tests/good/ComputerGroupsExample.bes") is True
+)
 
 assert besapi.besapi.validate_xml_bes_file("tests/bad/RelaySelectTask_BAD.bes") is False
 

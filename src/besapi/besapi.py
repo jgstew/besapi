@@ -254,7 +254,7 @@ def validate_xsd(doc):
         return False
 
     for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
-        xmlschema_doc = etree.parse(resource_filename(__name__, "schemas/%s" % xsd))
+        xmlschema_doc = etree.parse(resource_filename(__name__, f"schemas/{xsd}"))
 
         # one schema may throw an error while another will validate
         try:
