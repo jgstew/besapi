@@ -2,7 +2,7 @@
 <BESAPI xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BESAPI.xsd">
         <ComputerGroup Resource="https://10.0.7.70:52311/api/computergroup/custom/Public/6350" LastModified="Wed, 04 Jan 2017 23:13:34 +0000">
                 <Name>Non-BigFix Systems</Name>
-                <ID>6350</ID>
+                <ID></ID>
         </ComputerGroup>
         <ComputerGroup Resource="https://10.0.7.70:52311/api/computergroup/custom/Public/6818" LastModified="Mon, 18 Mar 2019 21:06:59 +0000">
                 <Name>Docker - Hosts - Linux</Name>

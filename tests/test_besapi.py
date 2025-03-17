@@ -73,6 +73,9 @@ def test_validate_xml_bes_file():
         besapi.besapi.validate_xml_bes_file("tests/bad/RelaySelectTask_BAD.bes")
         is False
     )
+    assert (
+        besapi.besapi.validate_xml_bes_file("tests/bad/ComputerGroups_BAD.bes") is False
+    )
 
 
 def test_failing_validate_site_path():
