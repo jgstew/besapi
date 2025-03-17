@@ -2,6 +2,7 @@
 """Test besapi."""
 
 import argparse
+import json
 import os
 import random
 import subprocess
@@ -166,9 +167,20 @@ if bigfix_cli.bes_conn:
     upload_result = bigfix_cli.bes_conn.upload(
         "./besapi/__init__.py", "test_besapi_upload.txt"
     )
+
     # print(upload_result)
+    # print(upload_result.besobj.FileUpload.Available)
+    assert upload_result.besobj.FileUpload.Available == 1
     assert "test_besapi_upload.txt</URL>" in str(upload_result)
-    print(bigfix_cli.bes_conn.parse_upload_result_to_prefetch(upload_result))
+    upload_result_json = json.loads(upload_result.besjson)
+    # print(upload_result_json["FileUpload"]["Available"])
+    assert upload_result_json["FileUpload"]["Available"] == "1"
+
+    upload_prefetch = bigfix_cli.bes_conn.parse_upload_result_to_prefetch(upload_result)
+    # print(upload_prefetch)
+    assert "prefetch test_besapi_upload.txt sha1:" in upload_prefetch
+    assert "test_besapi_upload.txt" in str(upload_result)
+    # print(bigfix_cli.bes_conn.parse_upload_result_to_prefetch(upload_result))
 
     dashboard_name = "_PyBESAPI_tests.py"
     var_name = "TestVarName"

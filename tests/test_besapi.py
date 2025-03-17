@@ -4,6 +4,7 @@
 This was converted from tests/tests.py which was used before this pytest was added.
 """
 
+import json
 import os
 import random
 import subprocess
@@ -189,8 +190,18 @@ def test_bescli():
             "./besapi/__init__.py", "test_besapi_upload.txt"
         )
         # print(upload_result)
+        assert upload_result.besobj.FileUpload.Available == 1
+        assert upload_result.besdict["FileUpload"]["Available"] == "1"
+        assert upload_result.besjson is not None
+        upload_result_json = json.loads(upload_result.besjson)
+        assert upload_result_json["FileUpload"]["Available"] == "1"
+
         assert "test_besapi_upload.txt</URL>" in str(upload_result)
-        print(bigfix_cli.bes_conn.parse_upload_result_to_prefetch(upload_result))
+        upload_prefetch = bigfix_cli.bes_conn.parse_upload_result_to_prefetch(
+            upload_result
+        )
+        # print(upload_prefetch)
+        assert "prefetch test_besapi_upload.txt sha1:" in upload_prefetch
 
         dashboard_name = "_PyBESAPI_tests.py"
         var_name = "TestVarName"

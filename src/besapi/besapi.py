@@ -12,22 +12,18 @@ Library for communicating with the BES (BigFix) REST API.
 import configparser
 import datetime
 import hashlib
+import importlib.resources
 import json
 import logging
 import os
 import random
 import site
 import string
-import typing
+import urllib.parse
 
-try:
-    from urllib import parse
-except ImportError:
-    from urlparse import parse_qs as parse  # type: ignore[no-redef,import-not-found]
-
+import lxml.etree
+import lxml.objectify
 import requests
-from lxml import etree, objectify
-from pkg_resources import resource_filename
 
 __version__ = "3.8.2"
 
@@ -249,17 +245,19 @@ def get_target_xml(targets=None):
 def validate_xsd(doc):
     """Validate results using XML XSDs."""
     try:
-        xmldoc = etree.fromstring(doc)
+        xmldoc = lxml.etree.fromstring(doc)
     except BaseException:  # pylint: disable=broad-except
         return False
 
     for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
-        xmlschema_doc = etree.parse(resource_filename(__name__, f"schemas/{xsd}"))
+        schema_path = importlib.resources.files(__package__) / f"schemas/{xsd}"
+        with schema_path.open("r") as xsd_file:
+            xmlschema_doc = lxml.etree.parse(xsd_file)
 
         # one schema may throw an error while another will validate
         try:
-            xmlschema = etree.XMLSchema(xmlschema_doc)
-        except etree.XMLSchemaParseError as err:
+            xmlschema = lxml.etree.XMLSchema(xmlschema_doc)
+        except lxml.etree.XMLSchemaParseError as err:
             # this should only error if the XSD itself is malformed
             besapi_logger.error("ERROR with `%s`: %s", xsd, err)
             raise err
@@ -456,7 +454,7 @@ class BESConnection:
         return RESTResult(
             self.session.post(
                 self.url("query"),
-                data=f"relevance={parse.quote(relevance, safe=':+')}",
+                data=f"relevance={urllib.parse.quote(relevance, safe=':+')}",
                 verify=self.verify,
                 **kwargs,
             )
@@ -651,7 +649,7 @@ class BESConnection:
 
     def create_site_from_file(self, bes_file_path, site_type="custom"):
         """Create new site."""
-        xml_parsed = etree.parse(bes_file_path)
+        xml_parsed = lxml.etree.parse(bes_file_path)
         new_site_name = xml_parsed.xpath("/BES/CustomSite/Name/text()")[0]
 
         result_site_path = self.validate_site_path(
@@ -662,7 +660,7 @@ class BESConnection:
             besapi_logger.warning("Site `%s` already exists", result_site_path)
             return None
 
-        result_site = self.post("sites", etree.tostring(xml_parsed))
+        result_site = self.post("sites", lxml.etree.tostring(xml_parsed))
 
         return result_site
 
@@ -678,7 +676,7 @@ class BESConnection:
 
     def create_user_from_file(self, bes_file_path):
         """Create user from xml."""
-        xml_parsed = etree.parse(bes_file_path)
+        xml_parsed = lxml.etree.parse(bes_file_path)
         new_user_name = xml_parsed.xpath("/BESAPI/Operator/Name/text()")[0]
         result_user = self.get_user(new_user_name)
 
@@ -686,7 +684,7 @@ class BESConnection:
             besapi_logger.warning("User `%s` Already Exists!", new_user_name)
             return result_user
         besapi_logger.info("Creating User `%s`", new_user_name)
-        _ = self.post("operators", etree.tostring(xml_parsed))
+        _ = self.post("operators", lxml.etree.tostring(xml_parsed))
         # print(user_result)
         return self.get_user(new_user_name)
 
@@ -708,7 +706,7 @@ class BESConnection:
     def create_group_from_file(self, bes_file_path, site_path=None):
         """Create a new group."""
         site_path = self.get_current_site_path(site_path)
-        xml_parsed = etree.parse(bes_file_path)
+        xml_parsed = lxml.etree.parse(bes_file_path)
         new_group_name = xml_parsed.xpath("/BES/ComputerGroup/Title/text()")[0]
 
         existing_group = self.get_computergroup(new_group_name, site_path)
@@ -719,7 +717,7 @@ class BESConnection:
 
         # print(lxml.etree.tostring(xml_parsed))
 
-        _ = self.post(f"computergroups/{site_path}", etree.tostring(xml_parsed))
+        _ = self.post(f"computergroups/{site_path}", lxml.etree.tostring(xml_parsed))
 
         return self.get_computergroup(site_path, new_group_name)
 
@@ -844,7 +842,7 @@ class BESConnection:
     def update_item_from_file(self, file_path, site_path=None):
         """Update an item by name and last modified."""
         site_path = self.get_current_site_path(site_path)
-        bes_tree = etree.parse(file_path)
+        bes_tree = lxml.etree.parse(file_path)
 
         with open(file_path, "rb") as f:
             content = f.read()
@@ -1130,7 +1128,7 @@ class RESTResult:
         """Property for python dict representation."""
         if self._besdict is None:
             if self.valid:
-                self._besdict = elem2dict(etree.fromstring(self.besxml))
+                self._besdict = elem2dict(lxml.etree.fromstring(self.besxml))
             else:
                 self._besdict = {"text": str(self)}
 
@@ -1154,11 +1152,11 @@ class RESTResult:
     def xmlparse_text(self, text):
         """Parse response text as xml."""
         if type(text) is str:
-            root_xml = etree.fromstring(text.encode("utf-8"))
+            root_xml = lxml.etree.fromstring(text.encode("utf-8"))
         else:
             root_xml = text
 
-        return etree.tostring(root_xml, encoding="utf-8", xml_declaration=True)
+        return lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True)
 
     def objectify_text(self, text):
         """Parse response text as objectified xml."""
@@ -1167,7 +1165,7 @@ class RESTResult:
         else:
             root_xml = text
 
-        return objectify.fromstring(root_xml)
+        return lxml.objectify.fromstring(root_xml)
 
 
 def main():
