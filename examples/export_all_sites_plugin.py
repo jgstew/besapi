@@ -20,6 +20,7 @@ import ntpath
 import os
 import platform
 import shutil
+import subprocess
 import sys
 
 import besapi
@@ -29,6 +30,8 @@ __version__ = "1.1.1"
 verbose = 0
 bes_conn = None
 invoke_folder = None
+
+GIT_PATHS = [r"C:\Program Files\Git\bin\git.exe", "/usr/bin/git"]
 
 
 def get_invoke_folder(verbose=0):
@@ -70,6 +73,16 @@ def get_invoke_file_name(verbose=0):
     return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
+def find_executable(path_array, default=None):
+    """Find executable from array of paths."""
+
+    for path in path_array:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+
+    return default
+
+
 def main():
     """Execution starts here."""
     print("main() start")
@@ -86,6 +99,13 @@ def main():
         required=False,
         action="store_true",
     )
+
+    parser.add_argument(
+        "--repo-subfolder",
+        help="subfolder to export to, then attempt to add, commit, push changes",
+        required=False,
+    )
+
     # allow unknown args to be parsed instead of throwing an error:
     args, _unknown = parser.parse_known_args()
 
@@ -118,9 +138,9 @@ def main():
 
     export_folder = os.path.join(invoke_folder, "export")
 
-    # if --delete arg used, delete export folder:
-    if args.delete:
-        shutil.rmtree(export_folder, ignore_errors=True)
+    if args.repo_subfolder:
+        logging.debug("Repo Specified: %s", args.repo_subfolder)
+        export_folder = os.path.join(invoke_folder, args.repo_subfolder, "export")
 
     try:
         os.mkdir(export_folder)
@@ -129,7 +149,68 @@ def main():
 
     os.chdir(export_folder)
 
-    bes_conn.export_all_sites()
+    # this will get changed later:
+    result = "Interrupted"
+
+    try:
+        if args.repo_subfolder:
+            git_path = shutil.which("git")
+            if not git_path:
+                logging.warning("could not find git on path")
+                git_path = find_executable(GIT_PATHS, "git")
+            logging.info("Using this path to git: %s", git_path)
+
+            result = subprocess.run(
+                [git_path, "fetch", "origin"], check=True, capture_output=True
+            )
+            logging.debug(result)
+            result = subprocess.run(
+                [git_path, "reset", "--hard", "origin/main"],
+                check=True,
+                capture_output=True,
+            )
+            logging.debug(result)
+            logging.info("Now attempting to git pull repo.")
+            result = subprocess.run([git_path, "pull"], check=True, capture_output=True)
+            logging.debug(result)
+
+        # if --delete arg used, delete export folder:
+        if args.delete:
+            shutil.rmtree(export_folder, ignore_errors=True)
+
+        logging.info("Now exporting content to folder.")
+        bes_conn.export_all_sites()
+
+        if args.repo_subfolder:
+            logging.info("Now attempting to add, commit, and push repo.")
+            result = subprocess.run(
+                [git_path, "add", "."],
+                check=True,
+                stdout=subprocess.PIPE,
+            )
+            logging.debug(result)
+            result = subprocess.run(
+                [git_path, "commit", "-m", "add changes from export"],
+                check=True,
+                stdout=subprocess.PIPE,
+                text=True,
+                capture_output=True,
+            )
+            logging.debug(result)
+            result = subprocess.run(
+                [git_path, "push"],
+                check=True,
+                stdout=subprocess.PIPE,
+                text=True,
+                capture_output=True,
+            )
+            logging.debug(result)
+    except BaseException as err:
+        logging.error(err)
+        logging.debug(result)
+        raise
+
+    logging.info("----- Session Ended ------")
 
 
 if __name__ == "__main__":
