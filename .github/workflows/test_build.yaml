@@ -40,7 +40,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install build tools
-        run: pip install setuptools wheel build pyinstaller
+        run: pip install setuptools wheel build pyinstaller pytest
 
       - name: Install requirements
         shell: bash
@@ -53,6 +53,9 @@ jobs:
 
       - name: Run Tests - Source
         run: python tests/tests.py
+
+      - name: Run PyTest
+        run: python -m pytest
 
       - name: Test invoke directly src/bescli/bescli.py
         run: python src/bescli/bescli.py ls logout clear error_count version exit
