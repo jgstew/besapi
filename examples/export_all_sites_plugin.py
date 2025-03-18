@@ -150,7 +150,7 @@ def main():
     os.chdir(export_folder)
 
     # this will get changed later:
-    result = "Interrupted"
+    result = None
 
     try:
         if args.repo_subfolder:
@@ -161,18 +161,24 @@ def main():
             logging.info("Using this path to git: %s", git_path)
 
             result = subprocess.run(
-                [git_path, "fetch", "origin"], check=True, capture_output=True
+                [git_path, "fetch", "origin"],
+                check=True,
+                capture_output=True,
+                text=True,
             )
-            logging.debug(result)
+            logging.debug(result.stdout)
             result = subprocess.run(
                 [git_path, "reset", "--hard", "origin/main"],
                 check=True,
                 capture_output=True,
+                text=True,
             )
-            logging.debug(result)
+            logging.debug(result.stdout)
             logging.info("Now attempting to git pull repo.")
-            result = subprocess.run([git_path, "pull"], check=True, capture_output=True)
-            logging.debug(result)
+            result = subprocess.run(
+                [git_path, "pull"], check=True, capture_output=True, text=True
+            )
+            logging.debug(result.stdout)
 
         # if --delete arg used, delete export folder:
         if args.delete:
@@ -187,25 +193,30 @@ def main():
                 [git_path, "add", "."],
                 check=True,
                 stdout=subprocess.PIPE,
+                text=True,
             )
-            logging.debug(result)
+            logging.debug(result.stdout)
             result = subprocess.run(
                 [git_path, "commit", "-m", "add changes from export"],
                 check=True,
-                text=True,
                 capture_output=True,
+                text=True,
             )
-            logging.debug(result)
+            logging.debug(result.stdout)
             result = subprocess.run(
                 [git_path, "push"],
                 check=True,
-                text=True,
                 capture_output=True,
+                text=True,
             )
-            logging.debug(result)
-    except BaseException as err:
-        logging.error(err)
-        logging.debug(result)
+            logging.debug(result.stdout)
+    except subprocess.CalledProcessError as err:
+        logging.error("Subprocess error: %s", err)
+        logging.debug(result.stdout)
+        raise
+    except Exception as err:
+        logging.error("An error occurred: %s", err)
+        logging.debug(result.stdout)
         raise
 
     logging.info("----- Session Ended ------")
