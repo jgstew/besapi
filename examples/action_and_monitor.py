@@ -1,6 +1,6 @@
 """
 Create an action from a fixlet or task xml bes file
-and monitor it's results for ~300 seconds.
+and monitor its results for ~300 seconds.
 
 requires `besapi`, install with command `pip install besapi`
 
@@ -18,7 +18,6 @@ import os
 import platform
 import sys
 import time
-import typing
 
 import lxml.etree
 
@@ -368,14 +367,18 @@ def main():
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
     logging.debug("Python version: %s", platform.sys.version)
 
-    bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
+    try:
+        bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
-    # set targeting criteria to computer id int or "<AllComputers>" or array
-    targets = 0
+        # set targeting criteria to computer id int or "<AllComputers>" or array
+        targets = 0
 
-    action_and_monitor(bes_conn, args.file, targets)
+        action_and_monitor(bes_conn, args.file, targets)
 
-    logging.info("---------- END -----------")
+        logging.info("---------- END -----------")
+    except Exception as err:
+        logging.error("An error occurred: %s", err)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
