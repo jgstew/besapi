@@ -192,10 +192,11 @@ def main():
             result = subprocess.run(
                 [git_path, "add", "."],
                 check=True,
-                stdout=subprocess.PIPE,
+                capture_output=True,
                 text=True,
             )
             logging.debug(result.stdout)
+            # TODO stop without error if nothing to add, nothing to commit
             result = subprocess.run(
                 [git_path, "commit", "-m", "add changes from export"],
                 check=True,
@@ -214,7 +215,7 @@ def main():
         logging.error("Subprocess error: %s", err)
         logging.debug(result.stdout)
         raise
-    except Exception as err:
+    except BaseException as err:
         logging.error("An error occurred: %s", err)
         logging.debug(result.stdout)
         raise
