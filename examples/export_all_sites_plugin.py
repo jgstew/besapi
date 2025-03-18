@@ -195,11 +195,6 @@ def main():
                 capture_output=True,
                 text=True,
             )
-            # stop without error if nothing to add, nothing to commit
-            if "nothing to commit" in result.stdout:
-                logging.info("No changes to commit.")
-                logging.info("----- Session Ended ------")
-                return 0
             logging.debug(result.stdout)
 
             result = subprocess.run(
@@ -209,6 +204,11 @@ def main():
                 text=True,
             )
             logging.debug(result.stdout)
+            # stop without error if nothing to add, nothing to commit
+            if "nothing to commit" in result.stdout:
+                logging.info("No changes to commit.")
+                logging.info("----- Session Ended ------")
+                return 0
 
             result = subprocess.run(
                 [git_path, "push"],
