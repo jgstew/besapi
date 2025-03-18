@@ -192,7 +192,6 @@ def main():
             result = subprocess.run(
                 [git_path, "commit", "-m", "add changes from export"],
                 check=True,
-                stdout=subprocess.PIPE,
                 text=True,
                 capture_output=True,
             )
@@ -200,7 +199,6 @@ def main():
             result = subprocess.run(
                 [git_path, "push"],
                 check=True,
-                stdout=subprocess.PIPE,
                 text=True,
                 capture_output=True,
             )
