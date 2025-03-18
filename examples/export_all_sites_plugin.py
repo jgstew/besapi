@@ -191,22 +191,28 @@ def main():
             logging.info("Now attempting to add, commit, and push repo.")
             result = subprocess.run(
                 [git_path, "add", "."],
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
+            # stop without error if nothing to add, nothing to commit
+            if "nothing to commit" in result.stdout:
+                logging.info("No changes to commit.")
+                logging.info("----- Session Ended ------")
+                return 0
             logging.debug(result.stdout)
-            # TODO stop without error if nothing to add, nothing to commit
+
             result = subprocess.run(
                 [git_path, "commit", "-m", "add changes from export"],
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
             logging.debug(result.stdout)
+
             result = subprocess.run(
                 [git_path, "push"],
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
@@ -221,7 +227,8 @@ def main():
         raise
 
     logging.info("----- Session Ended ------")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
