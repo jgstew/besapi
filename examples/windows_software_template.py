@@ -154,8 +154,16 @@ def main():
     print("downloading file and calculating prefetch")
     prefetch = get_prefetch_block(args.url)
 
+    # get filename from end of URL:
+    filename = args.url.split("/")[-1]
+
+    # remove ? and after from filename if present:
+    index = filename.find("?")
+    if index != -1:
+        filename = filename[:index]
+
     template_dictionary = {
-        "filename": args.url.split("/")[-1],
+        "filename": filename,
         "arguments": args.arguments,
         "prefetch": prefetch,
     }
