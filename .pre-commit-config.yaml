@@ -148,6 +148,19 @@ repos:
       - id: python-check-blanket-type-ignore
         stages: [manual]
 
+  - repo: https://github.com/christophmeissner/pytest-pre-commit
+    rev: 1.0.0
+    hooks:
+      - id: pytest
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+        additional_dependencies:
+          - cmd2
+          - lxml
+          - requests
+          - setuptools
+
   # - repo: https://github.com/pycqa/pylint
   #   rev: v3.3.5
   #   hooks:
