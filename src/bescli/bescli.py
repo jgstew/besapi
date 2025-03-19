@@ -32,7 +32,7 @@ except ImportError:
 try:
     from besapi.besapi import __version__
 except ImportError:
-    from besapi import __version__  # type: ignore
+    from besapi import __version__  # type: ignore[attr-defined, no-redef]
 
 
 class BESCLInterface(Cmd):

@@ -145,7 +145,8 @@ repos:
       - id: python-use-type-annotations
         stages: [manual]
       # - id: python-no-eval
-      # - id: python-check-blanket-type-ignore
+      - id: python-check-blanket-type-ignore
+        stages: [manual]
 
   # - repo: https://github.com/pycqa/pylint
   #   rev: v3.3.5

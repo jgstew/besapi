@@ -97,7 +97,7 @@ def test_failing_validate_site_path():
 
 class RequestResult:
     text = "this is just a test"
-    headers = []  # type: ignore
+    headers: list = []
 
 
 def test_rest_result():

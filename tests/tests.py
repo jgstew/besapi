@@ -87,7 +87,7 @@ assert raised_errors == 4
 
 class RequestResult:
     text = "this is just a test"
-    headers = []  # type: ignore
+    headers: list = []
 
 
 request_result = RequestResult()

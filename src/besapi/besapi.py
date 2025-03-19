@@ -412,9 +412,9 @@ class BESConnection:
                 if validate_xml:
                     logging.error(err_msg)
                     raise ValueError(err_msg)
-                else:
-                    # this is intended it validate_xml is None, but not used currently
-                    logging.warning(err_msg)
+
+                # this is intended it validate_xml is None, but not used currently
+                logging.warning(err_msg)
 
         self.last_connected = datetime.datetime.now()
         return RESTResult(
@@ -433,9 +433,9 @@ class BESConnection:
                 if validate_xml:
                     logging.error(err_msg)
                     raise ValueError(err_msg)
-                else:
-                    # this is intended it validate_xml is None, but not used currently
-                    logging.warning(err_msg)
+
+                # this is intended it validate_xml is None, but not used currently
+                logging.warning(err_msg)
 
         return RESTResult(
             self.session.put(self.url(path), data=data, verify=self.verify, **kwargs)
@@ -623,6 +623,8 @@ class BESConnection:
         if self.validate_site_path(site_path):
             self.site_path = site_path
             return self.site_path
+
+        return None
 
     def import_bes_to_site(self, bes_file_path, site_path=None):
         """Import bes file to site."""
