@@ -228,6 +228,39 @@ def test_bescli():
         assert bes_conn.login()
 
 
+def test_bes_conn_json():
+    """Test the BESConnection class with JSON output."""
+    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    if bes_conn and bes_conn.login():
+        print("testing session_relevance_json")
+        result = bes_conn.session_relevance_json("number of bes computers")
+        assert result is not None
+        assert int(result["result"][0]) > 0
+        result = bes_conn.session_relevance_json(
+            """("[%22" & it & "%22]") of concatenation "%22, %22" of names of bes computers"""
+        )
+        assert result is not None
+        string_first_result_json = result["result"][0]
+        print(string_first_result_json)
+        assert '", "' in string_first_result_json
+        assert '["' in string_first_result_json
+        # NOTE: the following check is specific to my env:
+        if "10.0." in bes_conn.rootserver:
+            print("doing check specific to my env")
+            assert '", "BIGFIX", "' in string_first_result_json
+
+        print("testing session_relevance_json_array")
+        result = bes_conn.session_relevance_json_array("number of bes computers")
+        print(result)
+        assert result is not None
+        assert int(result[0]) > 0
+        print("testing session_relevance_json_string")
+        result = bes_conn.session_relevance_json_string("number of bes computers")
+        print(result)
+        assert result is not None
+        assert int(result) > 0
+
+
 def test_plugin_utilities():
     """Test the plugin_utilities module."""
     print(besapi.plugin_utilities.get_invoke_folder())

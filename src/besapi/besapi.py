@@ -25,7 +25,7 @@ import lxml.etree
 import lxml.objectify
 import requests
 
-__version__ = "3.8.2"
+__version__ = "3.8.3"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -447,6 +447,41 @@ class BESConnection:
         return RESTResult(
             self.session.delete(self.url(path), verify=self.verify, **kwargs)
         )
+
+    def session_relevance_json(self, relevance, **kwargs):
+        """Get Session Relevance Results in JSON.
+
+        This will submit the relevance string as json instead of html form data.
+        """
+        session_relevance = urllib.parse.quote(relevance, safe=":+")
+        rel_data = {"output": "json", "relevance": session_relevance}
+        self.last_connected = datetime.datetime.now()
+        result = RESTResult(
+            self.session.post(
+                self.url("query"),
+                data=rel_data,
+                verify=self.verify,
+                **kwargs,
+            )
+        )
+        return json.loads(result.text)
+
+    def session_relevance_json_array(self, relevance, **kwargs):
+        """Get Session Relevance Results in an array from the json return.
+
+        This will submit the relevance string as json instead of html form data.
+        """
+        result = self.session_relevance_json(relevance, **kwargs)
+        return result["result"]
+
+    def session_relevance_json_string(self, relevance, **kwargs):
+        """Get Session Relevance Results in a string from the json return.
+
+        This will submit the relevance string as json instead of html form data.
+        """
+        rel_result_array = self.session_relevance_json_array(relevance, **kwargs)
+        # Ensure each element is converted to a string
+        return "\n".join(map(str, rel_result_array))
 
     def session_relevance_xml(self, relevance, **kwargs):
         """Get Session Relevance Results XML."""
