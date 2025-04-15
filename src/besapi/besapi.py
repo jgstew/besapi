@@ -479,6 +479,8 @@ class BESConnection:
 
         This will submit the relevance string as json instead of html form data.
         """
+        # not sure if the following is needed to handle some cases:
+        # relevance = "(it as string) of ( " + relevance + " )"
         rel_result_array = self.session_relevance_json_array(relevance, **kwargs)
         # Ensure each element is converted to a string
         return "\n".join(map(str, rel_result_array))
