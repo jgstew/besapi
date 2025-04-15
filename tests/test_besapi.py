@@ -259,6 +259,17 @@ def test_bes_conn_json():
         print(result)
         assert result is not None
         assert int(result) > 0
+        print("testing session_relevance_json_string tuple")
+        result = bes_conn.session_relevance_json_string(
+            '(ids of it, names of it, "TestString") of bes computers'
+        )
+        print(result)
+        assert result is not None
+        assert "TestString" in result
+        # NOTE: the following check is specific to my env:
+        if "10.0." in bes_conn.rootserver:
+            print("doing check specific to my env")
+            assert "BIGFIX" in result
 
 
 def test_plugin_utilities():
