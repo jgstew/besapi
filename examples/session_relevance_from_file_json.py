@@ -21,15 +21,13 @@ def main():
     with open("examples/session_relevance_query_input.txt") as file:
         session_relevance = file.read()
 
-    session_relevance = urllib.parse.quote(session_relevance, safe=":+")
-    data = {"output": "json", "relevance": session_relevance}
-
-    result = bes_conn.post(bes_conn.url("query"), data)
+    # this requires besapi 3.5.3+
+    result = bes_conn.session_relevance_json(session_relevance)
 
     if __debug__:
         print(result)
 
-    json_result = json.loads(str(result))
+    json_result = result
 
     json_string = json.dumps(json_result, indent=2)
 
