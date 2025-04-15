@@ -7,6 +7,7 @@ requires `besapi`, install with command `pip install besapi`
 """
 
 import json
+import urllib.parse
 
 import besapi
 
@@ -20,6 +21,7 @@ def main():
     with open("examples/session_relevance_query_input.txt") as file:
         session_relevance = file.read()
 
+    session_relevance = urllib.parse.quote(session_relevance, safe=":+")
     data = {"output": "json", "relevance": session_relevance}
 
     result = bes_conn.post(bes_conn.url("query"), data)

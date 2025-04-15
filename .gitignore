@@ -2,6 +2,8 @@ besapi.conf
 
 tmp/
 
+examples/session_relevance_query_from_file_output.json
+
 .DS_Store
 
 # Byte-compiled / optimized / DLL files
