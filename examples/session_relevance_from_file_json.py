@@ -7,7 +7,6 @@ requires `besapi`, install with command `pip install besapi`
 """
 
 import json
-import urllib.parse
 
 import besapi
 
