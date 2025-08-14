@@ -12,20 +12,28 @@ import besapi
 session_relevance_array = ["True", "number of integers in (1,10000000)"]
 
 
-def get_session_result(session_relevance, bes_conn):
+def get_session_result(session_relevance, bes_conn, iterations=2):
     """Get session relevance result and measure timing.
 
     returns a tuple: (timing_py, timing_eval, json_result)
     """
 
     data = {"output": "json", "relevance": session_relevance}
-    start_time = time.perf_counter()
-    result = bes_conn.post(bes_conn.url("query"), data)
-    end_time = time.perf_counter()
-    timing_py = end_time - start_time
 
-    json_result = json.loads(str(result))
-    timing_eval = get_evaltime_ms(json_result)
+    total_time_py = 0
+    total_time_eval = 0
+    result = None
+    for _ in range(iterations):
+        start_time = time.perf_counter()
+        result = bes_conn.post(bes_conn.url("query"), data)
+        end_time = time.perf_counter()
+        total_time_py += end_time - start_time
+        json_result = json.loads(str(result))
+        total_time_eval += get_evaltime_ms(json_result)
+
+    timing_py = total_time_py / iterations
+
+    timing_eval = total_time_eval / iterations
 
     return timing_py, timing_eval, json_result
 
