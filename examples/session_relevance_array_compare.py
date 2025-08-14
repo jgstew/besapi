@@ -59,14 +59,21 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    print("-- Getting results from array: --\n")
+    iterations = 2
+
+    print("\n---- Getting results from array: ----")
+    print(f"- timing averaged over {iterations} iterations -\n")
     for session_relevance in session_relevance_array:
-        timing, timing_eval, result = get_session_result(session_relevance, bes_conn)
-        print(f"Python took: {timing:0.4f} seconds")
-        print(f"  Eval time: {timing_eval:0.4f} seconds")
+        timing, timing_eval, result = get_session_result(
+            session_relevance, bes_conn, iterations
+        )
+        print(f" API took: {timing:0.4f} seconds")
+        print(f"Eval time: {timing_eval:0.4f} seconds")
         print(
             f"Result array for '{string_truncate(session_relevance)}':\n{result['result']}\n"
         )
+
+    print("---------------- END ----------------")
 
 
 if __name__ == "__main__":
