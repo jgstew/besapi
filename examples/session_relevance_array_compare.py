@@ -23,13 +23,16 @@ def get_session_result(session_relevance, bes_conn, iterations=1):
     total_time_py = 0
     total_time_eval = 0
     result = None
-    for _ in range(iterations):
+    for i in range(iterations):
         start_time = time.perf_counter()
         result = bes_conn.post(bes_conn.url("query"), data)
         end_time = time.perf_counter()
         total_time_py += end_time - start_time
         json_result = json.loads(str(result))
         total_time_eval += get_evaltime_ms(json_result)
+
+        if i < iterations - 1:
+            time.sleep(1)
 
     timing_py = total_time_py / iterations
 
