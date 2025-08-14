@@ -13,23 +13,36 @@ session_relevance_array = ["True", "number of integers in (1,10000000)"]
 
 
 def get_session_result(session_relevance, bes_conn):
-    """Get session relevance result and measure timing."""
-    start_time = time.perf_counter()
+    """Get session relevance result and measure timing.
+
+    returns a tuple: (timing_py, timing_eval, json_result)
+    """
+
     data = {"output": "json", "relevance": session_relevance}
+    start_time = time.perf_counter()
     result = bes_conn.post(bes_conn.url("query"), data)
     end_time = time.perf_counter()
+    timing_py = end_time - start_time
 
     json_result = json.loads(str(result))
-    timing = end_time - start_time
-    return timing, json_result
+    timing_eval = get_evaltime_ms(json_result)
+
+    return timing_py, timing_eval, json_result
 
 
 def get_evaltime_ms(json_result):
     """Extract evaluation time in milliseconds from JSON result."""
     try:
-        return json_result["evaltime_ms"]
+        return float(json_result["evaltime_ms"]) / 1000
     except KeyError:
         return None
+
+
+def string_truncate(text, max_length=40):
+    """Truncate a string to a maximum length and append ellipsis if truncated."""
+    if len(text) > max_length:
+        return text[:max_length] + "..."
+    return text
 
 
 def main():
@@ -38,12 +51,14 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    print("Getting results from array")
+    print("-- Getting results from array: --\n")
     for session_relevance in session_relevance_array:
-        timing, result = get_session_result(session_relevance, bes_conn)
-        print(f"Took {timing:0.4f} seconds in python for '{session_relevance}'")
-        print(f"Eval time in ms: {get_evaltime_ms(result)}")
-        print(f"Result for '{session_relevance}':\n{result}")
+        timing, timing_eval, result = get_session_result(session_relevance, bes_conn)
+        print(f"Python took: {timing:0.4f} seconds")
+        print(f"  Eval time: {timing_eval:0.4f} seconds")
+        print(
+            f"Result array for '{string_truncate(session_relevance)}':\n{result['result']}\n"
+        )
 
 
 if __name__ == "__main__":
