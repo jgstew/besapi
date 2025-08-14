@@ -46,7 +46,7 @@ def get_evaltime_ms(json_result):
         return None
 
 
-def string_truncate(text, max_length=40):
+def string_truncate(text, max_length=70):
     """Truncate a string to a maximum length and append ellipsis if truncated."""
     if len(text) > max_length:
         return text[:max_length] + "..."
