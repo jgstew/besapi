@@ -31,6 +31,7 @@ def get_session_result(session_relevance, bes_conn, iterations=1):
         json_result = json.loads(str(result))
         total_time_eval += get_evaltime_ms(json_result)
 
+        # Sleep only between iterations
         if i < iterations - 1:
             time.sleep(1)
 
