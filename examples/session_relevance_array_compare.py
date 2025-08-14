@@ -12,7 +12,7 @@ import besapi
 session_relevance_array = ["True", "number of integers in (1,10000000)"]
 
 
-def get_session_result(session_relevance, bes_conn, iterations=2):
+def get_session_result(session_relevance, bes_conn, iterations=1):
     """Get session relevance result and measure timing.
 
     returns a tuple: (timing_py, timing_eval, json_result)
