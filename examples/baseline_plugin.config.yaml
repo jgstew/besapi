@@ -6,4 +6,5 @@ bigfix:
         trigger_file_path: baseline_plugin_run_now
         sites:
           - name: Updates for Windows Applications Extended
+            # auto_remediate: true
           - name: Updates for Windows Applications

@@ -98,6 +98,10 @@ def create_baseline_from_site(site):
     """
 
     site_name = site["name"]
+
+    # create action automatically?
+    auto_remediate = site["auto_remediate"] if "auto_remediate" in site else False
+
     logging.info("Create patching baseline for site: %s", site_name)
 
     # Example:
@@ -177,6 +181,36 @@ def create_baseline_from_site(site):
         logging.info("Result: Import XML:\n%s", import_result)
 
         os.remove(file_path)
+
+        if auto_remediate:
+            baseline_id = import_result.besobj.Baseline.ID
+
+            logging.info("creating baseline offer action...")
+
+            BES_SourcedFixletAction = f"""\
+        <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+            <SourcedFixletAction>
+                <SourceFixlet>
+                    <Sitename>{import_site_name}</Sitename>
+                    <FixletID>{baseline_id}</FixletID>
+                    <Action>Action1</Action>
+                </SourceFixlet>
+                <Target>
+                    {"TODO"}
+                </Target>
+                <Settings>
+                    <HasEndTime>true</HasEndTime>
+                    <EndDateTimeLocalOffset>P10D</EndDateTimeLocalOffset>
+                    <ContinueOnErrors>true</ContinueOnErrors>
+                    <PostActionBehavior Behavior="Nothing"></PostActionBehavior>
+                </Settings>
+            </SourcedFixletAction>
+        </BES>
+        """
+
+            action_result = bes_conn.post("actions", BES_SourcedFixletAction)
+
+            logging.info("Result: Action XML:\n%s", action_result)
 
 
 def process_baselines(config):
