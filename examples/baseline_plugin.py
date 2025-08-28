@@ -152,7 +152,7 @@ def create_baseline_from_site(site):
         baseline_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
         <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
         <Baseline>
-            <Title>Patches from {site_name} - {datetime.datetime.today().strftime('%Y-%m-%d')}</Title>
+            <Title>Remediations from {site_name} - {datetime.datetime.today().strftime('%Y-%m-%d')}</Title>
             <Description />
             <Relevance><![CDATA[{baseline_rel}]]></Relevance>
             <Delay>PT12H</Delay>
@@ -187,6 +187,22 @@ def create_baseline_from_site(site):
 
             logging.info("creating baseline offer action...")
 
+            # get targeting xml with relevance
+            # target only machines currently relevant
+            target_rel = f'("<ComputerID>" & it & "</ComputerID>") of concatenations "</ComputerID><ComputerID>" of (it as string) of ids of elements of unions of applicable computer sets of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)") of {fixlets_rel}'
+
+            targeting_result = bes_conn.session_relevance_json_string(target_rel)
+
+            offer_xml = ""
+
+            offer_action = site["offer_action"] if "offer_action" in site else False
+
+            if offer_action:
+                offer_xml = """<IsOffer>true</IsOffer>
+            <AnnounceOffer>false</AnnounceOffer>
+            <OfferCategory>Remediation</OfferCategory>
+            <OfferDescriptionHTML><![CDATA[Offer to remediate issues.]]></OfferDescriptionHTML>"""
+
             BES_SourcedFixletAction = f"""\
         <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
             <SourcedFixletAction>
@@ -196,17 +212,19 @@ def create_baseline_from_site(site):
                     <Action>Action1</Action>
                 </SourceFixlet>
                 <Target>
-                    {"TODO"}
+                    {targeting_result}
                 </Target>
                 <Settings>
                     <HasEndTime>true</HasEndTime>
                     <EndDateTimeLocalOffset>P10D</EndDateTimeLocalOffset>
                     <ContinueOnErrors>true</ContinueOnErrors>
-                    <PostActionBehavior Behavior="Nothing"></PostActionBehavior>
+                    <PostActionBehavior Behavior="Nothing"></PostActionBehavior>{offer_xml}
                 </Settings>
             </SourcedFixletAction>
         </BES>
         """
+
+            logging.debug("Action XML:\n%s", BES_SourcedFixletAction)
 
             action_result = bes_conn.post("actions", BES_SourcedFixletAction)
 
