@@ -57,15 +57,15 @@ jobs:
         shell: bash
         run: cp ./examples/baseline_plugin.config.yaml ./dist/baseline_plugin/baseline_plugin.config.yaml
 
-      - name: create dist zip
+      - name: create dist zip linux
         if: ${{ runner.os == 'Linux' }}
         shell: bash
         run: cd dist/baseline_plugin && zip -r -o baseline_plugin_dist_`uname -s`-`uname -m`.zip *
 
-      - name: create dist zip
+      - name: create dist zip win
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh
-        run: cd dist/baseline_plugin && Compress-Archive -Path * -DestinationPath baseline_plugin_dist_`(Get-OS)`-`(Get-Arch)`.zip
+        run: cd dist/baseline_plugin && Compress-Archive -Path * -DestinationPath baseline_plugin_dist_Windows-$( ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower() ).zip
 
       - name: get zip name
         if: ${{ runner.os == 'Linux' }}
