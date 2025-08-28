@@ -4,12 +4,6 @@ name: test_build_baseline_plugin
 on:
   push:
     paths:
-      - "src/**.py"
-      - "tests/**.py"
-      - "setup.cfg"
-      - "MANIFEST.in"
-      - "pyproject.toml"
-      - "requirements.txt"
       - ".github/workflows/test_build_baseline_plugin.yaml"
       - "examples/baseline_plugin.py"
     branches:
@@ -35,11 +29,11 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install build tools
-        run: pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml
+        run: pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
 
-      - name: Install requirements
-        shell: bash
-        run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      # - name: Install requirements
+      #   shell: bash
+      #   run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Read VERSION file
         id: getversion
