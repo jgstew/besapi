@@ -8,4 +8,4 @@ bigfix:
           - name: Updates for Windows Applications Extended
             auto_remediate: true
             offer_action: true
-          # - name: Updates for Windows Applications
+          - name: Updates for Windows Applications

@@ -195,7 +195,7 @@ def create_baseline_from_site(site):
 
             offer_xml = ""
 
-            offer_action = site["offer_action"] if "offer_action" in site else False
+            offer_action = site["offer_action"] if "offer_action" in site else True
 
             if offer_action:
                 offer_xml = """<IsOffer>true</IsOffer>
