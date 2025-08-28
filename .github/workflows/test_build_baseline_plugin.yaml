@@ -58,13 +58,26 @@ jobs:
         run: cp ./examples/baseline_plugin.config.yaml ./dist/baseline_plugin/baseline_plugin.config.yaml
 
       - name: create dist zip
+        if: ${{ runner.os == 'Linux' }}
         shell: bash
         run: cd dist/baseline_plugin && zip -r -o baseline_plugin_dist_`uname -s`-`uname -m`.zip *
 
+      - name: create dist zip
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: cd dist/baseline_plugin && Compress-Archive -Path * -DestinationPath baseline_plugin_dist_`(Get-OS)`-`(Get-Arch)`.zip
+
       - name: get zip name
-        id: get_zip_name
+        if: ${{ runner.os == 'Linux' }}
+        id: get_zip_name_linux
         shell: bash
         run: echo "ZIP_NAME=baseline_plugin_dist_`uname -s`-`uname -m`.zip" >> $GITHUB_ENV
+
+      - name: get zip name
+        if: ${{ runner.os == 'Windows' }}
+        id: get_zip_name_win
+        shell: pwsh
+        run: echo "ZIP_NAME=baseline_plugin_dist_`(Get-OS)`-`(Get-Arch)`.zip" >> $GITHUB_ENV
 
       - name: upload built baseline_plugin
         uses: actions/upload-artifact@v4
