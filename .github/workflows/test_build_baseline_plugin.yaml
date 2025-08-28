@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, ubuntu-latest, ubuntu-latest-arm]
         # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
         python-version: ["3.12"]
     steps:
@@ -65,7 +65,8 @@ jobs:
       - name: create dist zip win
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh
-        run: cd dist/baseline_plugin && Compress-Archive -Path * -DestinationPath baseline_plugin_dist_Windows-$( ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower() ).zip
+        run: |
+          cd dist/baseline_plugin && Compress-Archive -Path * -DestinationPath baseline_plugin_dist_Windows-$( ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower() ).zip
 
       - name: get zip name linux
         if: ${{ runner.os == 'Linux' }}
@@ -78,7 +79,9 @@ jobs:
         id: get_zip_name_win
         shell: pwsh
         run: |
-          echo "ZIP_NAME=baseline_plugin_dist_Windows-$( ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower() ).zip" >> $env:GITHUB_ENV
+          $arch = ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower()
+          $outputString = "ZIP_NAME=baseline_plugin_dist_Windows-${arch}.zip"
+          Add-Content -Path $env:GITHUB_ENV -Value $outputString
 
       - name: upload built baseline_plugin
         uses: actions/upload-artifact@v4
