@@ -62,6 +62,6 @@ jobs:
       - name: upload built baseline_plugin
         uses: actions/upload-artifact@v4
         with:
-          name: baseline_plugin_dist_Linux-x86_64.zip
+          # name: baseline_plugin_dist_Linux-x86_64.zip
           path: dist/baseline_plugin/baseline_plugin_dist_*.zip
           if-no-files-found: error
