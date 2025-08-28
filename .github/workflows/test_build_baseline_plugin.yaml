@@ -72,7 +72,7 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         id: get_zip_name_linux
         shell: bash
-        run: echo "ZIP_NAME=baseline_plugin_dist_`uname -s`-`uname -m`.zip" >> $GITHUB_ENV
+        run: echo "ZIP_NAME=baseline_plugin_dist_`uname -s`-`uname -m`" >> $GITHUB_ENV
 
       - name: get zip name windows
         if: ${{ runner.os == 'Windows' }}
@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           $arch = ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower()
-          $outputString = "ZIP_NAME=baseline_plugin_dist_Windows-${arch}.zip"
+          $outputString = "ZIP_NAME=baseline_plugin_dist_Windows-${arch}"
           Add-Content -Path $env:GITHUB_ENV -Value $outputString
 
       - name: upload built baseline_plugin
