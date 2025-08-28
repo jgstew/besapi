@@ -26,7 +26,7 @@ import ruamel.yaml
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "1.1.1"
+__version__ = "1.2.1"
 verbose = 0
 bes_conn = None
 invoke_folder = None
@@ -278,35 +278,7 @@ def main():
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
     logging.debug("this plugin's version: %s", __version__)
 
-    password = args.password
-
-    if not password:
-        logging.warning("Password was not provided, provide REST API password.")
-        print("Password was not provided, provide REST API password.")
-        password = getpass.getpass()
-
-    # process args, setup connection:
-    rest_url = args.rest_url
-
-    # normalize url to https://HostOrIP:52311
-    if rest_url and rest_url.endswith("/api"):
-        rest_url = rest_url.replace("/api", "")
-
-    try:
-        bes_conn = besapi.besapi.BESConnection(args.user, password, rest_url)
-        # bes_conn.login()
-    except (
-        AttributeError,
-        ConnectionRefusedError,
-        besapi.besapi.requests.exceptions.ConnectionError,
-    ):
-        try:
-            # print(args.besserver)
-            bes_conn = besapi.besapi.BESConnection(args.user, password, args.besserver)
-        # handle case where args.besserver is None
-        # AttributeError: 'NoneType' object has no attribute 'startswith'
-        except AttributeError:
-            bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
     # get config:
     config_yaml = get_config()
