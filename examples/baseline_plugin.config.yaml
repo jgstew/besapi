@@ -5,8 +5,8 @@ bigfix:
       automation:
         trigger_file_path: baseline_plugin_run_now
         sites:
-          - name: Updates for Windows Applications Extended
-            auto_remediate: true
-            offer_action: true
-            superseded_eval: false
+          # - name: Updates for Windows Applications Extended
+          #   auto_remediate: false
+          #   offer_action: false
+          #   superseded_eval: false
           - name: Updates for Windows Applications

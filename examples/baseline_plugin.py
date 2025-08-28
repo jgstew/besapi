@@ -24,8 +24,9 @@ import sys
 import ruamel.yaml
 
 import besapi
+import besapi.plugin_utilities
 
-__version__ = "0.0.1"
+__version__ = "1.1.1"
 verbose = 0
 bes_conn = None
 invoke_folder = None
@@ -250,23 +251,8 @@ def main():
     """Execution starts here."""
     print("main() start")
 
-    parser = argparse.ArgumentParser(
-        description="Provide command line arguments for REST URL, username, and password"
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        help="Set verbose output",
-        required=False,
-        action="count",
-        default=0,
-    )
-    parser.add_argument(
-        "-besserver", "--besserver", help="Specify the BES URL", required=False
-    )
-    parser.add_argument("-r", "--rest-url", help="Specify the REST URL", required=False)
-    parser.add_argument("-u", "--user", help="Specify the username", required=False)
-    parser.add_argument("-p", "--password", help="Specify the password", required=False)
+    parser = besapi.plugin_utilities.setup_plugin_argparse()
+
     # allow unknown args to be parsed instead of throwing an error:
     args, _unknown = parser.parse_known_args()
 
@@ -277,35 +263,15 @@ def main():
     # get folder the script was invoked from:
     invoke_folder = get_invoke_folder()
 
-    # set different log levels:
-    log_level = logging.INFO
-    if verbose:
-        log_level = logging.INFO
-    if verbose > 1:
-        log_level = logging.DEBUG
-
     # get path to put log file in:
     log_filename = os.path.join(invoke_folder, "baseline_plugin.log")
 
-    print(f"Log File Path: {log_filename}")
-
-    handlers = [
-        logging.handlers.RotatingFileHandler(
-            log_filename, maxBytes=5 * 1024 * 1024, backupCount=1
-        )
-    ]
-
-    # log output to console if arg provided:
-    if verbose:
-        handlers.append(logging.StreamHandler())
-
-    # setup logging:
-    logging.basicConfig(
-        encoding="utf-8",
-        level=log_level,
-        format="%(asctime)s %(levelname)s:%(message)s",
-        handlers=handlers,
+    logging_config = besapi.plugin_utilities.get_plugin_logging_config(
+        log_filename, verbose, args.console
     )
+
+    logging.basicConfig(**logging_config)
+
     logging.info("----- Starting New Session ------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("Python version: %s", platform.sys.version)

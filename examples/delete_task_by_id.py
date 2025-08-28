@@ -20,8 +20,12 @@ def main():
     # https://developer.bigfix.com/rest-api/api/task.html
     # task/{site type}/{site name}/{task id}
 
-    for task_id in ids:
-        rest_url = f"task/custom/CUSTOM_SITE_NAME/{int(task_id)}"
+    site_type = "custom"
+    site_name = "Demo"
+    content_type = "task"
+
+    for content_id in ids:
+        rest_url = f"{content_type}/{site_type}/{site_name}/{int(content_id)}"
         print(f"Deleting: {rest_url}")
         result = bes_conn.delete(rest_url)
         print(result.text)
