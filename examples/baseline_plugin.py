@@ -102,6 +102,9 @@ def create_baseline_from_site(site):
     # create action automatically?
     auto_remediate = site["auto_remediate"] if "auto_remediate" in site else False
 
+    # eval old baselines?
+    superseded_eval = site["superseded_eval"] if "superseded_eval" in site else False
+
     logging.info("Create patching baseline for site: %s", site_name)
 
     # Example:
@@ -134,8 +137,13 @@ def create_baseline_from_site(site):
 
         logging.debug(baseline_components)
 
+        superseded_eval_rel = ""
+
+        if superseded_eval:
+            superseded_eval_rel = ' OR ( exists (it as string as integer) whose(it = 1) of values of settings whose(name of it ends with "_EnableSupersededEval" AND name of it contains "BESClient_") of client )'
+
         # only have the baseline be relevant for 60 days after creation:
-        baseline_rel = f'exists absolute values whose(it < 60 * day) of (current date - "{datetime.datetime.today().strftime("%d %b %Y")}" as date)'
+        baseline_rel = f'( exists absolute values whose(it < 60 * day) of (current date - "{datetime.datetime.today().strftime("%d %b %Y")}" as date) ){superseded_eval_rel}'
 
         if num_items > 100:
             site_rel_query = f"""unique value of site level relevances of bes sites whose(exists (it as trimmed string as lowercase) whose(it = "{site_name}" as trimmed string as lowercase) of (display names of it; names of it))"""
