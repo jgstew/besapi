@@ -77,7 +77,7 @@ jobs:
         if: ${{ runner.os == 'Windows' }}
         id: get_zip_name_win
         shell: pwsh
-        run: echo "ZIP_NAME=baseline_plugin_dist_`(Get-OS)`-`(Get-Arch)`.zip" >> $GITHUB_ENV
+        run: echo "ZIP_NAME=baseline_plugin_dist_Windows-$( ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower() ).zip" >> $GITHUB_ENV
 
       - name: upload built baseline_plugin
         uses: actions/upload-artifact@v4
