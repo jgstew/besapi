@@ -12,11 +12,8 @@ References:
 - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
 """
 
-import argparse
 import datetime
-import getpass
 import logging
-import logging.handlers
 import os
 import platform
 import sys
