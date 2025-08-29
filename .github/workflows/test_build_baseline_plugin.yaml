@@ -109,7 +109,7 @@ jobs:
       #     python-version: ${{ matrix.python-version }}
 
       - name: Install Python 3.12
-        run: dnf --assumeyes install python3.12
+        run: dnf --assumeyes install python3.12 python3.12-pip
 
       - name: get python version
         run: python3 --version
