@@ -12,7 +12,6 @@ References:
 - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
 """
 
-import json
 import logging
 import ntpath
 import os
@@ -22,7 +21,7 @@ import sys
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 verbose = 0
 bes_conn = None
 invoke_folder = None
@@ -81,11 +80,9 @@ def main():
     verbose = args.verbose
 
     # get folder the script was invoked from:
-    invoke_folder = get_invoke_folder()
+    invoke_folder = get_invoke_folder(verbose)
 
-    log_file_path = os.path.join(
-        get_invoke_folder(verbose), get_invoke_file_name(verbose) + ".log"
-    )
+    log_file_path = os.path.join(invoke_folder, get_invoke_file_name(verbose) + ".log")
 
     logging_config = besapi.plugin_utilities.get_plugin_logging_config(
         log_file_path, verbose, args.console
@@ -127,7 +124,7 @@ def main():
         group_members = group_members_str.split(member_join_str)
 
         # write group members to file
-        with open(f"{group_name}.txt", "w") as f:
+        with open(f"{group_name}.txt", "w", encoding="utf-8") as f:
             f.writelines("\n".join(group_members))
 
     logging.info("---------- Ending Session -----------")
