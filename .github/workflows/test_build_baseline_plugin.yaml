@@ -96,7 +96,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04]
         # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
-        python-version: ["3.12"]
+        python-version: ["3.9"]
     container:
       image: "redhat/ubi8:latest"
     steps:
