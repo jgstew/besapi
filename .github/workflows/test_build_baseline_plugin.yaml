@@ -17,7 +17,7 @@ jobs:
         # os: [windows-2022, windows-11-arm, ubuntu-24.04, ubuntu-24.04-arm]
         os: [ubuntu-24.04]
         # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
-        python-version: ["3.13"]
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -91,7 +91,7 @@ jobs:
           path: dist/baseline_plugin/baseline_plugin_dist_*.zip
           if-no-files-found: error
 
-  use_baseline_plugin_artifact:
+  test_baseline_plugin_rhel:
     needs: test_build_baseline_plugin
     runs-on: ubuntu-latest
     container:
