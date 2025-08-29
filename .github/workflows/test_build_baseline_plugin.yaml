@@ -102,16 +102,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Python3 and pyinstaller deps
-        run: dnf --assumeyes install python3.12 python3.12-pip binutils
+        run: dnf --assumeyes install python3.12 python3.12-pip binutils zip
 
       - name: get python version
-        run: python3 --version
+        run: python3.12 --version
 
       - name: update pip
-        run: python3 -m pip install --upgrade pip
+        run: python3.12 -m pip install --upgrade pip
 
       - name: Install build tools
-        run: python3 -m pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
+        run: python3.12 -m pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
 
       # - name: Install requirements
       #   shell: bash
@@ -120,10 +120,10 @@ jobs:
       - name: Read VERSION file
         id: getversion
         shell: bash
-        run: echo "$(python3 ./setup.py --version)"
+        run: echo "$(python3.12 ./setup.py --version)"
 
       - name: Run Tests - Source
-        run: python3 tests/tests.py
+        run: python3.12 tests/tests.py
 
       - name: Test pyinstaller build baseline_plugin
         run: pyinstaller --clean --noconfirm --collect-all besapi --collect-all ruamel.yaml ./examples/baseline_plugin.py
