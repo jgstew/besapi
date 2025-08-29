@@ -94,8 +94,11 @@ jobs:
   test_baseline_plugin_rhel:
     needs: test_build_baseline_plugin
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        container-image: ["redhat/ubi8:latest", "redhat/ubi9:latest"]
     container:
-      image: "redhat/ubi8:latest"
+      image: ${{ matrix.container-image }}
     steps:
       - name: Download baseline_plugin artifact
         uses: actions/download-artifact@v4
