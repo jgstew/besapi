@@ -108,7 +108,7 @@ jobs:
 
       - name: Install unzip command
         # if: ${{ contains(container.image, 'redhat') }}
-        run: sudo dnf install -y unzip
+        run: dnf --assumeyes install unzip
 
       # Example: Unzip and check contents
       - name: Unzip artifact
