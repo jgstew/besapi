@@ -106,6 +106,10 @@ jobs:
       - name: List downloaded files
         run: ls -l ./downloaded_artifact
 
+      - name: Install unzip command
+        # if: ${{ contains(container.image, 'redhat') }}
+        run: sudo dnf install -y unzip
+
       # Example: Unzip and check contents
       - name: Unzip artifact
         run: unzip ./downloaded_artifact/baseline_plugin_dist_Linux-x86_64.zip
