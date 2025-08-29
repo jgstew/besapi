@@ -97,7 +97,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04]
     container:
-      image: "redhat/ubi9:latest"
+      image: "redhat/ubi8:latest"
     steps:
       - uses: actions/checkout@v4
 
