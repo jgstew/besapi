@@ -94,8 +94,8 @@ jobs:
   use_baseline_plugin_artifact:
     needs: test_build_baseline_plugin
     runs-on: ubuntu-latest
-    # container:
-    #   image: "redhat/ubi8:latest"
+    container:
+      image: "redhat/ubi8:latest"
     steps:
       - name: Download baseline_plugin artifact
         uses: actions/download-artifact@v4
