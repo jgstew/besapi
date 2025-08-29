@@ -107,4 +107,5 @@ jobs:
       - name: Unzip artifact
         run: unzip -l ./downloaded_artifact/baseline_plugin_dist_Linux-x86_64.zip
 
-      # Add further steps as needed to use the artifact
+      - name: test plugin help
+        run: ./downloaded_artifact/baseline_plugin --help
