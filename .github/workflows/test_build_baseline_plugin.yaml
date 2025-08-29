@@ -89,3 +89,22 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: dist/baseline_plugin/baseline_plugin_dist_*.zip
           if-no-files-found: error
+
+  use_baseline_plugin_artifact:
+    needs: test_build_baseline_plugin
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download baseline_plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline_plugin_dist_Linux-x86_64
+          path: ./downloaded_artifact
+
+      - name: List downloaded files
+        run: ls -l ./downloaded_artifact
+
+      # Example: Unzip and check contents
+      - name: Unzip artifact
+        run: unzip -l ./downloaded_artifact/baseline_plugin_dist_Linux-x86_64.zip
+
+      # Add further steps as needed to use the artifact
