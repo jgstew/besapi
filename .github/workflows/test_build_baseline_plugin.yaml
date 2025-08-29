@@ -96,21 +96,13 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-24.04]
-        # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
-        python-version: ["3.12"]
     container:
       image: "redhat/ubi8:latest"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
       - name: Install Python3 and pyinstaller deps
-        # python3.12 python3.12-pip
-        run: dnf --assumeyes install binutils
+        run: dnf --assumeyes install python3.13 python3.13-pip binutils
 
       - name: get python version
         run: python3 --version
