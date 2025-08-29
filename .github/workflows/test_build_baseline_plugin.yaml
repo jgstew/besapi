@@ -92,10 +92,7 @@ jobs:
           if-no-files-found: error
 
   build_baseline_plugin_rhel:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-24.04]
+    runs-on: ubuntu-24.04
     container:
       image: "redhat/ubi8:latest"
     steps:
@@ -197,6 +194,10 @@ jobs:
       - name: Install unzip command
         if: ${{ contains (matrix.container-image, 'redhat/ubi') }}
         run: dnf --assumeyes install unzip
+
+      - name: Install unzip command
+        if: ${{ contains (matrix.container-image, 'ubuntu') }}
+        run: apt-get install -y unzip
 
       # Example: Unzip and check contents
       - name: Unzip artifact
