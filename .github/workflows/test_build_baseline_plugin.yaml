@@ -102,13 +102,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+      # - name: Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: ${{ matrix.python-version }}
+
+      - name: update pip
+        run: python -m pip install --upgrade pip
 
       - name: Install build tools
-        run: pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
+        run: python -m pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
 
       # - name: Install requirements
       #   shell: bash
