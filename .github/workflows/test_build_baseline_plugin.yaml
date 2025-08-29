@@ -140,7 +140,6 @@ jobs:
         run: cp ./examples/baseline_plugin.config.yaml ./dist/baseline_plugin/baseline_plugin.config.yaml
 
       - name: Install zip command
-        if: ${{ contains(container.image, 'redhat') }}
         run: dnf --assumeyes install zip
 
       - name: create dist zip linux
@@ -195,7 +194,6 @@ jobs:
         run: ls -l ./downloaded_artifact
 
       - name: Install unzip command
-        if: ${{ contains(container.image, 'redhat') }}
         run: dnf --assumeyes install unzip
 
       # Example: Unzip and check contents
