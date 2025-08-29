@@ -180,7 +180,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        container-image: ["redhat/ubi8:latest", "redhat/ubi9:latest"]
+        container-image:
+          ["redhat/ubi8:latest", "redhat/ubi9:latest", "ubuntu:latest"]
     container:
       image: ${{ matrix.container-image }}
     steps:
@@ -194,6 +195,7 @@ jobs:
         run: ls -l ./downloaded_artifact
 
       - name: Install unzip command
+        if: ${{ contains (matrix.container-image, 'redhat/ubi') }}
         run: dnf --assumeyes install unzip
 
       # Example: Unzip and check contents
