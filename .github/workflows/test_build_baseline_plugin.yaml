@@ -197,7 +197,7 @@ jobs:
 
       - name: Install unzip command
         if: ${{ contains (matrix.container-image, 'ubuntu') }}
-        run: apt-get install -y unzip
+        run: apt-get update && apt-get install -y unzip
 
       # Example: Unzip and check contents
       - name: Unzip artifact
