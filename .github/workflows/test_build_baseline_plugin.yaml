@@ -11,6 +11,7 @@ on:
 
 jobs:
   test_build_baseline_plugin:
+    needs: build_baseline_plugin_rhel
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -110,11 +111,14 @@ jobs:
       - name: Install Python 3.12
         run: dnf --assumeyes install python3.12
 
+      - name: get python version
+        run: python3 --version
+
       - name: update pip
-        run: python -m pip install --upgrade pip
+        run: python3 -m pip install --upgrade pip
 
       - name: Install build tools
-        run: python -m pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
+        run: python3 -m pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
 
       # - name: Install requirements
       #   shell: bash
@@ -123,10 +127,10 @@ jobs:
       - name: Read VERSION file
         id: getversion
         shell: bash
-        run: echo "$(python ./setup.py --version)"
+        run: echo "$(python3 ./setup.py --version)"
 
       - name: Run Tests - Source
-        run: python tests/tests.py
+        run: python3 tests/tests.py
 
       - name: Test pyinstaller build baseline_plugin
         run: pyinstaller --clean --noconfirm --collect-all besapi --collect-all ruamel.yaml ./examples/baseline_plugin.py
