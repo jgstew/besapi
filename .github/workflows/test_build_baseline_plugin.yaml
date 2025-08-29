@@ -14,10 +14,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # os: [windows-2022, windows-11-arm, ubuntu-24.04, ubuntu-24.04-arm]
-        os: [ubuntu-22.04]
+        os: [windows-2022, windows-11-arm, ubuntu-24.04-arm]
         # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
-        python-version: ["3.10"]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -91,8 +90,94 @@ jobs:
           path: dist/baseline_plugin/baseline_plugin_dist_*.zip
           if-no-files-found: error
 
+  build_baseline_plugin_rhel:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+        # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
+        python-version: ["3.13"]
+    container:
+      image: "redhat/ubi8:latest"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: update pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install build tools
+        run: pip install --upgrade setuptools wheel build pyinstaller ruamel.yaml besapi
+
+      # - name: Install requirements
+      #   shell: bash
+      #   run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Read VERSION file
+        id: getversion
+        shell: bash
+        run: echo "$(python ./setup.py --version)"
+
+      - name: Run Tests - Source
+        run: python tests/tests.py
+
+      - name: Test pyinstaller build baseline_plugin
+        run: pyinstaller --clean --noconfirm --collect-all besapi --collect-all ruamel.yaml ./examples/baseline_plugin.py
+
+      - name: set executable
+        if: ${{ runner.os == 'Linux' }}
+        run: chmod +x ./dist/baseline_plugin/baseline_plugin
+
+      - name: test plugin help
+        run: ./dist/baseline_plugin/baseline_plugin --help
+
+      - name: copy example config
+        shell: bash
+        run: cp ./examples/baseline_plugin.config.yaml ./dist/baseline_plugin/baseline_plugin.config.yaml
+
+      - name: Install zip command
+        if: ${{ contains(container.image, 'redhat') }}
+        run: dnf --assumeyes install zip
+
+      - name: create dist zip linux
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: cd dist/baseline_plugin && zip -r -o baseline_plugin_dist_`uname -s`-`uname -m`.zip *
+
+      - name: create dist zip win
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          cd dist/baseline_plugin && Compress-Archive -Path * -DestinationPath baseline_plugin_dist_Windows-$( ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower() ).zip
+
+      - name: get zip name linux
+        if: ${{ runner.os == 'Linux' }}
+        id: get_zip_name_linux
+        shell: bash
+        run: echo "ZIP_NAME=baseline_plugin_dist_`uname -s`-`uname -m`" >> $GITHUB_ENV
+
+      - name: get zip name windows
+        if: ${{ runner.os == 'Windows' }}
+        id: get_zip_name_win
+        shell: pwsh
+        run: |
+          $arch = ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture).ToString().ToLower()
+          $outputString = "ZIP_NAME=baseline_plugin_dist_Windows-${arch}"
+          Add-Content -Path $env:GITHUB_ENV -Value $outputString
+
+      - name: upload built baseline_plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: dist/baseline_plugin/baseline_plugin_dist_*.zip
+          if-no-files-found: error
+
   test_baseline_plugin_rhel:
-    needs: test_build_baseline_plugin
+    needs: build_baseline_plugin_rhel
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -110,7 +195,7 @@ jobs:
         run: ls -l ./downloaded_artifact
 
       - name: Install unzip command
-        # if: ${{ contains(container.image, 'redhat') }}
+        if: ${{ contains(container.image, 'redhat') }}
         run: dnf --assumeyes install unzip
 
       # Example: Unzip and check contents
