@@ -66,16 +66,16 @@ def main():
     iterations = 2
 
     print("\n---- Getting results from array: ----")
-    print(f"- timing averaged over {iterations} iterations -\n")
+    print(f"- timing averaged over {iterations} iterations -\n\n")
     for session_relevance in session_relevance_array:
         timing, timing_eval, result = get_session_result(
             session_relevance, bes_conn, iterations
         )
-        print(f" API took: {timing:0.4f} seconds")
-        print(f"Eval time: {timing_eval:0.4f} seconds")
         print(
-            f"Result array for '{string_truncate(session_relevance)}':\n{result['result']}\n"
+            f"Results for '{string_truncate(session_relevance)}':\nNumber of results: {len(result['result'])}\n"
         )
+        print(f" API took: {timing:0.4f} seconds")
+        print(f"Eval time: {timing_eval:0.4f} seconds\n\n")
 
     print("---------------- END ----------------")
 
