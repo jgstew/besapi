@@ -2,6 +2,11 @@
 Add mime field to custom content.
 
 Need to url escape site name https://bigfix:52311/api/sites
+
+TODO: make this work with multiple fixlets, not just one hardcoded
+
+Use this session relevance to find fixlets missing the mime field:
+- https://bigfix.me/relevance/details/3023816
 """
 
 import lxml.etree
@@ -17,6 +22,32 @@ session_relevance = (
     + MIME_FIELD
     + '" of it)'
 )
+
+
+def update_fixlet_xml(fixlet_xml):
+    """Update fixlet XML to add mime field."""
+    root_xml = lxml.etree.fromstring(fixlet_xml)
+
+    # get first MIMEField
+    xml_first_mime = root_xml.find(".//*/MIMEField")
+
+    xml_container = xml_first_mime.getparent()
+
+    # new mime to set relevance eval to once an hour:
+    new_mime = lxml.etree.XML(
+        """<MIMEField>
+			<Name>x-relevance-evaluation-period</Name>
+			<Value>01:00:00</Value>
+		</MIMEField>"""
+    )
+
+    # insert new mime BEFORE first MIME
+    # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
+    xml_container.insert(xml_container.index(xml_first_mime) - 1, new_mime)
+
+    return lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True).decode(
+        "utf-8"
+    )
 
 
 def main():
@@ -51,38 +82,9 @@ def main():
         f"fixlet/custom/{fixlet_site_name}/{fixlet_id}"
     )
 
-    # print(fixlet_content)
-
-    root_xml = lxml.etree.fromstring(fixlet_content.besxml)
-
-    # get first MIMEField
-    xml_first_mime = root_xml.find(".//*/MIMEField")
-
-    xml_container = xml_first_mime.getparent()
-
-    print(lxml.etree.tostring(xml_first_mime))
-
-    print(xml_container.index(xml_first_mime))
-
-    # new mime to set relevance eval to once an hour:
-    new_mime = lxml.etree.XML(
-        """<MIMEField>
-			<Name>x-relevance-evaluation-period</Name>
-			<Value>01:00:00</Value>
-		</MIMEField>"""
-    )
-
-    print(lxml.etree.tostring(new_mime))
-
-    # insert new mime BEFORE first MIME
-    # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
-    xml_container.insert(xml_container.index(xml_first_mime) - 1, new_mime)
-
     print(
         "\nPreview of new XML:\n ",
-        lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True).decode(
-            "utf-8"
-        ),
+        update_fixlet_xml(fixlet_content.besxml),
     )
 
     # TODO: PUT changed XML back to RESTAPI resource to modify
