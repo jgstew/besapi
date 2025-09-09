@@ -81,6 +81,7 @@ def main():
 
         # print(updated_xml)
 
+        # this type works for fixlets, tasks, and baselines
         fixlet_type = "fixlet"
 
         if "<Analysis>" in updated_xml:
