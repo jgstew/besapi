@@ -22,7 +22,7 @@ import besapi
 import besapi.plugin_utilities
 
 MIME_FIELD_NAME = "x-relevance-evaluation-period"
-MIME_FIELD_VALUE = "01:00:00"  # 1 hour
+MIME_FIELD_VALUE = "06:00:00"  # 6 hours
 
 # Must return fixlet / task / baseline / analysis objects:
 session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
