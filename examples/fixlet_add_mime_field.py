@@ -67,8 +67,18 @@ def main():
 
         print(fixlet_id, fixlet_site_name)
 
+        site_path = "custom/"
+
+        # site path must be empty string for ActionSite
+        if fixlet_site_name == "ActionSite":
+            site_path = ""
+            # site name must be "master" for ActionSite
+            fixlet_site_name = "master"
+
+        print(f"fixlet/{site_path}{fixlet_site_name}/{fixlet_id}")
+
         fixlet_content = bes_conn.get_content_by_resource(
-            f"fixlet/custom/{fixlet_site_name}/{fixlet_id}"
+            f"fixlet/{site_path}{fixlet_site_name}/{fixlet_id}"
         )
         # print(fixlet_content.text)
 
@@ -90,7 +100,7 @@ def main():
         try:
             # PUT changed XML back to RESTAPI resource to modify
             _update_result = bes_conn.put(
-                f"{fixlet_type}/custom/{fixlet_site_name}/{fixlet_id}",
+                f"{fixlet_type}/{site_path}{fixlet_site_name}/{fixlet_id}",
                 updated_xml,
                 headers={"Content-Type": "application/xml"},
             )
