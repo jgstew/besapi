@@ -14,7 +14,7 @@ import lxml.etree
 import besapi
 
 # Must return fixlet or task objects:
-session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it AND "Demo" = name of site of it)"""
+session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
 
 
 def update_fixlet_xml(fixlet_xml):
@@ -87,16 +87,20 @@ def main():
         if "<Analysis>" in updated_xml:
             fixlet_type = "analysis"
 
-        # PUT changed XML back to RESTAPI resource to modify
-        _update_result = bes_conn.put(
-            f"{fixlet_type}/custom/{fixlet_site_name}/{fixlet_id}",
-            updated_xml,
-            headers={"Content-Type": "application/xml"},
-        )
-        print(f"Updated fixlet {result[1]}/{fixlet_id}")
+        try:
+            # PUT changed XML back to RESTAPI resource to modify
+            _update_result = bes_conn.put(
+                f"{fixlet_type}/custom/{fixlet_site_name}/{fixlet_id}",
+                updated_xml,
+                headers={"Content-Type": "application/xml"},
+            )
+            print(f"Updated fixlet {result[1]}/{fixlet_id}")
 
-        print(_update_result)
-        # break
+            print(_update_result)
+        except PermissionError as exc:
+            print(
+                f"ERROR: PermissionError updating fixlet {result[1]}/{fixlet_id}: {exc}"
+            )
 
 
 if __name__ == "__main__":
