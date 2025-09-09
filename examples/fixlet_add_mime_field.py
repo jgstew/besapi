@@ -5,6 +5,22 @@ This example adds a mime field to custom fixlets, tasks, baselines, and analyses
 contain the slower WMI or descendant inspector calls in their relevance, and do not already have
 the mime field.
 
+Other candidates for eval mime field addition due to slow relevance:
+- anything examining log files
+  - (it as lowercase contains ".log%22" AND it as lowercase contains " lines ")
+- anything examining large files
+- things enumerating `active devices` or `smbios`
+- things enumerating the PATH environment variable or other environment variables with many entries
+  - ` substrings separated by (";";":") of values of (variables "PATH" of it`
+- complicated xpaths of many files
+- getting maximum or maxima of modification times of files
+- ` of folders of folders `
+- ` image files of processes `
+- `(now - modification time of it) < `
+- ` of active director`
+- ` of folders "Logs" of folders "__Global" of `
+- complicated package relevance: rpm or debian package or winrt package
+
 Use this session relevance to find fixlets missing the mime field:
 - https://bigfix.me/relevance/details/3023816
 """
