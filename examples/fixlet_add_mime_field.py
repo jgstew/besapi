@@ -128,11 +128,11 @@ def main():
 
         # print(updated_xml)
 
-        _update_result = put_updated_xml(
+        update_result = put_updated_xml(
             bes_conn, fixlet_site_name, fixlet_id, updated_xml
         )
 
-        if _update_result is not None:
+        if update_result is not None:
             print(f"Updated fixlet {fixlet_id} in site {fixlet_site_name}:")
 
 
