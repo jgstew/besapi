@@ -162,7 +162,7 @@ def main():
 
     root_id = int(
         bes_conn.session_relevance_string(
-            "unique value of ids of bes computers whose(root server flag of it)"
+            "unique value of ids of bes computers whose(root server flag of it AND now - last report time of it < 3 * day)"
         )
     )
 
