@@ -18,7 +18,9 @@ MIME_FIELD_VALUE = "01:00:00"  # 1 hour
 session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
 
 
-def fixlet_xml_add_mime(fixlet_xml, mime_field_name, mime_field_value):
+def fixlet_xml_add_mime(
+    fixlet_xml: str, mime_field_name: str, mime_field_value: str
+) -> str | None:
     """Update fixlet XML to add mime field."""
     new_mime = f"""<MIMEField>
         <Name>{mime_field_name}</Name>
@@ -54,7 +56,9 @@ def fixlet_xml_add_mime(fixlet_xml, mime_field_name, mime_field_value):
     )
 
 
-def get_fixlet_content(bes_conn, fixlet_site_name, fixlet_id):
+def get_content_restresult(
+    bes_conn: besapi.besapi.BESConnection, fixlet_site_name: str, fixlet_id: int
+) -> besapi.besapi.RESTResult | None:
     """Get fixlet content by ID and site name.
 
     This works with fixlets, tasks, baselines, and analyses.
@@ -76,7 +80,12 @@ def get_fixlet_content(bes_conn, fixlet_site_name, fixlet_id):
     return fixlet_content
 
 
-def put_updated_xml(bes_conn, fixlet_site_name, fixlet_id, updated_xml):
+def put_updated_xml(
+    bes_conn: besapi.besapi.BESConnection,
+    fixlet_site_name: str,
+    fixlet_id: int,
+    updated_xml: str,
+) -> besapi.besapi.RESTResult | None:
     """PUT updated XML back to RESTAPI resource to modify.
 
     This works with fixlets, tasks, baselines, and analyses.
@@ -111,6 +120,8 @@ def put_updated_xml(bes_conn, fixlet_site_name, fixlet_id, updated_xml):
             f"ERROR: PermissionError updating fixlet {fixlet_site_name}/{fixlet_id}:{exc}"
         )
 
+    return None
+
 
 def main():
     """Execution starts here."""
@@ -130,7 +141,7 @@ def main():
 
         print(fixlet_id, fixlet_site_name)
 
-        fixlet_content = get_fixlet_content(bes_conn, fixlet_site_name, fixlet_id)
+        fixlet_content = get_content_restresult(bes_conn, fixlet_site_name, fixlet_id)
 
         updated_xml = fixlet_xml_add_mime(
             fixlet_content.besxml, MIME_FIELD_NAME, MIME_FIELD_VALUE
