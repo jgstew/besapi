@@ -55,8 +55,7 @@ def main():
     bes_conn.login()
 
     results = bes_conn.session_relevance_json_array(
-        "(id of it, name of site of it) of it whose(not analysis flag of it) of "
-        + session_relevance_multiple_fixlets
+        "(id of it, name of site of it) of " + session_relevance_multiple_fixlets
     )
 
     print(results)
@@ -82,9 +81,14 @@ def main():
 
         # print(updated_xml)
 
+        fixlet_type = "fixlet"
+
+        if "<Analysis>" in updated_xml:
+            fixlet_type = "analysis"
+
         # PUT changed XML back to RESTAPI resource to modify
         _update_result = bes_conn.put(
-            f"fixlet/custom/{fixlet_site_name}/{fixlet_id}",
+            f"{fixlet_type}/custom/{fixlet_site_name}/{fixlet_id}",
             updated_xml,
             headers={"Content-Type": "application/xml"},
         )
