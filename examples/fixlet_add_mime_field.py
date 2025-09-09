@@ -64,7 +64,10 @@ def get_fixlet_content(bes_conn, fixlet_site_name, fixlet_id):
 
 
 def put_updated_xml(bes_conn, fixlet_site_name, fixlet_id, updated_xml):
-    """PUT updated XML back to RESTAPI resource to modify."""
+    """PUT updated XML back to RESTAPI resource to modify.
+
+    This works with fixlets, tasks, baselines, and analyses.
+    """
     # may need to escape other chars too?
     fixlet_site_name = fixlet_site_name.replace("/", "%2f")
 
