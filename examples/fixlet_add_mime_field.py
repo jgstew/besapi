@@ -1,5 +1,9 @@
 """
-Add mime field to custom content.
+Add a mime field to custom content returned by session relevance.
+
+This example adds a mime field to custom fixlets, tasks, baselines, and analyses that
+contain the slower WMI or descendant inspector calls in their relevance, and do not already have
+the mime field.
 
 Use this session relevance to find fixlets missing the mime field:
 - https://bigfix.me/relevance/details/3023816
@@ -20,7 +24,7 @@ import besapi.plugin_utilities
 MIME_FIELD_NAME = "x-relevance-evaluation-period"
 MIME_FIELD_VALUE = "01:00:00"  # 1 hour
 
-# Must return fixlet or task objects:
+# Must return fixlet / task / baseline / analysis objects:
 session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
 
 
@@ -114,6 +118,7 @@ def get_content_restresult(
     """Get fixlet content by ID and site name.
 
     This works with fixlets, tasks, baselines, and analyses.
+    Might work with other content types too.
     """
     # URL encode the site name to handle special characters
     fixlet_site_name = urllib.parse.quote(fixlet_site_name, safe="")
@@ -141,6 +146,7 @@ def put_updated_xml(
     """PUT updated XML back to RESTAPI resource to modify.
 
     This works with fixlets, tasks, baselines, and analyses.
+    Might work with other content types too.
     """
     # URL encode the site name to handle special characters
     fixlet_site_name = urllib.parse.quote(fixlet_site_name, safe="")
@@ -177,8 +183,11 @@ def put_updated_xml(
 
 
 def main():
-    """Execution starts here."""
-    print("main()")
+    """Execution starts here.
+
+    This is designed to be run as a plugin, but can also be run as a standalone script.
+    """
+    print("fixlet_add_mime_field main()")
 
     parser = besapi.plugin_utilities.setup_plugin_argparse()
 
