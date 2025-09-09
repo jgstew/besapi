@@ -13,15 +13,8 @@ import lxml.etree
 
 import besapi
 
-FIXLET_NAME = "Install Microsoft Orca from local SDK - Windows"
-MIME_FIELD = "x-relevance-evaluation-period"
-session_relevance = (
-    'custom bes fixlets whose(name of it = "'
-    + FIXLET_NAME
-    + '" AND not exists mime fields "'
-    + MIME_FIELD
-    + '" of it)'
-)
+# Must return fixlet or task objects:
+session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it AND "Demo" = name of site of it)"""
 
 
 def update_fixlet_xml(fixlet_xml):
@@ -43,7 +36,12 @@ def update_fixlet_xml(fixlet_xml):
 
     # insert new mime BEFORE first MIME
     # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
-    xml_container.insert(xml_container.index(xml_first_mime) - 1, new_mime)
+    xml_container.insert(xml_container.index(xml_first_mime), new_mime)
+
+    # validate against XSD
+    besapi.besapi.validate_xsd(
+        lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=False)
+    )
 
     return lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True).decode(
         "utf-8"
@@ -56,38 +54,44 @@ def main():
     bes_conn = besapi.besapi.get_bes_conn_using_config_file()
     bes_conn.login()
 
-    data = {"relevance": "id of " + session_relevance}
-
-    result = bes_conn.post(bes_conn.url("query"), data)
-
-    # example result: fixlet/custom/Public%2fWindows/21405
-    # full example: https://bigfix:52311/api/fixlet/custom/Public%2fWindows/21405
-    fixlet_id = int(result.besdict["Query"]["Result"]["Answer"])
-
-    print(fixlet_id)
-
-    data = {"relevance": "name of site of " + session_relevance}
-
-    result = bes_conn.post(bes_conn.url("query"), data)
-
-    fixlet_site_name = str(result.besdict["Query"]["Result"]["Answer"])
-
-    # escape `/` in site name, if applicable
-    # do spaces need escaped too? `%20`
-    fixlet_site_name = fixlet_site_name.replace("/", "%2f")
-
-    print(fixlet_site_name)
-
-    fixlet_content = bes_conn.get_content_by_resource(
-        f"fixlet/custom/{fixlet_site_name}/{fixlet_id}"
+    results = bes_conn.session_relevance_json_array(
+        "(id of it, name of site of it) of it whose(not analysis flag of it) of "
+        + session_relevance_multiple_fixlets
     )
 
-    print(
-        "\nPreview of new XML:\n ",
-        update_fixlet_xml(fixlet_content.besxml),
-    )
+    print(results)
 
-    # TODO: PUT changed XML back to RESTAPI resource to modify
+    for result in results:
+        fixlet_id = result[0]
+        # may need to escape other chars too?
+        fixlet_site_name = result[1].replace("/", "%2f")
+
+        print(fixlet_id, fixlet_site_name)
+
+        fixlet_content = bes_conn.get_content_by_resource(
+            f"fixlet/custom/{fixlet_site_name}/{fixlet_id}"
+        )
+        # print(fixlet_content.text)
+
+        # need to check if mime field already exists in case session relevance is behind
+        if "x-relevance-evaluation-period" in fixlet_content.text.lower():
+            print(f"INFO: skipping {fixlet_id}, it already has mime field")
+            continue
+
+        updated_xml = update_fixlet_xml(fixlet_content.besxml)
+
+        # print(updated_xml)
+
+        # PUT changed XML back to RESTAPI resource to modify
+        _update_result = bes_conn.put(
+            f"fixlet/custom/{fixlet_site_name}/{fixlet_id}",
+            updated_xml,
+            headers={"Content-Type": "application/xml"},
+        )
+        print(f"Updated fixlet {result[1]}/{fixlet_id}")
+
+        print(_update_result)
+        # break
 
 
 if __name__ == "__main__":
