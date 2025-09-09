@@ -5,6 +5,8 @@ Use this session relevance to find fixlets missing the mime field:
 - https://bigfix.me/relevance/details/3023816
 """
 
+import urllib.parse
+
 import lxml.etree
 
 import besapi
@@ -45,9 +47,12 @@ def fixlet_xml_add_mime(fixlet_xml):
 
 
 def get_fixlet_content(bes_conn, fixlet_site_name, fixlet_id):
-    """Get fixlet content by ID and site name."""
-    # may need to escape other chars too?
-    fixlet_site_name = fixlet_site_name.replace("/", "%2f")
+    """Get fixlet content by ID and site name.
+
+    This works with fixlets, tasks, baselines, and analyses.
+    """
+    # URL encode the site name to handle special characters
+    fixlet_site_name = urllib.parse.quote(fixlet_site_name, safe="")
 
     site_path = "custom/"
 
@@ -68,8 +73,8 @@ def put_updated_xml(bes_conn, fixlet_site_name, fixlet_id, updated_xml):
 
     This works with fixlets, tasks, baselines, and analyses.
     """
-    # may need to escape other chars too?
-    fixlet_site_name = fixlet_site_name.replace("/", "%2f")
+    # URL encode the site name to handle special characters
+    fixlet_site_name = urllib.parse.quote(fixlet_site_name, safe="")
 
     # this type works for fixlets, tasks, and baselines
     fixlet_type = "fixlet"
