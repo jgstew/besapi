@@ -11,12 +11,25 @@ import lxml.etree
 
 import besapi
 
+MIME_FIELD_NAME = "x-relevance-evaluation-period"
+MIME_FIELD_VALUE = "01:00:00"  # 1 hour
+
 # Must return fixlet or task objects:
 session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
 
 
-def fixlet_xml_add_mime(fixlet_xml):
+def fixlet_xml_add_mime(fixlet_xml, mime_field_name, mime_field_value):
     """Update fixlet XML to add mime field."""
+    new_mime = f"""<MIMEField>
+        <Name>{mime_field_name}</Name>
+        <Value>{mime_field_value}</Value>
+    </MIMEField>"""
+
+    # need to check if mime field already exists in case session relevance is behind
+    if mime_field_name in str(fixlet_xml).lower():
+        print("INFO: skipping item, it already has mime field")
+        return None
+
     root_xml = lxml.etree.fromstring(fixlet_xml)
 
     # get first MIMEField
@@ -25,16 +38,11 @@ def fixlet_xml_add_mime(fixlet_xml):
     xml_container = xml_first_mime.getparent()
 
     # new mime to set relevance eval to once an hour:
-    new_mime = lxml.etree.XML(
-        """<MIMEField>
-			<Name>x-relevance-evaluation-period</Name>
-			<Value>01:00:00</Value>
-		</MIMEField>"""
-    )
+    new_mime_lxml = lxml.etree.XML(new_mime)
 
     # insert new mime BEFORE first MIME
     # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
-    xml_container.insert(xml_container.index(xml_first_mime), new_mime)
+    xml_container.insert(xml_container.index(xml_first_mime), new_mime_lxml)
 
     # validate against XSD
     besapi.besapi.validate_xsd(
@@ -124,12 +132,13 @@ def main():
 
         fixlet_content = get_fixlet_content(bes_conn, fixlet_site_name, fixlet_id)
 
-        # need to check if mime field already exists in case session relevance is behind
-        if "x-relevance-evaluation-period" in fixlet_content.text.lower():
-            print(f"INFO: skipping {fixlet_id}, it already has mime field")
-            continue
+        updated_xml = fixlet_xml_add_mime(
+            fixlet_content.besxml, MIME_FIELD_NAME, MIME_FIELD_VALUE
+        )
 
-        updated_xml = fixlet_xml_add_mime(fixlet_content.besxml)
+        if updated_xml is None:
+            # skip, already has mime field
+            continue
 
         # print(updated_xml)
 
