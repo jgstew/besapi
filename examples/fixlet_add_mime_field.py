@@ -43,7 +43,7 @@ MIME_FIELD_VALUE = "06:00:00"  # 6 hours
 
 # Must return fixlet / task / baseline / analysis objects:
 session_relevance_multiple_fixlets = """custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant") of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
-
+# custom bes fixlets whose(not exists mime fields "x-relevance-evaluation-period" of it) whose(exists (it as lowercase) whose(exists matches (case insensitive regex "records? of[a-z0-9]* event log") of it OR (it contains ".log%22" AND it contains " lines ") OR (it contains " substrings separated by (%22;%22;%22:%22) of values of") OR it contains " wmi" OR it contains " descendant") of relevance of it)
 
 __version__ = "0.1.1"
 verbose = 0
