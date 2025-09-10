@@ -20,6 +20,7 @@ Other candidates for eval mime field addition due to slow relevance:
 - ` of active director`
 - ` of folders "Logs" of folders "__Global" of `
 - complicated package relevance: rpm or debian package or winrt package
+- event log relevance: `exists matches (case insensitive regex "records? of[a-z0-9]* event log") of it`
 
 Use this session relevance to find fixlets missing the mime field:
 - https://bigfix.me/relevance/details/3023816
