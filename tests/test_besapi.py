@@ -300,20 +300,39 @@ def test_plugin_utilities_logging():
 
 def test_plugin_utilities_win_dpapi():
     """Test the Windows DPAPI encryption function, if on Windows."""
+    if not os.name == "nt":
+        pytest.skip("Skipping Windows Registry test on non-Windows system.")
+
     # only run this test if besapi > v3.8.3:
     if besapi.besapi.__version__ <= "3.8.3":
         pytest.skip("Skipping test for besapi <= 3.8.3")
 
-    if os.name == "nt":
-        test_string = "This is just a test string " + str(random.randint(0, 9999))
-        encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(test_string)
-        print("Encrypted string:", encrypted_str)
-        assert encrypted_str != ""
-        assert encrypted_str != test_string
-        decrypted_str = besapi.plugin_utilities_win.win_dpapi_decrypt_base64(
-            encrypted_str
-        )
-        print("Decrypted string:", decrypted_str)
-        assert decrypted_str == test_string
-    else:
-        print("Skipping Windows DPAPI test on non-Windows system.")
+    test_string = "This is just a test string " + str(random.randint(0, 9999))
+    encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(test_string)
+    print("Encrypted string:", encrypted_str)
+    assert encrypted_str != ""
+    assert encrypted_str != test_string
+    decrypted_str = besapi.plugin_utilities_win.win_dpapi_decrypt_base64(encrypted_str)
+    print("Decrypted string:", decrypted_str)
+    assert decrypted_str == test_string
+
+
+def test_plugin_utilities_win_win_registry_value_read():
+    """Test reading a Windows registry value."""
+    if not os.name == "nt":
+        pytest.skip("Skipping Windows Registry test on non-Windows system.")
+
+    # only run this test if besapi > v3.8.3:
+    if besapi.besapi.__version__ <= "3.8.3":
+        pytest.skip("Skipping test for besapi <= 3.8.3")
+
+    import winreg
+
+    registry_key = r"SOFTWARE\Microsoft\Windows\CurrentVersion"
+    registry_value = "ProgramFilesDir"
+    result = besapi.plugin_utilities_win.win_registry_value_read(
+        winreg.HKEY_LOCAL_MACHINE, registry_key, registry_value
+    )
+    print("Registry value:", result)
+    assert result is not None
+    assert "Program Files" in result
