@@ -148,7 +148,7 @@ def get_win_registry_rest_pass() -> Union[str, None]:
     Returns:
         The REST Password if found, otherwise None.
     """
-    hive = winreg.HKEY_LOCAL_MACHINE
+    hive = winreg.HKEY_LOCAL_MACHINE  # type: ignore[attr-defined]
     # HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig
     subkey = r"SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig"
     value_name = "RESTPassword"
@@ -181,7 +181,7 @@ def get_besconn_root_windows_registry() -> Union[besapi.besapi.BESConnection, No
     if not password:
         return None
 
-    hive = winreg.HKEY_LOCAL_MACHINE
+    hive = winreg.HKEY_LOCAL_MACHINE  # type: ignore[attr-defined]
     subkey = r"SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig"
 
     user = win_registry_value_read(hive, subkey, "RESTUsername")
