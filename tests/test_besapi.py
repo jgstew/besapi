@@ -25,6 +25,9 @@ if not os.getenv("TEST_PIP"):
 import besapi
 import besapi.plugin_utilities
 
+if os.name == "nt":
+    import besapi.plugin_utilities_win
+
 
 def test_besapi_version():
     """Test that the besapi version is not None."""
@@ -272,7 +275,7 @@ def test_bes_conn_json():
             assert "BIGFIX" in result
 
 
-def test_plugin_utilities():
+def test_plugin_utilities_logging():
     """Test the plugin_utilities module."""
     print(besapi.plugin_utilities.get_invoke_folder())
     print(besapi.plugin_utilities.get_invoke_file_name())
@@ -293,3 +296,18 @@ def test_plugin_utilities():
         logging.warning("Just testing to see if logging is working!")
 
         assert os.path.isfile("./tests.log")
+
+
+def test_plugin_utilities_win_dpapi():
+    """Test the Windows DPAPI encryption function, if on Windows."""
+    if os.name == "nt":
+        test_string = "This is just a test string " + str(random.randint(0, 9999))
+        encrypted_str = besapi.plugin_utilities.win_dpapi_encrypt_str(test_string)
+        print("Encrypted string:", encrypted_str)
+        assert encrypted_str != ""
+        assert encrypted_str != test_string
+        decrypted_str = besapi.plugin_utilities.win_dpapi_decrypt_base64(encrypted_str)
+        print("Decrypted string:", decrypted_str)
+        assert decrypted_str == test_string
+    else:
+        print("Skipping Windows DPAPI test on non-Windows system.")

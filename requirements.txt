@@ -1,4 +1,5 @@
 cmd2
 lxml
+pywin32; sys_platform == 'win32'
 requests
 setuptools
