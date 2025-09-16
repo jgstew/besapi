@@ -8,6 +8,8 @@ import logging
 import sys
 from typing import Union
 
+import besapi
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -139,7 +141,7 @@ def win_registry_value_read(hive, subkey, value_name):
         return None
 
 
-def get_win_registry_rest_pass():
+def get_win_registry_rest_pass() -> Union[str, None]:
     """
     Retrieves the base64 encrypted REST Password from the Windows Registry.
 
@@ -163,5 +165,44 @@ def get_win_registry_rest_pass():
 
     if reg_value:
         return win_dpapi_decrypt_base64(reg_value)
+
+    return None
+
+
+def get_besconn_root_windows_registry() -> Union[besapi.besapi.BESConnection, None]:
+    """
+    Attempts to create a BESConnection using credentials stored in the Windows
+    Registry.
+
+    Returns:
+        A BESConnection object if successful, otherwise None.
+    """
+    password = get_win_registry_rest_pass()
+    if not password:
+        return None
+
+    hive = winreg.HKEY_LOCAL_MACHINE
+    subkey = r"SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig"
+
+    user = win_registry_value_read(hive, subkey, "RESTUsername")
+
+    if not user:
+        return None
+
+    rest_url = win_registry_value_read(hive, subkey, "RESTURL")
+
+    if not rest_url:
+        return None
+
+    # normalize url to https://HostOrIP:52311
+    if rest_url and rest_url.endswith("/api"):
+        rest_url = rest_url.replace("/api", "")
+
+    if user and password and rest_url:
+        try:
+            return besapi.besapi.BESConnection(user, password, rest_url)
+        except Exception as e:
+            logger.error("Failed to create BESConnection from registry values: %s", e)
+            return None
 
     return None

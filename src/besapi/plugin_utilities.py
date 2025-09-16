@@ -140,11 +140,17 @@ def get_besapi_connection(args):
 
     # if user was provided as arg but password was not:
     if args.user and not password:
+        if os.name == "nt":
+            # attempt to get password from windows root server registry:
+            password = besapi.plugin_utilities_win.get_win_registry_rest_pass()
+
+    # if user was provided as arg but password was not:
+    if args.user and not password:
         logging.warning("Password was not provided, provide REST API password.")
         print("Password was not provided, provide REST API password:")
         password = getpass.getpass()
 
-    if args.user:
+    if password:
         logging.debug("REST API Password Length: %s", len(password))
 
     # process args, setup connection:
