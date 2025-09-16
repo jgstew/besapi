@@ -56,7 +56,7 @@ def win_dpapi_encrypt_str(
     #
     # The function returns a tuple: (description, encrypted_bytes)
     # We only need the second element.
-    _, encrypted_bytes = win32crypt.CryptProtectData(
+    encrypted_bytes = win32crypt.CryptProtectData(
         plaintext_bytes,
         None,  # Description
         entropy,  # Optional entropy

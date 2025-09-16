@@ -300,6 +300,10 @@ def test_plugin_utilities_logging():
 
 def test_plugin_utilities_win_dpapi():
     """Test the Windows DPAPI encryption function, if on Windows."""
+    # only run this test if besapi > v3.8.3:
+    if not os.getenv("TEST_PIP") or besapi.besapi.__version__ <= "3.8.3":
+        pytest.skip("Skipping test for besapi <= 3.8.3")
+
     if os.name == "nt":
         test_string = "This is just a test string " + str(random.randint(0, 9999))
         encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(test_string)
