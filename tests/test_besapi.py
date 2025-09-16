@@ -333,13 +333,14 @@ def test_plugin_utilities_win_win_registry_value_read():
     result = besapi.plugin_utilities_win.win_registry_value_read(
         winreg.HKEY_LOCAL_MACHINE, registry_key, registry_value
     )
-    print("Registry value:", result)
+
     assert result is not None
+    print("Registry value:", result)
     assert "Program Files" in result
 
 
 def test_plugin_utilities_win_get_win_registry_rest_pass():
-    """Test getting the Windows Registry REST path."""
+    """Test getting the Windows Registry REST password."""
     if not os.name == "nt":
         pytest.skip("Skipping Windows Registry test on non-Windows system.")
 
@@ -361,6 +362,6 @@ def test_plugin_utilities_win_get_win_registry_rest_pass():
     winreg.CloseKey(key)
 
     result = besapi.plugin_utilities_win.get_win_registry_rest_pass()
-    print("Windows Registry REST password:", result)
     assert result is not None
+    print("Windows Registry REST password:", result)
     assert result == test_string
