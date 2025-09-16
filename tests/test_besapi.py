@@ -302,11 +302,13 @@ def test_plugin_utilities_win_dpapi():
     """Test the Windows DPAPI encryption function, if on Windows."""
     if os.name == "nt":
         test_string = "This is just a test string " + str(random.randint(0, 9999))
-        encrypted_str = besapi.plugin_utilities.win_dpapi_encrypt_str(test_string)
+        encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(test_string)
         print("Encrypted string:", encrypted_str)
         assert encrypted_str != ""
         assert encrypted_str != test_string
-        decrypted_str = besapi.plugin_utilities.win_dpapi_decrypt_base64(encrypted_str)
+        decrypted_str = besapi.plugin_utilities_win.win_dpapi_decrypt_base64(
+            encrypted_str
+        )
         print("Decrypted string:", decrypted_str)
         assert decrypted_str == test_string
     else:
