@@ -6,6 +6,7 @@ and Windows Registry access.
 import base64
 import logging
 import sys
+from typing import Union
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,8 @@ except (ImportError, ModuleNotFoundError) as e:
 
 
 def win_dpapi_encrypt_str(
-    plaintext: str, scope_flags: int = 4, entropy: str | bytes | None = None
-) -> str:
+    plaintext: str, scope_flags: int = 4, entropy: Union[str, bytes, None] = None
+) -> Union[str, None]:
     """Encrypt a string using Windows DPAPI and return it as a base64-encoded string.
 
     Args:
@@ -44,7 +45,7 @@ def win_dpapi_encrypt_str(
     """
     if not plaintext or plaintext.strip() == "":
         logger.warning("No plaintext provided for encryption.")
-        return ""
+        return None
 
     # 1. Convert the plaintext string to bytes
     plaintext_bytes = plaintext.encode("utf-8")
@@ -71,8 +72,8 @@ def win_dpapi_encrypt_str(
 
 
 def win_dpapi_decrypt_base64(
-    encrypted_b64: str, scope_flags: int = 4, entropy: str | bytes | None = None
-) -> str | None:
+    encrypted_b64: str, scope_flags: int = 4, entropy: Union[str, bytes, None] = None
+) -> Union[str, None]:
     """Decrypt a base64-encoded string encrypted with Windows DPAPI.
 
     Args:
