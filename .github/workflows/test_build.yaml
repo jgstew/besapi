@@ -12,6 +12,8 @@ on:
       - "requirements.txt"
       - ".github/workflows/test_build.yaml"
       - ".github/workflows/tag_and_release.yaml"
+    branches:
+      - master
   pull_request:
     paths:
       - "src/**.py"

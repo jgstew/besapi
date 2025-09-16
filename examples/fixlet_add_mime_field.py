@@ -1,4 +1,4 @@
-"""
+r"""
 Add a mime field to custom content returned by session relevance.
 
 This example adds a mime field to custom fixlets, tasks, baselines, and analyses that
