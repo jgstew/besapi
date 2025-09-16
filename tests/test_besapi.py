@@ -336,3 +336,31 @@ def test_plugin_utilities_win_win_registry_value_read():
     print("Registry value:", result)
     assert result is not None
     assert "Program Files" in result
+
+
+def test_plugin_utilities_win_get_win_registry_rest_pass():
+    """Test getting the Windows Registry REST path."""
+    if not os.name == "nt":
+        pytest.skip("Skipping Windows Registry test on non-Windows system.")
+
+    # only run this test if besapi > v3.8.3:
+    if besapi.besapi.__version__ <= "3.8.3":
+        pytest.skip("Skipping test for besapi <= 3.8.3")
+
+    import winreg
+
+    test_string = "This is just a test string " + str(random.randint(0, 9999))
+    encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(test_string)
+
+    # write encrypted string to registry for testing:
+    # HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig
+    subkey = r"SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig"
+
+    key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, subkey)
+    winreg.SetValueEx(key, "RESTPassword", 0, winreg.REG_SZ, "{obf}" + encrypted_str)
+    winreg.CloseKey(key)
+
+    result = besapi.plugin_utilities_win.get_win_registry_rest_pass()
+    print("Windows Registry REST password:", result)
+    assert result is not None
+    assert result == test_string
