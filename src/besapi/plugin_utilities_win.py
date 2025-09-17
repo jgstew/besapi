@@ -107,7 +107,12 @@ def win_dpapi_decrypt_base64(
         scope_flags,
     )
 
-    return decrypted_bytes.decode("utf-8") if decrypted_bytes else None
+    if decrypted_bytes:
+        decrypted_string = decrypted_bytes.decode("utf-8").strip()
+        return decrypted_string
+
+    logger.debug("Decryption returned no data.")
+    return None
 
 
 def win_registry_value_read(hive, subkey, value_name):
@@ -134,7 +139,7 @@ def win_registry_value_read(hive, subkey, value_name):
 
         return value_data
     except FileNotFoundError:
-        logger.error("Registry key or value '%s\\%s' not found.", subkey, value_name)
+        logger.debug("Registry key or value '%s\\%s' not found.", subkey, value_name)
         return None
     except Exception as e:
         logger.error("An error occurred: %s", e)
@@ -156,16 +161,19 @@ def get_win_registry_rest_pass() -> Union[str, None]:
     reg_value = win_registry_value_read(hive, subkey, value_name)
 
     if not reg_value:
-        logger.error("No registry value found for RESTPassword.")
+        logger.debug("No registry value found for %s.", value_name)
         return None
 
     # remove {obf} from start of string if present:
     if reg_value and reg_value.startswith("{obf}"):
         reg_value = reg_value[5:]
 
-    if reg_value:
-        return win_dpapi_decrypt_base64(reg_value)
+    if reg_value and len(reg_value) > 50:
+        password = win_dpapi_decrypt_base64(reg_value)
+        if len(password) > 3:
+            return password
 
+    logger.debug("Decryption failed or decrypted password length is too short.")
     return None
 
 

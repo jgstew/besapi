@@ -365,3 +365,46 @@ def test_plugin_utilities_win_get_win_registry_rest_pass():
     assert result is not None
     print("Windows Registry REST password:", result)
     assert result == test_string
+
+
+def test_plugin_utilities_win_get_besconn_root_windows_registry():
+    """Test getting a BESConnection from the Windows Registry."""
+    if "ROOT_SERVER" not in os.environ:
+        pytest.skip("Skipping Windows Registry test, ROOT_SERVER not set.")
+    if "ROOT_USER" not in os.environ:
+        pytest.skip("Skipping Windows Registry test, ROOT_USER not set.")
+    if "ROOT_USER_PASSWORD" not in os.environ:
+        pytest.skip("Skipping Windows Registry test, ROOT_USER_PASSWORD not set.")
+
+    if not os.name == "nt":
+        pytest.skip("Skipping Windows Registry test on non-Windows system.")
+
+    # only run this test if besapi > v3.9.1:
+    if besapi.besapi.__version__ <= "3.9.1":
+        pytest.skip("Skipping test for besapi <= 3.9.1")
+
+    # get env vars for testing:
+    root_server = os.getenv("ROOT_SERVER")
+    root_user = os.getenv("ROOT_USER")
+    root_user_password = os.getenv("ROOT_USER_PASSWORD")
+
+    encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(
+        root_user_password
+    )
+
+    import winreg
+
+    # write user and encrypted password to registry for testing:
+    # HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig
+    subkey = r"SOFTWARE\Wow6432Node\BigFix\Enterprise Server\MFSConfig"
+    hive = winreg.HKEY_LOCAL_MACHINE  # type: ignore[attr-defined]
+
+    key = winreg.CreateKey(hive, subkey)
+    winreg.SetValueEx(
+        key, "RESTURL", 0, winreg.REG_SZ, "https://" + root_server + ":52311/api"
+    )
+    winreg.SetValueEx(key, "RESTUsername", 0, winreg.REG_SZ, root_user)
+    winreg.SetValueEx(key, "RESTPassword", 0, winreg.REG_SZ, "{obf}" + encrypted_str)
+    winreg.CloseKey(key)
+    bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
+    assert bes_conn is not None

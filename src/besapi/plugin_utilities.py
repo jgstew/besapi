@@ -135,6 +135,10 @@ def get_besapi_connection(args):
     """Get connection to besapi using either args or config file if args not
     provided.
     """
+    if os.name == "nt":
+        bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
+        if bes_conn:
+            return bes_conn
 
     password = args.password
 
