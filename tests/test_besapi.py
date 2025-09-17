@@ -281,43 +281,37 @@ def test_bes_conn_json():
 
     if bes_conn and bes_conn.login():
         print("testing session_relevance_json")
-        result = bes_conn.session_relevance_json("number of bes computers")
+        result = bes_conn.session_relevance_json("number of all bes sites")
         assert result is not None
         assert int(result["result"][0]) > 0
         result = bes_conn.session_relevance_json(
-            """("[%22" & it & "%22]") of concatenation "%22, %22" of names of bes computers"""
+            """("[%22" & it & "%22]") of concatenation "%22, %22" of names of all bes sites"""
         )
         assert result is not None
         string_first_result_json = result["result"][0]
         print(string_first_result_json)
         assert '", "' in string_first_result_json
         assert '["' in string_first_result_json
-        # NOTE: the following check is specific to my env:
-        if "10.0." in bes_conn.rootserver:
-            print("doing check specific to my env")
-            assert '", "BIGFIX", "' in string_first_result_json
+        assert '"BES Support"' in string_first_result_json
 
         print("testing session_relevance_json_array")
-        result = bes_conn.session_relevance_json_array("number of bes computers")
+        result = bes_conn.session_relevance_json_array("number of all bes sites")
         print(result)
         assert result is not None
         assert int(result[0]) > 0
         print("testing session_relevance_json_string")
-        result = bes_conn.session_relevance_json_string("number of bes computers")
+        result = bes_conn.session_relevance_json_string("number of all bes sites")
         print(result)
         assert result is not None
         assert int(result) > 0
         print("testing session_relevance_json_string tuple")
         result = bes_conn.session_relevance_json_string(
-            '(ids of it, names of it, "TestString") of bes computers'
+            '(ids of it, names of it, "TestString") of all bes sites'
         )
         print(result)
         assert result is not None
         assert "TestString" in result
-        # NOTE: the following check is specific to my env:
-        if "10.0." in bes_conn.rootserver:
-            print("doing check specific to my env")
-            assert "BIGFIX" in result
+        assert "BES Support" in result
     else:
         pytest.skip("Skipping BESConnection test, no config file or login failed.")
 
