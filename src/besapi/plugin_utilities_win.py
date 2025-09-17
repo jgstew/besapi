@@ -170,7 +170,7 @@ def get_win_registry_rest_pass() -> Union[str, None]:
 
     if reg_value and len(reg_value) > 50:
         password = win_dpapi_decrypt_base64(reg_value)
-        if len(password) > 3:
+        if password and len(password) > 3:
             return password
 
     logger.debug("Decryption failed or decrypted password length is too short.")
