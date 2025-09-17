@@ -243,9 +243,9 @@ def test_plugin_utilities_win_get_besconn_root_windows_registry():
     if not os.name == "nt":
         pytest.skip("Skipping Windows Registry test on non-Windows system.")
 
-    # # only run this test if besapi > v3.9.1:
-    # if besapi.besapi.__version__ <= "3.9.1":
-    #     pytest.skip("Skipping test for besapi <= 3.9.1")
+    # only run this test if besapi > v3.9.1:
+    if besapi.besapi.__version__ <= "3.9.1":
+        pytest.skip("Skipping test for besapi <= 3.9.1")
 
     # get env vars for testing:
     root_server = os.getenv("BES_ROOT_SERVER")
