@@ -9,7 +9,7 @@ Other candidates for eval mime field addition due to slow relevance:
 - anything examining log files
   - (it as lowercase contains ".log%22" AND it as lowercase contains " lines ")
 - anything examining large files
-- things enumerating `active devices` or `smbios`
+- things enumerating `of active device` or `of smbios`
 - things enumerating the PATH environment variable or other environment variables with many entries
   - ` substrings separated by (";";":") of values of (variables "PATH" of it`
 - complicated xpaths of many files
