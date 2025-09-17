@@ -14,6 +14,7 @@ Other candidates for eval mime field addition due to slow relevance:
   - ` substrings separated by (";";":") of values of (variables "PATH" of it`
 - complicated xpaths of many files
 - getting maximum or maxima of modification times of files
+- ` of scheduled tasks`
 - ` of folders of folders `
 - ` image files of processes `
 - `(now - modification time of it) < `
