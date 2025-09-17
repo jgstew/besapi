@@ -10,6 +10,7 @@ import logging.handlers
 import ntpath
 import os
 import sys
+from typing import Union
 
 import besapi
 
@@ -131,21 +132,33 @@ def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
     }
 
 
-def get_besapi_connection(args):
-    """Get connection to besapi using either args or config file if args not
-    provided.
-    """
-    if os.name == "nt":
-        bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
-        if bes_conn:
-            return bes_conn
+def get_besapi_connection_env_then_config():
+    """Get connection to besapi using env vars first, then config file."""
+    logging.info("attempting connection to BigFix using ENV method.")
+    # try to get connection from env vars:
+    bes_conn = besapi.besapi.get_bes_conn_using_env()
+    if bes_conn:
+        return bes_conn
 
-    password = args.password
+    logging.info("attempting connection to BigFix using config file method.")
+    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    return bes_conn
+
+
+def get_besapi_connection_args(
+    args: Union[argparse.Namespace, None] = None,
+) -> Union[besapi.besapi.BESConnection, None]:
+    """"""
+    password = None
+    bes_conn = None
+    if args.password:
+        password = args.password
 
     # if user was provided as arg but password was not:
     if args.user and not password:
         if os.name == "nt":
             # attempt to get password from windows root server registry:
+            # this is specifically for the case where user is provided for a plugin
             password = besapi.plugin_utilities_win.get_win_registry_rest_pass()
 
     # if user was provided as arg but password was not:
@@ -168,13 +181,13 @@ def get_besapi_connection(args):
     if args.user and password:
         try:
             if not rest_url:
-                raise AttributeError
+                raise AttributeError("args.rest_url is not set.")
             bes_conn = besapi.besapi.BESConnection(args.user, password, rest_url)
         except (
             AttributeError,
             ConnectionRefusedError,
             besapi.besapi.requests.exceptions.ConnectionError,
-        ):
+        ) as e:
             logging.exception(
                 "connection to `%s` failed, attempting `%s` instead",
                 rest_url,
@@ -182,7 +195,7 @@ def get_besapi_connection(args):
             )
             try:
                 if not args.besserver:
-                    raise AttributeError
+                    raise AttributeError("args.besserver is not set.") from e
                 bes_conn = besapi.besapi.BESConnection(
                     args.user, password, args.besserver
                 )
@@ -195,7 +208,7 @@ def get_besapi_connection(args):
                 )
                 return None
             except BaseException as err:
-                # always log error and stop the current process
+                # always log error
                 logging.exception("ERROR: %s", err)
                 logging.exception(
                     "----- ERROR: BigFix Connection Failed! Unknown reason ------"
@@ -203,8 +216,46 @@ def get_besapi_connection(args):
                 return None
     else:
         logging.info(
-            "attempting connection to BigFix using config file method as user command arg was not provided"
+            "No user arg provided, no password found. Cannot create connection."
         )
-        bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+        return None
+
+    return bes_conn
+
+
+def get_besapi_connection(
+    args: Union[argparse.Namespace, None] = None,
+) -> Union[besapi.besapi.BESConnection, None]:
+    """Get connection to besapi.
+
+    If on Windows, will attempt to get connection from Windows Registry first.
+    If args provided, will attempt to get connection using provided args.
+    If no args provided, will attempt to get connection from env vars.
+    If no env vars, will attempt to get connection from config file.
+
+    Arguments:
+        args: argparse.Namespace object, usually from setup_plugin_argparse()
+    Returns:
+        A BESConnection object if successful, otherwise None.
+    """
+    # if windows, try to get connection from windows registry:
+    if os.name == "nt":
+        bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
+        if bes_conn:
+            return bes_conn
+
+    # if no args provided, try to get connection from env then config file:
+    if not args:
+        logging.info("no args provided, attempting connection using env then config.")
+        return get_besapi_connection_env_then_config()
+
+    # attempt bigfix connection with provided args:
+    if args.user:
+        bes_conn = get_besapi_connection_args(args)
+    else:
+        logging.info(
+            "no user arg provided, attempting connection using env then config."
+        )
+        return get_besapi_connection_env_then_config()
 
     return bes_conn

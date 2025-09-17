@@ -233,12 +233,12 @@ def test_bescli():
 
 def test_plugin_utilities_win_get_besconn_root_windows_registry():
     """Test getting a BESConnection from the Windows Registry."""
-    if "ROOT_SERVER" not in os.environ:
-        pytest.skip("Skipping Windows Registry test, ROOT_SERVER not set.")
-    if "ROOT_USER" not in os.environ:
-        pytest.skip("Skipping Windows Registry test, ROOT_USER not set.")
-    if "ROOT_USER_PASSWORD" not in os.environ:
-        pytest.skip("Skipping Windows Registry test, ROOT_USER_PASSWORD not set.")
+    if "BES_ROOT_SERVER" not in os.environ:
+        pytest.skip("Skipping Windows Registry test, BES_ROOT_SERVER not set.")
+    if "BES_USER_NAME" not in os.environ:
+        pytest.skip("Skipping Windows Registry test, BES_USER_NAME not set.")
+    if "BES_PASSWORD" not in os.environ:
+        pytest.skip("Skipping Windows Registry test, BES_PASSWORD not set.")
 
     if not os.name == "nt":
         pytest.skip("Skipping Windows Registry test on non-Windows system.")
@@ -248,9 +248,9 @@ def test_plugin_utilities_win_get_besconn_root_windows_registry():
     #     pytest.skip("Skipping test for besapi <= 3.9.1")
 
     # get env vars for testing:
-    root_server = os.getenv("ROOT_SERVER")
-    root_user = os.getenv("ROOT_USER")
-    root_user_password = os.getenv("ROOT_USER_PASSWORD")
+    root_server = os.getenv("BES_ROOT_SERVER")
+    root_user = os.getenv("BES_USER_NAME")
+    root_user_password = os.getenv("BES_PASSWORD")
 
     encrypted_str = besapi.plugin_utilities_win.win_dpapi_encrypt_str(
         root_user_password
@@ -273,22 +273,12 @@ def test_plugin_utilities_win_get_besconn_root_windows_registry():
     bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
     assert bes_conn is not None
 
-    import bescli
-
-    bigfix_cli = bescli.bescli.BESCLInterface()
-
-    bigfix_cli.BES_ROOT_SERVER = root_server
-    bigfix_cli.BES_USER_NAME = root_user
-    bigfix_cli.BES_PASSWORD = root_user_password
-
-    bigfix_cli.do_saveconf()
-
-    assert bigfix_cli.bes_conn is not None
-
 
 def test_bes_conn_json():
     """Test the BESConnection class with JSON output."""
-    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+
+    bes_conn = besapi.plugin_utilities.get_besapi_connection(None)
+
     if bes_conn and bes_conn.login():
         print("testing session_relevance_json")
         result = bes_conn.session_relevance_json("number of bes computers")

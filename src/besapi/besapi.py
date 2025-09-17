@@ -283,6 +283,20 @@ def validate_xml_bes_file(file_path):
     return validate_xsd(file_data)
 
 
+def get_bes_conn_using_env():
+    """Get BESConnection using environment variables."""
+    username = os.getenv("BES_USER_NAME")
+    password = os.getenv("BES_PASSWORD")
+    rootserver = os.getenv("BES_ROOT_SERVER")
+
+    if username and password and rootserver:
+        bes_conn = BESConnection(username, password, rootserver)
+        if bes_conn:
+            return bes_conn
+
+    return None
+
+
 def get_bes_conn_using_config_file(conf_file=None):
     """
     Read connection values from config file.
