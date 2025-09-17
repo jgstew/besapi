@@ -146,11 +146,12 @@ def get_besapi_connection_env_then_config():
 
 
 def get_besapi_connection_args(
-    args: Union[argparse.Namespace, None] = None,
+    args: argparse.Namespace,
 ) -> Union[besapi.besapi.BESConnection, None]:
-    """"""
+    """Get connection to besapi using provided args."""
     password = None
     bes_conn = None
+
     if args.password:
         password = args.password
 
