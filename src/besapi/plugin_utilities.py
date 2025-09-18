@@ -208,7 +208,7 @@ def get_besapi_connection_args(
                     "attempts to connect to BigFix using rest_url and besserver both failed"
                 )
                 return None
-            except BaseException as err:
+            except BaseException as err:  # pylint: disable=broad-exception-caught
                 # always log error
                 logging.exception("ERROR: %s", err)
                 logging.exception(

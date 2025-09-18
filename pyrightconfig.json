@@ -1,0 +1,11 @@
+{
+  "include": ["src"],
+  "exclude": [".venv", "tests"],
+  "pythonVersion": "3.9",
+  "venv": "my_project_venv",
+  "venvPath": "./.venv",
+  "reportMissingImports": true,
+  "reportUnusedImport": "warning",
+  "reportOptionalMemberAccess": "none",
+  "reportAttributeAccessIssue": "none"
+}

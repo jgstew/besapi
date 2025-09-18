@@ -500,7 +500,7 @@ class BESCLInterface(Cmd):
     def do_update_item(self, file_path):
         """Update bigfix content item from bes file."""
         if not os.access(file_path, os.R_OK):
-            self.poutput(file_path, "is not a readable file")
+            self.poutput(file_path, " is not a readable file")
         else:
             self.poutput(self.bes_conn.update_item_from_file(file_path))
 

@@ -23,7 +23,7 @@ except (ImportError, ModuleNotFoundError) as e:
         raise e
 
 try:
-    import win32crypt
+    import win32crypt  # type: ignore[import]
 except (ImportError, ModuleNotFoundError) as e:
     if not sys.platform.startswith("win"):
         raise RuntimeError("This script only works on Windows systems") from e
@@ -141,7 +141,7 @@ def win_registry_value_read(hive, subkey, value_name):
     except FileNotFoundError:
         logger.debug("Registry key or value '%s\\%s' not found.", subkey, value_name)
         return None
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("An error occurred: %s", e)
         return None
 
@@ -203,14 +203,11 @@ def get_besconn_root_windows_registry() -> Union[besapi.besapi.BESConnection, No
         return None
 
     # normalize url to https://HostOrIP:52311
-    if rest_url and rest_url.endswith("/api"):
+    if rest_url.endswith("/api"):
         rest_url = rest_url.replace("/api", "")
 
-    if user and password and rest_url:
-        try:
-            return besapi.besapi.BESConnection(user, password, rest_url)
-        except Exception as e:
-            logger.error("Failed to create BESConnection from registry values: %s", e)
-            return None
-
-    return None
+    try:
+        return besapi.besapi.BESConnection(user, password, rest_url)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to create BESConnection from registry values: %s", e)
+        return None
