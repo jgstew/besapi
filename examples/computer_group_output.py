@@ -66,6 +66,13 @@ def get_invoke_file_name(verbose=0):
     return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
+def string_truncate(text, max_length=70):
+    """Truncate a string to a maximum length and append ellipsis if truncated."""
+    if len(text) > max_length:
+        return text[:max_length] + "..."
+    return text
+
+
 def main():
     """Execution starts here."""
     print("main() start")
@@ -117,7 +124,7 @@ def main():
             continue
 
         logging.debug("GroupName: %s", group_name)
-        logging.debug("GroupMembers: %s", group_members_str)
+        logging.debug("GroupMembers: %s", string_truncate(group_members_str))
 
         # split group_members_str on member_join_str
         group_members = group_members_str.split(member_join_str)
