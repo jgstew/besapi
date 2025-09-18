@@ -13,7 +13,9 @@ import sys
 from typing import Union
 
 import besapi
-import besapi.plugin_utilities_win
+
+if os.name == "nt":
+    import besapi.plugin_utilities_win
 
 
 # NOTE: This does not work as expected when run from plugin_utilities
