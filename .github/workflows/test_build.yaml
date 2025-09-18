@@ -77,7 +77,7 @@ jobs:
       - name: Get Wheel File Path
         id: getwheelfile
         shell: bash
-        run: echo "::set-output name=wheelfile::$(find "dist" -type f -name "*.whl")"
+        run: echo "wheelfile=$(find "dist" -type f -name "*.whl")" >> $GITHUB_OUTPUT
 
       - name: Test pip install of wheel
         shell: bash
