@@ -4,6 +4,7 @@ This module besapi provides a simple interface to the BigFix REST API.
 
 MIT License
 Copyright (c) 2014 Matt Hansen
+Copyright (c) 2021 James Stewart
 Maintained by James Stewart since 2021
 
 Library for communicating with the BES (BigFix) REST API.
