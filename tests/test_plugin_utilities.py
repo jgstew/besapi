@@ -13,6 +13,7 @@ from besapi import plugin_utilities
 
 
 def test_setup_plugin_argparse_defaults():
+    """Test that default args are set correctly."""
     parser = plugin_utilities.setup_plugin_argparse(plugin_args_required=False)
     # ensure parser returns expected arguments when not required
     args = parser.parse_args([])
@@ -25,6 +26,7 @@ def test_setup_plugin_argparse_defaults():
 
 
 def test_setup_plugin_argparse_required_flags():
+    """Test that required args cause SystemExit when missing."""
     parser = plugin_utilities.setup_plugin_argparse(plugin_args_required=True)
     # when required, missing required args should cause SystemExit
     with pytest.raises(SystemExit):
@@ -32,6 +34,7 @@ def test_setup_plugin_argparse_required_flags():
 
 
 def test_get_plugin_args_parses_known_args(monkeypatch):
+    """Test that known command line args are parsed correctly."""
     # simulate command line args
     monkeypatch.setattr(
         sys,
@@ -54,3 +57,4 @@ def test_get_plugin_args_parses_known_args(monkeypatch):
     assert args.rest_url == "https://example:52311"
     assert args.user == "me"
     assert args.password == "pw"
+    assert args.besserver is None

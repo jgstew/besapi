@@ -8,6 +8,7 @@ from besapi import plugin_utilities
 
 
 def test_get_plugin_logging_config_default(tmp_path, capsys):
+    """Test default logging config with no verbosity and no console."""
     # Use an explicit log file path in a temp dir to avoid touching real files
     log_file = tmp_path / "test.log"
 
@@ -26,6 +27,7 @@ def test_get_plugin_logging_config_default(tmp_path, capsys):
 
 
 def test_get_plugin_logging_config_verbose_and_console(tmp_path, capsys):
+    """Test logging config with verbosity and console logging."""
     # ensure the function prints info when verbose and console True
     log_file = tmp_path / "test2.log"
 
@@ -48,6 +50,7 @@ def test_get_plugin_logging_config_verbose_and_console(tmp_path, capsys):
 
 
 def test_get_plugin_logging_config_debug_level(tmp_path):
+    """Test logging config with debug level verbosity."""
     log_file = tmp_path / "test3.log"
 
     cfg = plugin_utilities.get_plugin_logging_config(
