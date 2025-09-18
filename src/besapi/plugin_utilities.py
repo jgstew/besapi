@@ -92,6 +92,13 @@ def setup_plugin_argparse(plugin_args_required=False):
     return arg_parser
 
 
+def get_plugin_args(plugin_args_required=False):
+    """Get basic args for plugin use."""
+    arg_parser = setup_plugin_argparse(plugin_args_required)
+    args, _unknown = arg_parser.parse_known_args()
+    return args
+
+
 def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
     """Get config for logging for plugin use.
 

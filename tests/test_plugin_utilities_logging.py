@@ -1,0 +1,58 @@
+import logging
+import os
+import tempfile
+
+import pytest
+
+from besapi import plugin_utilities
+
+
+def test_get_plugin_logging_config_default(tmp_path, capsys):
+    # Use an explicit log file path in a temp dir to avoid touching real files
+    log_file = tmp_path / "test.log"
+
+    cfg = plugin_utilities.get_plugin_logging_config(
+        str(log_file), verbose=0, console=False
+    )
+
+    # handlers should include a RotatingFileHandler only
+    handlers = cfg.get("handlers")
+    assert handlers, "handlers should be present"
+    assert len(handlers) == 1
+    assert isinstance(handlers[0], logging.handlers.RotatingFileHandler)
+
+    # level should be WARNING when verbose=0
+    assert cfg.get("level") == logging.WARNING
+
+
+def test_get_plugin_logging_config_verbose_and_console(tmp_path, capsys):
+    # ensure the function prints info when verbose and console True
+    log_file = tmp_path / "test2.log"
+
+    cfg = plugin_utilities.get_plugin_logging_config(
+        str(log_file), verbose=1, console=True
+    )
+
+    handlers = cfg.get("handlers")
+    # should have file handler + stream handler
+    assert any(isinstance(h, logging.handlers.RotatingFileHandler) for h in handlers)
+    assert any(isinstance(h, logging.StreamHandler) for h in handlers)
+
+    # verbose=1 -> INFO
+    assert cfg.get("level") == logging.INFO
+
+    # get printed output
+    captured = capsys.readouterr()
+    assert "INFO: Log File Path:" in captured.out
+    assert "INFO: also logging to console" in captured.out
+
+
+def test_get_plugin_logging_config_debug_level(tmp_path):
+    log_file = tmp_path / "test3.log"
+
+    cfg = plugin_utilities.get_plugin_logging_config(
+        str(log_file), verbose=2, console=False
+    )
+
+    # verbose>1 -> DEBUG
+    assert cfg.get("level") == logging.DEBUG

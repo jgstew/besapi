@@ -8,6 +8,7 @@ import json
 import time
 
 import besapi
+import besapi.plugin_utilities
 
 session_relevance_array = ["True", "number of integers in (1,10000000)"]
 
@@ -60,8 +61,11 @@ def string_truncate(text, max_length=70):
 def main():
     """Execution starts here."""
     print("main()")
-    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
-    bes_conn.login()
+    # requires besapi v3.9.5 or later:
+    bes_conn = besapi.plugin_utilities.get_besapi_connection(
+        # besapi.plugin_utilities.get_plugin_args()
+    )
+    # bes_conn.login()
 
     iterations = 2
 
