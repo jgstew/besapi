@@ -127,6 +127,8 @@ def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
         )
     ]
 
+    logging.addLevelName(99, "SESSION")
+
     # log output to console if arg provided:
     if console:
         handlers.append(logging.StreamHandler())

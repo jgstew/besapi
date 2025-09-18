@@ -1,8 +1,15 @@
 import logging
 import os
+import sys
 import tempfile
 
 import pytest
+
+# Ensure the local `src/` is first on sys.path so tests import the workspace package
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
 from besapi import plugin_utilities
 
@@ -59,3 +66,13 @@ def test_get_plugin_logging_config_debug_level(tmp_path):
 
     # verbose>1 -> DEBUG
     assert cfg.get("level") == logging.DEBUG
+
+
+def test_plugin_logging_config_registers_session_level(tmp_path):
+    """Test that get_plugin_logging_config registers the custom SESSION log level
+    (99).
+    """
+    log_file = tmp_path / "test_session.log"
+    plugin_utilities.get_plugin_logging_config(str(log_file), verbose=0, console=False)
+    # After calling, the level name for 99 should be 'SESSION'
+    assert logging.getLevelName(99) == "SESSION"
