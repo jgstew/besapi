@@ -102,7 +102,7 @@ def main():
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
     member_join_str = ";;;"
-    session_relevance = f"""(item 0 of it & ": " & item 1 of it, item 2 of it) of ( ( (if automatic flag of it then "Automatic" else NOTHING) ; (if manual flag of it then "Manual" else NOTHING) ; (if server based flag of it then "Server" else NOTHING) ), names of it, concatenations "{member_join_str}" of names of members of it ) of bes computer groups"""
+    session_relevance = f"""(item 0 of it & " - " & item 1 of it, item 2 of it) of ( ( (if automatic flag of it then "Automatic" else NOTHING) ; (if manual flag of it then "Manual" else NOTHING) ; (if server based flag of it then "Server" else NOTHING) ), names of it, concatenations "{member_join_str}" of names of members of it ) of bes computer groups"""
 
     logging.info("Getting computer group membership information")
     results = bes_conn.session_relevance_json(session_relevance)
