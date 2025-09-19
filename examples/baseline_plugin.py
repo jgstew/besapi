@@ -238,7 +238,7 @@ def create_baseline_from_site(site):
 
 
 def process_baselines(config):
-    """Generate baselines."""
+    """Generate baselines for each site in config."""
 
     for site in config:
         create_baseline_from_site(site)

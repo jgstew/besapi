@@ -93,7 +93,7 @@ def baseline_sync(baseline_id, site_path):
 
 
 def process_baseline(baseline_id, site_path):
-    """Process a single baseline."""
+    """Check a single baseline if it needs syncing."""
     logging.info("Processing baseline: %s/%s", site_path, baseline_id)
 
     # get baseline xml:
@@ -109,7 +109,7 @@ def process_baseline(baseline_id, site_path):
 
 
 def process_site(site_path):
-    """Process a single site."""
+    """Process a single site to find baselines to check."""
     logging.info("Processing site: %s", site_path)
 
     # get site name from end of path:
