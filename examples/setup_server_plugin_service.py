@@ -153,7 +153,6 @@ def main():
         besapi.besapi.requests.exceptions.ConnectionError,
     ):
         try:
-            # print(args.besserver)
             bes_conn = besapi.besapi.BESConnection(args.user, password, args.besserver)
         # handle case where args.besserver is None
         # AttributeError: 'NoneType' object has no attribute 'startswith'

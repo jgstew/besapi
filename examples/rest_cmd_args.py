@@ -38,9 +38,7 @@ def main():
 
     try:
         bes_conn = besapi.besapi.BESConnection(args.user, args.password, rest_url)
-        # bes_conn.login()
     except (ConnectionRefusedError, besapi.besapi.requests.exceptions.ConnectionError):
-        # print(args.besserver)
         bes_conn = besapi.besapi.BESConnection(args.user, args.password, args.besserver)
 
     # get unique device OSes

@@ -738,8 +738,9 @@ class BESConnection:
             besapi_logger.warning("User `%s` Already Exists!", new_user_name)
             return result_user
         besapi_logger.info("Creating User `%s`", new_user_name)
-        _ = self.post("operators", lxml.etree.tostring(xml_parsed))
-        # print(user_result)
+        user_result = self.post("operators", lxml.etree.tostring(xml_parsed))
+        logging.debug("user creation result:\n%s", user_result)
+
         return self.get_user(new_user_name)
 
     def get_computergroup(self, group_name, site_path=None):
@@ -771,7 +772,11 @@ class BESConnection:
 
         # print(lxml.etree.tostring(xml_parsed))
 
-        _ = self.post(f"computergroups/{site_path}", lxml.etree.tostring(xml_parsed))
+        create_group_result = self.post(
+            f"computergroups/{site_path}", lxml.etree.tostring(xml_parsed)
+        )
+
+        logging.debug("group creation result:\n%s", create_group_result)
 
         return self.get_computergroup(site_path, new_group_name)
 
@@ -796,7 +801,7 @@ class BESConnection:
             raise ValueError("No file_name specified. Must be at least one character.")
 
         if "Upload not found" in result.text:
-            # print("WARNING: Upload not found!")
+            logging.debug("WARNING: Upload not found!")
             return None
 
         return result

@@ -270,7 +270,7 @@ def main():
             # skip, already has mime field
             continue
 
-        # print(updated_xml)
+        logging.debug("updated_xml:\n%s", updated_xml)
 
         update_result = put_updated_xml(
             bes_conn, fixlet_site_name, fixlet_id, updated_xml
