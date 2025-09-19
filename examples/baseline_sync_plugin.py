@@ -90,6 +90,7 @@ def baseline_sync(baseline_id, site_path):
     logging.debug("Sync results: %s", results.text)
 
     logging.info("Baseline %s/%s synced successfully", site_path, baseline_id)
+    return results.text
 
 
 def process_baseline(baseline_id, site_path):
@@ -106,6 +107,7 @@ def process_baseline(baseline_id, site_path):
         return baseline_sync(baseline_id, site_path)
     else:
         logging.info("Baseline %s/%s is in sync", site_path, baseline_id)
+        return baseline_xml
 
 
 def process_site(site_path):
@@ -169,6 +171,8 @@ def main():
     results = bes_conn.session_relevance_json(session_relevance)
 
     logging.info("Processing %i custom sites with baselines", len(results["result"]))
+
+    logging.debug("Custom sites with baselines:\n%s", results["result"])
 
     for site in results["result"]:
         try:
