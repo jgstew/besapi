@@ -26,7 +26,7 @@ import lxml.etree
 import lxml.objectify
 import requests
 
-__version__ = "3.9.6"
+__version__ = "3.9.7"
 
 besapi_logger = logging.getLogger("besapi")
 
