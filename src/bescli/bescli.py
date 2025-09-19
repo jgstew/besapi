@@ -390,7 +390,7 @@ class BESCLInterface(Cmd):
         if not self.bes_conn:
             self.do_login()
         if not self.bes_conn:
-            self.poutput("ERROR: can't check without login")
+            self.perror("ERROR: can't check without login")
         else:
             self.poutput(f"Am I Main Operator? {self.bes_conn.am_i_main_operator()}")
 
