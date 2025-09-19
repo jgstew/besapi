@@ -399,7 +399,7 @@ class BESCLInterface(Cmd):
         if not self.bes_conn:
             self.do_login()
         if not self.bes_conn:
-            self.poutput("ERROR: can't query without login")
+            self.perror("ERROR: can't query without login")
         else:
             if statement.raw:
                 # get everything after `query `
