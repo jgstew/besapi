@@ -11,7 +11,7 @@ on:
 
 jobs:
   test_build_baseline_plugin:
-    needs: build_baseline_plugin_rhel
+    # needs: build_baseline_plugin_rhel
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

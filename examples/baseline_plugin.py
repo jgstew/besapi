@@ -89,7 +89,7 @@ def test_file_exists(path):
 
 
 def create_baseline_from_site(site):
-    """Create a patching baseline from a site name.
+    """Create a patching baseline from a site config.
 
     References:
     - https://github.com/jgstew/besapi/blob/master/examples/baseline_by_relevance.py
@@ -191,8 +191,6 @@ def create_baseline_from_site(site):
         if auto_remediate:
             baseline_id = import_result.besobj.Baseline.ID
 
-            logging.info("creating baseline offer action...")
-
             # get targeting xml with relevance
             # target only machines currently relevant
             target_rel = f'("<ComputerID>" & it & "</ComputerID>") of concatenations "</ComputerID><ComputerID>" of (it as string) of ids of elements of unions of applicable computer sets of it whose(exists default action of it AND globally visible flag of it AND name of it does not contain "(Superseded)") of {fixlets_rel}'
@@ -204,10 +202,13 @@ def create_baseline_from_site(site):
             offer_action = site["offer_action"] if "offer_action" in site else True
 
             if offer_action:
+                logging.info("creating baseline offer action...")
                 offer_xml = """<IsOffer>true</IsOffer>
             <AnnounceOffer>false</AnnounceOffer>
             <OfferCategory>Remediation</OfferCategory>
             <OfferDescriptionHTML><![CDATA[Offer to remediate issues.]]></OfferDescriptionHTML>"""
+            else:
+                logging.info("creating baseline action...")
 
             BES_SourcedFixletAction = f"""\
         <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
