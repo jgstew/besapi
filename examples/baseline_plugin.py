@@ -269,7 +269,7 @@ def main():
 
     logging.basicConfig(**logging_config)
 
-    logging.info("----- Starting New Session ------")
+    logging.log(99, "----- Starting New Session ------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("Python version: %s", platform.sys.version)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -296,8 +296,7 @@ def main():
     else:
         logging.info("Trigger File Does Not Exists, skipping execution!")
 
-    logging.info("----- Ending Session ------")
-    print("main() End")
+    logging.log(99, "----- Ending Session ------")
 
 
 if __name__ == "__main__":

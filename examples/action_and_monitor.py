@@ -361,7 +361,7 @@ def main():
 
     logging.basicConfig(**logging_config)
 
-    logging.info("---------- Starting New Session -----------")
+    logging.log(99, "---------- Starting New Session -----------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("%s's version: %s", get_invoke_file_name(verbose), __version__)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -375,7 +375,7 @@ def main():
 
         action_and_monitor(bes_conn, args.file, targets)
 
-        logging.info("---------- END -----------")
+        logging.log(99, "---------- END -----------")
     except Exception as err:
         logging.error("An error occurred: %s", err)
         sys.exit(1)

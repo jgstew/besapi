@@ -94,13 +94,17 @@ def main():
 
     print(log_file_path)
 
+    if not verbose or verbose == 0:
+        verbose = 1
+
+    # always print to console:
     logging_config = besapi.plugin_utilities.get_plugin_logging_config(
-        log_file_path, verbose, args.console
+        log_file_path, verbose, True
     )
 
     logging.basicConfig(**logging_config)
 
-    logging.info("---------- Starting New Session -----------")
+    logging.log(99, "---------- Starting New Session -----------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("Python version: %s", platform.sys.version)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -109,7 +113,7 @@ def main():
     bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
 
     # get the ~10 most recent computers to report into BigFix:
-    session_relevance = 'tuple string items (integers in (0,9)) of concatenations ", " of (it as string) of ids of bes computers whose(now - last report time of it < 25 * minute)'
+    session_relevance = 'tuple string items (integers in (0,9)) of concatenations ", " of (it as string) of ids of bes computers whose(now - last report time of it < 90 * minute)'
 
     data = {"output": "json", "relevance": session_relevance}
 
@@ -118,11 +122,7 @@ def main():
 
     json_result = json.loads(str(result))
 
-    # json_string = json.dumps(json_result, indent=2)
-    # print(json_string)
-
-    # for item in json_result["result"]:
-    #     print(item)
+    logging.debug("computer ids to target with query: %s", json_result["result"])
 
     # this is the client relevance we are going to get the results of:
     client_relevance = args.query
@@ -145,13 +145,16 @@ def main():
 </ClientQuery>
 </BESAPI>"""
 
-    # print(query_payload)
+    logging.debug("query_payload: %s", query_payload)
 
     # send the client query: (need it's ID to get results)
     query_submit_result = bes_conn.post(bes_conn.url("clientquery"), data=query_payload)
 
-    # print(query_submit_result)
-    # print(query_submit_result.besobj.ClientQuery.ID)
+    client_query_id = query_submit_result.besobj.ClientQuery.ID
+
+    logging.debug("query_submit_result: %s", query_submit_result)
+
+    logging.debug("client_query_id: %s", client_query_id)
 
     previous_result = ""
     i = 0
@@ -161,15 +164,13 @@ def main():
             print("... waiting for results ... Ctrl+C to quit loop")
 
             # TODO: loop this to keep getting more results until all return or any key pressed
-            time.sleep(10)
+            time.sleep(20)
 
             # get the actual results:
             # NOTE: this might not return anything if no clients have returned results
             #       this can be checked again and again for more results:
             query_result = bes_conn.get(
-                bes_conn.url(
-                    f"clientqueryresults/{query_submit_result.besobj.ClientQuery.ID}"
-                )
+                bes_conn.url(f"clientqueryresults/{client_query_id}")
             )
 
             if previous_result != str(query_result):
@@ -181,12 +182,15 @@ def main():
             # if not running interactively:
             # https://stackoverflow.com/questions/2356399/tell-if-python-is-in-interactive-mode
             if not sys.__stdin__.isatty():
-                print("not interactive, stopping loop")
+                logging.info("not interactive, stopping loop")
                 break
     except KeyboardInterrupt:
-        print("\nloop interrupted by user")
+        logging.info("\nloop interrupted by user")
 
-    print("script finished")
+    # log only final result:
+    logging.info(previous_result)
+
+    logging.log(99, "---------- Ended Session -----------")
 
 
 if __name__ == "__main__":

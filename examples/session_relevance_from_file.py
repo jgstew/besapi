@@ -95,7 +95,7 @@ def main():
 
     logging.basicConfig(**logging_config)
 
-    logging.info("---------- Starting New Session -----------")
+    logging.log(99, "---------- Starting New Session -----------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("%s's version: %s", get_invoke_file_name(verbose), __version__)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -114,7 +114,7 @@ def main():
     with open("examples/session_relevance_query_output.txt", "w") as file_out:
         file_out.write(result)
 
-    logging.info("---------- END -----------")
+    logging.log(99, "---------- END -----------")
 
 
 if __name__ == "__main__":

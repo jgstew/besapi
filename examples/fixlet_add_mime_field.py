@@ -228,7 +228,7 @@ def main():
 
     logging.basicConfig(**logging_config)
 
-    logging.info("---------- Starting New Session -----------")
+    logging.log(99, "---------- Starting New Session -----------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("%s's version: %s", get_invoke_file_name(verbose), __version__)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -279,7 +279,7 @@ def main():
         if update_result is not None:
             logging.info("Updated fixlet %d in site %s", fixlet_id, fixlet_site_name)
 
-    logging.info("---------- Ending Session -----------")
+    logging.log(99, "---------- Ending Session -----------")
 
 
 if __name__ == "__main__":

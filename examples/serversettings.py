@@ -189,7 +189,7 @@ def main():
         format="%(asctime)s %(levelname)s:%(message)s",
         handlers=handlers,
     )
-    logging.info("----- Starting New Session ------")
+    logging.log(99, "----- Starting New Session ------")
     logging.debug("invoke folder: %s", invoke_folder)
     logging.debug("Python version: %s", platform.sys.version)
     logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
@@ -239,8 +239,7 @@ def main():
 
     logging.info(rest_result)
 
-    logging.info("----- Ending Session ------")
-    print("main() End")
+    logging.log(99, "----- Ending Session ------")
 
 
 if __name__ == "__main__":
