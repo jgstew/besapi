@@ -320,6 +320,9 @@ def test_bes_conn_upload_always():
     """Test the BESConnection class with JSON output."""
     file_name = "LICENSE.txt"
     file_path = "../" + file_name
+    if not os.path.isfile(os.path.abspath(file_path)):
+        # handle case where not running from src or tests folder.
+        file_path = "./" + file_name
     assert os.path.isfile(os.path.abspath(file_path))
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(None)
