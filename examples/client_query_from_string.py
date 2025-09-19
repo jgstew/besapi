@@ -170,11 +170,12 @@ def main():
             # NOTE: this might not return anything if no clients have returned results
             #       this can be checked again and again for more results:
             query_result = bes_conn.get(
-                bes_conn.url(f"clientqueryresults/{client_query_id}")
+                bes_conn.url(f"clientqueryresults/{client_query_id}?output=json")
             )
 
             if previous_result != str(query_result):
-                print(query_result)
+                json_result = json.loads(str(query_result))
+                print(json.dumps(json_result["results"], indent=2))
                 previous_result = str(query_result)
 
             i += 1
@@ -185,10 +186,10 @@ def main():
                 logging.info("not interactive, stopping loop")
                 break
     except KeyboardInterrupt:
-        logging.info("\nloop interrupted by user")
+        logging.info(" ** loop interrupted by user **")
 
     # log only final result:
-    logging.info(previous_result)
+    logging.info(" -- final results:\n%s", json.dumps(json_result["results"], indent=2))
 
     logging.log(99, "---------- Ended Session -----------")
 
