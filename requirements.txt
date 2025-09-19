@@ -3,3 +3,4 @@ lxml
 pywin32 ; sys_platform=="win32"
 requests
 setuptools
+urllib3 >= 2.2.3

@@ -25,6 +25,7 @@ import urllib.parse
 import lxml.etree
 import lxml.objectify
 import requests
+import urllib3.poolmanager
 
 __version__ = "3.9.8"
 
@@ -115,44 +116,6 @@ def parse_bes_modtime(string_datetime):
     """Parse datetime string to object."""
     # ("%a, %d %b %Y %H:%M:%S %z")
     return datetime.datetime.strptime(string_datetime, "%a, %d %b %Y %H:%M:%S %z")
-
-
-# import urllib3.poolmanager
-# # https://docs.python-requests.org/en/latest/user/advanced/#transport-adapters
-# class HTTPAdapterBiggerBlocksize(requests.adapters.HTTPAdapter):
-#     """custom HTTPAdapter for requests to override blocksize
-#     for Uploading or Downloading large files"""
-
-#     # override init_poolmanager from regular HTTPAdapter
-#     # https://stackoverflow.com/questions/22915295/python-requests-post-and-big-content/22915488#comment125583017_22915488
-#     def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
-#         """Initializes a urllib3 PoolManager.
-
-#         This method should not be called from user code, and is only
-#         exposed for use when subclassing the
-#         :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.
-
-#         :param connections: The number of urllib3 connection pools to cache.
-#         :param maxsize: The maximum number of connections to save in the pool.
-#         :param block: Block when no free connections are available.
-#         :param pool_kwargs: Extra keyword arguments used to initialize the Pool Manager.
-#         """
-#         # save these values for pickling
-#         self._pool_connections = connections
-#         self._pool_maxsize = maxsize
-#         self._pool_block = block
-
-#         # This doesn't work until urllib3 is updated to a future version:
-#         # updating blocksize to be larger:
-#         # pool_kwargs["blocksize"] = 8 * 1024 * 1024
-
-#         self.poolmanager = urllib3.poolmanager.PoolManager(
-#             num_pools=connections,
-#             maxsize=maxsize,
-#             block=block,
-#             strict=True,
-#             **pool_kwargs,
-#         )
 
 
 def get_action_combined_relevance(relevances: list[str]):
@@ -341,6 +304,52 @@ def get_bes_conn_using_config_file(conf_file=None):
     return None
 
 
+# https://docs.python-requests.org/en/latest/user/advanced/#transport-adapters
+class HTTPAdapterBlocksize(requests.adapters.HTTPAdapter):
+    """Custom HTTPAdapter for requests to override blocksize
+    for Uploading or Downloading large files.
+    """
+
+    def __init__(self, blocksize=1000000, **kwargs):
+        self.blocksize = blocksize
+        super().__init__(**kwargs)
+
+    # override init_poolmanager from regular HTTPAdapter
+    # https://stackoverflow.com/questions/22915295/python-requests-post-and-big-content/22915488#comment125583017_22915488
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        """Initializes a urllib3 PoolManager.
+
+        This method should not be called from user code, and is only
+        exposed for use when subclassing the
+        :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.
+
+        :param connections: The number of urllib3 connection pools to cache.
+        :param maxsize: The maximum number of connections to save in the pool.
+        :param block: Block when no free connections are available.
+        :param pool_kwargs: Extra keyword arguments used to initialize the Pool Manager.
+        """
+        # save these values for pickling
+        self._pool_connections = connections
+        self._pool_maxsize = maxsize
+        self._pool_block = block
+
+        try:
+            self.poolmanager = urllib3.poolmanager.PoolManager(
+                num_pools=connections,
+                maxsize=maxsize,
+                block=block,
+                blocksize=self.blocksize,
+                **pool_kwargs,
+            )
+        except Exception:  # pylint: disable=broad-except
+            self.poolmanager = urllib3.poolmanager.PoolManager(
+                num_pools=connections,
+                maxsize=maxsize,
+                block=block,
+                **pool_kwargs,
+            )
+
+
 class BESConnection:
     """BigFix RESTAPI connection abstraction class."""
 
@@ -354,6 +363,16 @@ class BESConnection:
         self.username = username
         self.session = requests.Session()
         self.session.auth = (username, password)
+
+        # # configure retries for requests
+        # retry = requests.adapters.Retry(
+        #     total=2,
+        #     backoff_factor=0.1,
+        #     # status_forcelist=[500, 502, 503, 504],
+        # )
+
+        # # mount the HTTPAdapter with the retry configuration
+        # self.session.mount("https://", requests.adapters.HTTPAdapter(max_retries=retry))
 
         # store if connection user is main operator
         self.is_main_operator = None
@@ -564,7 +583,7 @@ class BESConnection:
         )
         return "\n".join(rel_result_array)
 
-    def login(self):
+    def login(self, timeout=(3, 20)):
         """Do login."""
         if bool(self.last_connected):
             duration_obj = datetime.datetime.now() - self.last_connected
@@ -577,21 +596,24 @@ class BESConnection:
             # default timeout is 5 minutes
             # I'm not sure if this is required
             # or if 'requests' would handle this automatically anyway
-            if int(duration_minutes) > 3:
-                besapi_logger.info("Refreshing Login to prevent timeout.")
-                self.last_connected = None
+            # if int(duration_minutes) > 3:
+            #     besapi_logger.info("Refreshing Login to prevent timeout.")
+            #     self.last_connected = None
 
         if not bool(self.last_connected):
-            result_login = self.get("login")
+            result_login = self.get("login", timeout=timeout)
             if not result_login.request.status_code == 200:
                 result_login.request.raise_for_status()
             if result_login.request.status_code == 200:
                 # set time of connection
                 self.last_connected = datetime.datetime.now()
 
-        # This doesn't work until urllib3 is updated to a future version:
-        # if self.connected():
-        #     self.session.mount(self.url("upload"), HTTPAdapterBiggerBlocksize())
+        # This doesn't work until urllib3 is at least ~v2:
+        if self.last_connected:
+            try:
+                self.session.mount(self.url("upload"), HTTPAdapterBlocksize())
+            except Exception:  # pylint: disable=broad-except
+                pass
 
         return bool(self.last_connected)
 
@@ -872,6 +894,9 @@ class BESConnection:
 
         # Example Header::  Content-Disposition: attachment; filename="file.xml"
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
+        logging.warning(
+            "Uploading `%s` to BigFix Server, this could take a while.", file_name
+        )
         with open(file_path, "rb") as f:
             return self.post(self.url("upload"), data=f, headers=headers)
 
