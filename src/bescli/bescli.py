@@ -385,6 +385,15 @@ class BESCLInterface(Cmd):
         # no matter what I try I can't get anything but exit code 0 on windows
         return self.do_quit("")
 
+    def do_am_i_main_operator(self, _=None):
+        """Check if the connection user is a main operator user."""
+        if not self.bes_conn:
+            self.do_login()
+        if not self.bes_conn:
+            self.poutput("ERROR: can't check without login")
+        else:
+            self.poutput(f"Am I Main Operator? {self.bes_conn.am_i_main_operator()}")
+
     def do_query(self, statement):
         """Get Session Relevance Results."""
         if not self.bes_conn:

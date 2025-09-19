@@ -26,7 +26,7 @@ import lxml.etree
 import lxml.objectify
 import requests
 
-__version__ = "3.9.7"
+__version__ = "3.9.8"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -195,7 +195,7 @@ def get_target_xml(targets=None):
         - Array of Integers: ComputerID
     """
     if targets is None or not targets:
-        logging.warning("No valid targeting found, will target no computers.")
+        besapi_logger.warning("No valid targeting found, will target no computers.")
         # default if invalid:
         return "<CustomRelevance>False</CustomRelevance>"
 
@@ -237,7 +237,7 @@ def get_target_xml(targets=None):
                 + "</ComputerName>"
             )
 
-    logging.warning("No valid targeting found, will target no computers.")
+    besapi_logger.warning("No valid targeting found, will target no computers.")
 
     # default if invalid:
     return "<CustomRelevance>False</CustomRelevance>"
@@ -354,8 +354,11 @@ class BESConnection:
         self.username = username
         self.session = requests.Session()
         self.session.auth = (username, password)
-        # store info on operator used to login
-        # self.operator_info = {}
+
+        # store if connection user is main operator
+        self.is_main_operator = None
+
+        self.webreports_info_xml = None
 
         # use a sitepath context if none specified when required.
         self.site_path = "master"
@@ -425,11 +428,11 @@ class BESConnection:
             if not validate_xsd(data):
                 err_msg = "data being posted did not validate to XML schema. If expected, consider setting validate_xml to false."
                 if validate_xml:
-                    logging.error(err_msg)
+                    besapi_logger.error(err_msg)
                     raise ValueError(err_msg)
 
                 # this is intended it validate_xml is None, but not used currently
-                logging.warning(err_msg)
+                besapi_logger.warning(err_msg)
 
         self.last_connected = datetime.datetime.now()
         return RESTResult(
@@ -446,11 +449,11 @@ class BESConnection:
             if not validate_xsd(data):
                 err_msg = "data being put did not validate to XML schema. If expected, consider setting validate_xml to false."
                 if validate_xml:
-                    logging.error(err_msg)
+                    besapi_logger.error(err_msg)
                     raise ValueError(err_msg)
 
                 # this is intended it validate_xml is None, but not used currently
-                logging.warning(err_msg)
+                besapi_logger.warning(err_msg)
 
         return RESTResult(
             self.session.put(self.url(path), data=data, verify=self.verify, **kwargs)
@@ -462,6 +465,21 @@ class BESConnection:
         return RESTResult(
             self.session.delete(self.url(path), verify=self.verify, **kwargs)
         )
+
+    def am_i_main_operator(self):
+        """Check if the current user is the main operator user."""
+        if self.is_main_operator is None:
+            try:
+                self.webreports_info_xml = self.get("webreports")
+                self.is_main_operator = True
+            except PermissionError:
+                self.is_main_operator = False
+            except Exception as err:  # pylint: disable=broad-except
+                besapi_logger.error("Error checking if main operator: %s", err)
+                self.is_main_operator = None
+
+        if self.is_main_operator is not None:
+            return self.is_main_operator
 
     def session_relevance_json(self, relevance, **kwargs):
         """Get Session Relevance Results in JSON.
@@ -739,7 +757,7 @@ class BESConnection:
             return result_user
         besapi_logger.info("Creating User `%s`", new_user_name)
         user_result = self.post("operators", lxml.etree.tostring(xml_parsed))
-        logging.debug("user creation result:\n%s", user_result)
+        besapi_logger.debug("user creation result:\n%s", user_result)
 
         return self.get_user(new_user_name)
 
@@ -776,7 +794,7 @@ class BESConnection:
             f"computergroups/{site_path}", lxml.etree.tostring(xml_parsed)
         )
 
-        logging.debug("group creation result:\n%s", create_group_result)
+        besapi_logger.debug("group creation result:\n%s", create_group_result)
 
         return self.get_computergroup(site_path, new_group_name)
 
@@ -801,7 +819,7 @@ class BESConnection:
             raise ValueError("No file_name specified. Must be at least one character.")
 
         if "Upload not found" in result.text:
-            logging.debug("WARNING: Upload not found!")
+            besapi_logger.debug("WARNING: Upload not found!")
             return None
 
         return result
@@ -887,8 +905,8 @@ class BESConnection:
         try:
             content = self.get(resource_url.replace("http://", "https://"))
         except PermissionError as err:
-            logging.error("Could not export item:")
-            logging.error(err)
+            besapi_logger.error("Could not export item:")
+            besapi_logger.error(err)
 
         # item_id = int(resource_url.split("/")[-1])
         # site_name = resource_url.split("/")[-2]
@@ -1148,7 +1166,7 @@ class RESTResult:
             if self.validate_xsd(request.text):
                 self.valid = True
             else:
-                logging.debug(
+                besapi_logger.debug(
                     "INFO: REST API Result does not appear to be XML, this could be expected."
                 )
                 self.valid = False
