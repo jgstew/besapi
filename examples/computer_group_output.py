@@ -123,11 +123,11 @@ def main():
             logging.warning("Group '%s' has no members, skipping it.", group_name)
             continue
 
-        logging.debug("GroupName: %s", group_name)
-        logging.debug("GroupMembers: %s", string_truncate(group_members_str))
-
         # split group_members_str on member_join_str
         group_members = group_members_str.split(member_join_str)
+
+        logging.debug("GroupName: %s  > %d members", group_name, len(group_members))
+        logging.debug("GroupMembers: %s", string_truncate(group_members_str))
 
         # write group members to file
         with open(f"{group_name}.txt", "w", encoding="utf-8") as f:
