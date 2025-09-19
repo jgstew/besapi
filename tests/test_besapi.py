@@ -316,18 +316,23 @@ def test_bes_conn_json():
         pytest.skip("Skipping BESConnection test, no config file or login failed.")
 
 
-def test_bes_conn_upload():
+def test_bes_conn_upload_always():
     """Test the BESConnection class with JSON output."""
+    file_name = "LICENSE.txt"
+    file_path = "../" + file_name
+    assert os.path.isfile(os.path.abspath(file_path))
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(None)
     if bes_conn and bes_conn.login():
         # test upload
-        file_name = "LICENSE.txt"
-        file_path = "../" + file_name
         # Example Header::  Content-Disposition: attachment; filename="file.xml"
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
         with open(file_path, "rb") as f:
-            return bes_conn.post(bes_conn.url("upload"), data=f, headers=headers)
+            result = bes_conn.post(bes_conn.url("upload"), data=f, headers=headers)
+        print(result)
+        assert result is not None
+        assert result.besobj.FileUpload.Available == 1
+        assert result.besdict["FileUpload"]["Available"] == "1"
     else:
         pytest.skip("Skipping BESConnection upload test, login failed.")
 
