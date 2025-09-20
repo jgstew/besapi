@@ -357,14 +357,17 @@ def get_bes_conn_interactive(
     try:
         return BESConnection(user, password, root_server)
     except requests.exceptions.HTTPError as err:
-        print("Bad Password, Try again!")
+        print("Bad Username or Bad Password, Try again!")
         logging.debug(err)
+        print("    BES_ROOT_SERVER: ", root_server)
         return get_bes_conn_interactive(
-            user=user, password=None, root_server=root_server, force_prompt=force_prompt
+            user=None, password=None, root_server=root_server, force_prompt=force_prompt
         )
     except requests.exceptions.ConnectionError as err:
         print("Bad Root Server Specified, Try again!")
         logging.debug("Connection Error: %s", err)
+        print("      BES_USER_NAME: ", user)
+        print("BES_PASSWORD length: ", len(password))
         return get_bes_conn_interactive(
             user=user, password=password, root_server=None, force_prompt=force_prompt
         )
