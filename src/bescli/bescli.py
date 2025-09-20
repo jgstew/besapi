@@ -216,6 +216,20 @@ class BESCLInterface(Cmd):
             self.pfeedback(" - attempt login using config parameters - ")
             self.do_login()
 
+    def do_login_new(self, user=None):
+        """Login to BigFix Server."""
+        if not user or str(user).strip() == "":
+            user = self.BES_USER_NAME
+        self.bes_conn = besapi.get_bes_conn_interactive(
+            user=user,
+            password=self.BES_PASSWORD,
+            root_server=self.BES_ROOT_SERVER,
+        )
+        if self.bes_conn:
+            self.pfeedback("Login Successful!")
+            (self.BES_USER_NAME, self.BES_PASSWORD) = self.bes_conn.session.auth
+            self.BES_ROOT_SERVER = self.bes_conn.rootserver
+
     def do_login(self, user=None):
         """Login to BigFix Server."""
 
@@ -227,7 +241,7 @@ class BESCLInterface(Cmd):
                 if not user:
                     user = getpass.getuser()
 
-            self.BES_USER_NAME = user
+            self.BES_USER_NAME = user.strip()
             if not self.CONFPARSER.has_section("besapi"):
                 self.CONFPARSER.add_section("besapi")
             self.CONFPARSER.set("besapi", "BES_USER_NAME", user)
@@ -237,14 +251,14 @@ class BESCLInterface(Cmd):
             if not root_server:
                 root_server = str(input("Root Server [%s]: " % self.BES_ROOT_SERVER))
 
-            self.BES_ROOT_SERVER = root_server
+            self.BES_ROOT_SERVER = root_server.strip()
 
         else:
             root_server = str(
                 input("Root Server (ex. %s): " % "https://server.institution.edu:52311")
             )
             if root_server:
-                self.BES_ROOT_SERVER = root_server
+                self.BES_ROOT_SERVER = root_server.strip()
                 if not self.CONFPARSER.has_section("besapi"):
                     self.CONFPARSER.add_section("besapi")
                 self.CONFPARSER.set("besapi", "BES_ROOT_SERVER", root_server)

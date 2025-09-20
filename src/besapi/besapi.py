@@ -12,6 +12,7 @@ Library for communicating with the BES (BigFix) REST API.
 
 import configparser
 import datetime
+import getpass
 import hashlib
 import importlib.resources
 import json
@@ -20,6 +21,7 @@ import os
 import random
 import site
 import string
+import sys
 import urllib.parse
 
 import lxml.etree
@@ -27,7 +29,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.0.1"
+__version__ = "4.0.2"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -302,6 +304,73 @@ def get_bes_conn_using_config_file(conf_file=None):
             return BESConnection(BES_USER_NAME, BES_PASSWORD, BES_ROOT_SERVER)
 
     return None
+
+
+def get_bes_conn_interactive(
+    user=None, password=None, root_server=None, force_prompt=False
+):
+    """Get BESConnection using interactive prompts."""
+
+    if not (force_prompt or sys.__stdin__.isatty()):
+        logging.error("No TTY available for interactive login!")
+        return None
+
+    print(
+        "Attempting BESAPI Connection using interactive prompts. Use Ctrl-C to cancel."
+    )
+    try:
+        if not user:
+            user = str(input("User [%s]: " % getpass.getuser())).strip()
+        if not user:
+            user = getpass.getuser()
+
+        if not root_server:
+            root_server = str(
+                input("Root Server (ex. %s): " % "https://localhost:52311")
+            ).strip()
+        if not root_server or root_server == "":
+            print("Root Server is required, try again!")
+            return get_bes_conn_interactive(
+                user=user,
+                password=password,
+                root_server=None,
+                force_prompt=force_prompt,
+            )
+
+        if not password:
+            password = str(
+                getpass.getpass(f"Password for {user}@{root_server}: ")
+            ).strip()
+
+        if not password or password == "":
+            print("Password is required, try again!")
+            return get_bes_conn_interactive(
+                user=user,
+                password=None,
+                root_server=root_server,
+                force_prompt=force_prompt,
+            )
+    except (KeyboardInterrupt, EOFError):
+        print("\nLogin cancelled.")
+        return None
+
+    try:
+        return BESConnection(user, password, root_server)
+    except requests.exceptions.HTTPError as err:
+        print("Bad Password, Try again!")
+        logging.debug(err)
+        return get_bes_conn_interactive(
+            user=user, password=None, root_server=root_server, force_prompt=force_prompt
+        )
+    except requests.exceptions.ConnectionError as err:
+        print("Bad Root Server Specified, Try again!")
+        logging.debug("Connection Error: %s", err)
+        return get_bes_conn_interactive(
+            user=user, password=password, root_server=None, force_prompt=force_prompt
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logging.error("Error occurred while establishing BESConnection: %s", e)
+        return None
 
 
 # https://docs.python-requests.org/en/latest/user/advanced/#transport-adapters
