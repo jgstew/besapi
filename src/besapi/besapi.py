@@ -615,7 +615,7 @@ class BESConnection:
         return RESTResult(
             self.session.post(
                 self.url("query"),
-                data=f"relevance={urllib.parse.quote(relevance, safe=':+')}",
+                data=f"relevance={urllib.parse.quote(relevance, safe=':')}",
                 verify=self.verify,
                 **kwargs,
             )

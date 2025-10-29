@@ -321,7 +321,7 @@ def test_bes_conn_json():
         pytest.skip("Skipping BESConnection test, no config file or login failed.")
 
 
-def test_bes_conn_session_relevance_with_special_characters():
+def test_bes_conn_session_relevance_with_plus():
     """Test the BESConnection class with JSON output."""
 
     bes_conn = besapi.plugin_utilities.get_besapi_connection(None)
@@ -333,8 +333,8 @@ def test_bes_conn_session_relevance_with_special_characters():
         result = bes_conn.session_relevance_xml(str_relevance_plus)
         print(result)
         assert result is not None
-        # this test is failing and needs fixed:
-        # assert f'<Answer type="integer">{str_relevance_answer}</Answer>' in str(result)
+        print(result.request.request.body)
+        assert f'<Answer type="integer">{str_relevance_answer}</Answer>' in str(result)
         result = bes_conn.session_relevance_json_string(str_relevance_plus)
         print(result)
         assert result is not None
@@ -346,17 +346,24 @@ def test_bes_conn_session_relevance_with_special_characters():
         result = bes_conn.session_relevance_string(str_relevance_plus)
         print(result)
         assert result is not None
-        # this test is failing and needs fixed:
-        # assert str_relevance_answer in str(result)
+        assert str_relevance_answer in str(result)
         result = bes_conn.session_relevance_array(str_relevance_plus)
         print(result)
         assert result is not None
-        # this test is failing and needs fixed:
-        # assert f"['{str_relevance_answer}']" in str(result)
+        assert f"['{str_relevance_answer}']" in str(result)
         result = bes_conn.session_relevance_json_array(str_relevance_plus)
         print(result)
         assert result is not None
         assert f"[{str_relevance_answer}]" in str(result)
+
+        # test already escaped +
+        str_relevance_plus = r'lengths of first matches (regex " %2b") of "        "'
+        print(str_relevance_plus)
+        result = bes_conn.session_relevance_xml(str_relevance_plus)
+        print(result)
+        assert result is not None
+        print(result.request.request.body)
+        assert f'<Answer type="integer">{str_relevance_answer}</Answer>' in str(result)
     else:
         pytest.skip("Skipping BESConnection test, no config file or login failed.")
 
