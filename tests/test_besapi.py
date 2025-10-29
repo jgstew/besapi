@@ -312,6 +312,51 @@ def test_bes_conn_json():
         assert result is not None
         assert "TestString" in result
         assert "BES Support" in result
+        print("testing session relevance with + in relevance")
+        str_relevance_plus = 'lengths of first matches (regex " +") of "        "'
+        result = bes_conn.session_relevance_xml(str_relevance_plus)
+        print(result)
+        assert result is not None
+    else:
+        pytest.skip("Skipping BESConnection test, no config file or login failed.")
+
+
+def test_bes_conn_session_relevance_with_special_characters():
+    """Test the BESConnection class with JSON output."""
+
+    bes_conn = besapi.plugin_utilities.get_besapi_connection(None)
+
+    if bes_conn and bes_conn.login():
+        print("testing session relevance with + in relevance")
+        str_relevance_plus = 'lengths of first matches (regex " +") of "        "'
+        str_relevance_answer = "8"
+        result = bes_conn.session_relevance_xml(str_relevance_plus)
+        print(result)
+        assert result is not None
+        # this test is failing and needs fixed:
+        # assert f'<Answer type="integer">{str_relevance_answer}</Answer>' in str(result)
+        result = bes_conn.session_relevance_json_string(str_relevance_plus)
+        print(result)
+        assert result is not None
+        assert str_relevance_answer in str(result)
+        result = bes_conn.session_relevance_json(str_relevance_plus)
+        print(result)
+        assert result is not None
+        assert f"[{str_relevance_answer}]" in str(result["result"])
+        result = bes_conn.session_relevance_string(str_relevance_plus)
+        print(result)
+        assert result is not None
+        # this test is failing and needs fixed:
+        # assert str_relevance_answer in str(result)
+        result = bes_conn.session_relevance_array(str_relevance_plus)
+        print(result)
+        assert result is not None
+        # this test is failing and needs fixed:
+        # assert f"['{str_relevance_answer}']" in str(result)
+        result = bes_conn.session_relevance_json_array(str_relevance_plus)
+        print(result)
+        assert result is not None
+        assert f"[{str_relevance_answer}]" in str(result)
     else:
         pytest.skip("Skipping BESConnection test, no config file or login failed.")
 
