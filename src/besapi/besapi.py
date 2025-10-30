@@ -29,7 +29,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.0.2"
+__version__ = "4.1.2"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -615,7 +615,7 @@ class BESConnection:
         return RESTResult(
             self.session.post(
                 self.url("query"),
-                data=f"relevance={urllib.parse.quote(relevance, safe=':+')}",
+                data=f"relevance={urllib.parse.quote(relevance, safe=':')}",
                 verify=self.verify,
                 **kwargs,
             )
