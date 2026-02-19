@@ -44,7 +44,7 @@ MIME_FIELD_NAME = "x-relevance-evaluation-period"
 MIME_FIELD_VALUE = "06:00:00"  # 6 hours
 
 # Must return fixlet / task / baseline / analysis objects:
-session_relevance_multiple_fixlets = r"""custom bes fixlets whose(exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant" OR it contains " of scheduled task" OR it contains "image files of processes" OR it contains " of active director" OR it contains "of active device" OR it contains "of smbios" OR exists first matches (case insensitive regex "records? of[a-z0-9]* event log") of it OR exists first matches (case insensitive regex "(md5|sha1|sha2?_?\d{3,4})s? +of +") of it OR (it as lowercase contains ".log%22" AND it as lowercase contains " lines ")) of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
+session_relevance_multiple_fixlets = r"""custom bes fixlets whose(not group flag of it AND exists (it as lowercase) whose(it contains " wmi" OR it contains " descendant" OR it contains " of scheduled task" OR it contains "image files of processes" OR it contains " of active director" OR it contains "of active device" OR it contains "of smbios" OR exists first matches (case insensitive regex "records? of[a-z0-9]* event log") of it OR exists first matches (case insensitive regex "(md5|sha1|sha2?_?\d{3,4})s? +of +") of it OR (it as lowercase contains ".log%22" AND it as lowercase contains " lines ")) of relevance of it AND not exists mime fields "x-relevance-evaluation-period" of it)"""
 # custom bes fixlets whose(not exists mime fields "x-relevance-evaluation-period" of it) whose(exists (it as lowercase) whose(exists matches (case insensitive regex "records? of[a-z0-9]* event log") of it OR (it contains ".log%22" AND it contains " lines ") OR (it contains " substrings separated by (%22;%22;%22:%22) of values of") OR it contains " wmi" OR it contains " descendant") of relevance of it)
 
 __version__ = "0.1.1"
@@ -102,33 +102,38 @@ def fixlet_xml_add_mime(
         <Value>{mime_field_value}</Value>
     </MIMEField>"""
 
-    # need to check if mime field already exists in case session relevance is behind
-    if mime_field_name in str(fixlet_xml).lower():
-        logging.warning("Skipping item, it already has mime field")
+    try:
+        # need to check if mime field already exists in case session relevance is behind
+        if mime_field_name in str(fixlet_xml).lower():
+            logging.warning("Skipping item, it already has mime field")
+            return None
+
+        root_xml = lxml.etree.fromstring(fixlet_xml)
+
+        # get first MIMEField
+        xml_first_mime = root_xml.find(".//*/MIMEField")
+
+        xml_container = xml_first_mime.getparent()
+
+        # new mime to set relevance eval to once an hour:
+        new_mime_lxml = lxml.etree.XML(new_mime)
+
+        # insert new mime BEFORE first MIME
+        # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
+        xml_container.insert(xml_container.index(xml_first_mime), new_mime_lxml)
+
+        # validate against XSD
+        besapi.besapi.validate_xsd(
+            lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=False)
+        )
+
+        return lxml.etree.tostring(
+            root_xml, encoding="utf-8", xml_declaration=True
+        ).decode("utf-8")
+    except Exception as exc:
+        logging.error("Error updating fixlet XML: %s", exc)
+        logging.debug("fixlet_xml:\n%s", fixlet_xml)
         return None
-
-    root_xml = lxml.etree.fromstring(fixlet_xml)
-
-    # get first MIMEField
-    xml_first_mime = root_xml.find(".//*/MIMEField")
-
-    xml_container = xml_first_mime.getparent()
-
-    # new mime to set relevance eval to once an hour:
-    new_mime_lxml = lxml.etree.XML(new_mime)
-
-    # insert new mime BEFORE first MIME
-    # https://stackoverflow.com/questions/7474972/append-element-after-another-element-using-lxml
-    xml_container.insert(xml_container.index(xml_first_mime), new_mime_lxml)
-
-    # validate against XSD
-    besapi.besapi.validate_xsd(
-        lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=False)
-    )
-
-    return lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True).decode(
-        "utf-8"
-    )
 
 
 def get_content_restresult(
@@ -242,42 +247,55 @@ def main():
     results = bes_conn.session_relevance_json_array(
         "(id of it, name of site of it) of " + session_relevance_multiple_fixlets
     )
+    # print(results)
 
     logging.debug(results)
 
     for result in results:
-        fixlet_id = result[0]
-        fixlet_site_name = result[1]
+        fixlet_id = int(result[0])
+        fixlet_site_name = str(result[1])
         fixlet_site_name_safe = urllib.parse.quote(fixlet_site_name, safe="")
 
         if fixlet_site_name_safe in sites_no_permissions:
             logging.warning(
                 "Skipping item %d, no permissions to update content in site '%s'",
                 fixlet_id,
-                fixlet_site_name,
+                fixlet_site_name_safe,
             )
             continue
 
-        logging.debug(fixlet_id, fixlet_site_name)
+        try:
+            logging.debug(
+                "Processing fixlet %d in site '%s'", fixlet_id, fixlet_site_name_safe
+            )
 
-        fixlet_content = get_content_restresult(bes_conn, fixlet_site_name, fixlet_id)
+            fixlet_content = get_content_restresult(
+                bes_conn, fixlet_site_name, fixlet_id
+            )
 
-        updated_xml = fixlet_xml_add_mime(
-            fixlet_content.besxml, MIME_FIELD_NAME, MIME_FIELD_VALUE
-        )
+            updated_xml = fixlet_xml_add_mime(
+                fixlet_content.besxml, MIME_FIELD_NAME, MIME_FIELD_VALUE
+            )
 
-        if updated_xml is None:
-            # skip, already has mime field
+            if updated_xml is None:
+                # skip, already has mime field
+                continue
+
+            logging.debug("updated_xml:\n%s", updated_xml)
+
+            update_result = put_updated_xml(
+                bes_conn, fixlet_site_name, fixlet_id, updated_xml
+            )
+
+            if update_result is not None:
+                logging.info(
+                    "Updated fixlet %d in site %s", fixlet_id, fixlet_site_name
+                )
+        except Exception:
+            logging.error(
+                "Error processing item %d in site '%s'", fixlet_id, fixlet_site_name
+            )
             continue
-
-        logging.debug("updated_xml:\n%s", updated_xml)
-
-        update_result = put_updated_xml(
-            bes_conn, fixlet_site_name, fixlet_id, updated_xml
-        )
-
-        if update_result is not None:
-            logging.info("Updated fixlet %d in site %s", fixlet_id, fixlet_site_name)
 
     logging.log(99, "---------- Ending Session -----------")
 
