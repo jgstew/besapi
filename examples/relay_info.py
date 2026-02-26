@@ -177,6 +177,9 @@ def main():
         json.dumps(results.besdict["ClientReports"], indent=2),
     )
 
+    # root server cache size:
+    # (it as integer) of tuple string items of (unique value of concatenations ", " of unique values of values of client settings whose(name of it = "_BESGather_Download_CacheLimitMB") of bes computers whose(root server flag of it) | "1024")
+
     logging.log(99, "---------- Ending Session -----------")
 
 
