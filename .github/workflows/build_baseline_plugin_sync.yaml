@@ -88,7 +88,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value $outputString
 
       - name: upload built ${{ env.script_name }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ZIP_NAME }}
           path: dist/${{ env.script_name }}/${{ env.script_name }}_dist_*.zip
@@ -169,7 +169,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value $outputString
 
       - name: upload built ${{ env.script_name }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ZIP_NAME }}
           path: dist/${{ env.script_name }}/${{ env.script_name }}_dist_*.zip
