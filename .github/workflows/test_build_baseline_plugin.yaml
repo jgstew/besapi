@@ -85,7 +85,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value $outputString
 
       - name: upload built baseline_plugin
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ZIP_NAME }}
           path: dist/baseline_plugin/baseline_plugin_dist_*.zip
@@ -166,7 +166,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value $outputString
 
       - name: upload built baseline_plugin
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ZIP_NAME }}
           path: dist/baseline_plugin/baseline_plugin_dist_*.zip
