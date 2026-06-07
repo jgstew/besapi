@@ -33,6 +33,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, windows-11-arm, macos-26-intel, macos-latest]
         # https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
         python-version: ["3.9", "3"]
+        exclude:
+          - os: windows-11-arm
+            python-version: "3.9"
     steps:
       - uses: actions/checkout@v4
 
