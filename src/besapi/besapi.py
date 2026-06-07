@@ -249,6 +249,96 @@ def validate_xml_bes_file(file_path):
     return validate_xsd(file_data)
 
 
+def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
+    """Create action XML from bes file with fixlet or task or singleaction."""
+    # default to empty string:
+    custom_relevance_xml = ""
+
+    if not validate_xml_bes_file(file_path):
+        err_msg = "bes file is not valid according to XML Schema!"
+        logging.error(err_msg)
+        raise ValueError(err_msg)
+
+    tree = lxml.etree.parse(file_path)
+
+    # //BES/*[self::Task or self::Fixlet]/*[@id='elid']/name()
+    bes_type = str(
+        tree.xpath("//BES/*[self::Task or self::Fixlet or self::SingleAction]")[0].tag
+    )
+
+    logging.debug("BES Type: %s", bes_type)
+
+    title = tree.xpath(f"//BES/{bes_type}/Title/text()")[0]
+
+    logging.debug("Title: %s", title)
+
+    try:
+        actionscript = tree.xpath(
+            f"//BES/{bes_type}/DefaultAction/ActionScript/text()"
+        )[0]
+    except IndexError:
+        # handle SingleAction case:
+        actionscript = tree.xpath(f"//BES/{bes_type}/ActionScript/text()")[0]
+
+    logging.debug("ActionScript: %s", actionscript)
+
+    try:
+        if bes_type != "SingleAction":
+            success_criteria = tree.xpath(
+                f"//BES/{bes_type}/DefaultAction/SuccessCriteria/@Option"
+            )[0]
+        else:
+            success_criteria = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/@Option")[
+                0
+            ]
+    except IndexError:
+        # set success criteria if missing: (default)
+        success_criteria = "RunToCompletion"
+        if bes_type == "Fixlet":
+            # set success criteria if missing: (Fixlet)
+            success_criteria = "OriginalRelevance"
+
+    if success_criteria == "CustomRelevance":
+        if bes_type != "SingleAction":
+            custom_relevance = tree.xpath(
+                f"//BES/{bes_type}/DefaultAction/SuccessCriteria/text()"
+            )[0]
+        else:
+            custom_relevance = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/text()")[0]
+
+        custom_relevance_xml = f"<![CDATA[{custom_relevance}]]>"
+
+    logging.debug("success_criteria: %s", success_criteria)
+
+    relevance_clauses = tree.xpath(f"//BES/{bes_type}/Relevance/text()")
+
+    logging.debug("Relevances: %s", relevance_clauses)
+
+    relevance_clauses_combined = get_action_combined_relevance(relevance_clauses)
+
+    logging.debug("Relevance Combined: %s", relevance_clauses_combined)
+
+    action_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<SingleAction>
+		<Title>{title}</Title>
+		<Relevance><![CDATA[{relevance_clauses_combined}]]></Relevance>
+		<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[// Start:
+{actionscript}
+// End]]></ActionScript>
+		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>
+		<Target>
+            {get_target_xml(targets)}
+        </Target>
+	</SingleAction>
+</BES>
+"""
+
+    logging.debug("Action XML:\n%s", action_xml)
+
+    return action_xml
+
+
 def get_bes_conn_using_env():
     """Get BESConnection using environment variables."""
     username = os.getenv("BES_USER_NAME")
