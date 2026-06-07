@@ -68,8 +68,8 @@ def get_invoke_file_name(verbose=0):
     return os.path.splitext(ntpath.basename(invoke_file_path))[0]
 
 
-def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
-    """Create action from bes file with fixlet or task."""
+def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
+    """Create action XML from bes file with fixlet or task or singleaction."""
     # default to empty string:
     custom_relevance_xml = ""
 
@@ -156,6 +156,14 @@ def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
 """
 
     logging.debug("Action XML:\n%s", action_xml)
+
+    return action_xml
+
+
+def action_from_bes_file(bes_conn, file_path, targets="<AllComputers>"):
+    """Create action from bes file with fixlet or task or single action."""
+
+    action_xml = action_xml_from_bes_file(file_path, targets)
 
     # the validation isn't working, but everything seems valid :(
 
