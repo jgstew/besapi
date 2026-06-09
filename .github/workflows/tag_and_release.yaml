@@ -39,7 +39,7 @@ jobs:
       # only make release if there is NOT a git tag for this version
       - name: "Check: package version has corresponding git tag"
         # this will prevent this from doing anything when run through ACT
-        if: ${{ !env.ACT }} && contains(steps.getversion.outputs.version, '.')
+        if: ${{ !env.ACT && contains(steps.getversion.outputs.version, '.') }}
         id: tagged
         shell: bash
         run: |
