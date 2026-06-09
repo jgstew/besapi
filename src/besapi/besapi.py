@@ -249,6 +249,21 @@ def validate_xml_bes_file(file_path):
     return validate_xsd(file_data)
 
 
+def xml_elem_strip_namespace(elem):
+    """Strip namespace."""
+    clean_elem = lxml.etree.Element(elem.tag, attrib=elem.attrib)
+
+    # Move the inner text and children over to the fresh element
+    clean_elem.text = elem.text
+
+    for child in elem:
+        # Create a true, independent copy of the child element
+        child_copy = xml_elem_strip_namespace(child)
+        clean_elem.append(child_copy)
+
+    return clean_elem
+
+
 def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
     """Create action XML from bes file with fixlet or task or singleaction."""
     # default to empty string:
@@ -318,6 +333,21 @@ def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
 
     logging.debug("Relevance Combined: %s", relevance_clauses_combined)
 
+    # get settings if found
+    settings_xml_string = ""
+    try:
+        if bes_type != "SingleAction":
+            settings_xml = tree.xpath(f"//BES/{bes_type}/DefaultAction/Settings")[0]
+        else:
+            settings_xml = tree.xpath(f"//BES/{bes_type}/Settings")[0]
+
+        # get_settings_xml = xml_elem_strip_namespace(get_settings_xml)
+        settings_xml_string = lxml.etree.tostring(
+            settings_xml, encoding="utf-8"
+        ).decode("utf-8")
+    except IndexError:
+        pass
+
     action_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<SingleAction>
@@ -326,7 +356,7 @@ def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
 		<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[// Start:
 {actionscript}
 // End]]></ActionScript>
-		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>
+		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>{settings_xml_string}
 		<Target>
             {get_target_xml(targets)}
         </Target>
