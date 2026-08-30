@@ -28,6 +28,29 @@ repos:
       # - id: no-commit-to-branch
       #   args: [--branch, main]
 
+  # - repo: https://github.com/jgstew/pre-commit-bigfix
+  #   rev: v1.2.3
+  #   hooks:
+  #     - id: bes-schema-validate
+  #     - id: bes-actionscript-lint-schclass
+  #     - id: bes-actionscript-validate-script
+  #     - id: bes-actionscript-validate-prefetch
+  #       # args: [--auto-fix-network, "yes"]
+  #       # args: [--disable, "E401"]
+  #     - id: bes-conventions-check
+  #       args: [--strict, --disable, "W207,W206,W212,W214,W216,E212,W218,W203,W211,W208"]
+  #       exclude: |
+  #         (?x)^(
+  #           fixlet/RESTAPI_\ Generate\ uninstall\ tasks\ for\ all\ MSI\ applications\ on\ target\ computer\ -\ Windows\.bes|
+  #           fixlet/Tasks_UninstallApplicationsMSI_Windows.bes
+  #         )$
+  #     - id: bes-relevance-lint
+  #       args: [--disable, "E604,W601,W600"]
+  #       exclude: |
+  #         (?x)^(
+  #           fixlet/RESTAPI_\ Generate\ uninstall\ tasks\ for\ all\ MSI\ applications\ on\ target\ computer\ -\ Windows\.bes
+  #         )$
+
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.36.0
     hooks:
