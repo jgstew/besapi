@@ -1,4 +1,5 @@
 import csv
+import datetime
 
 
 def read_items(filepath, indices):
@@ -20,9 +21,29 @@ def main():
         action_name = selected_fields[2]
 
         baseline_components_xml += f"""
-                    <BaselineComponent IncludeInRelevance="true" SourceSiteURL="{site_url}" SourceID="{fixlet_id}" ActionName="{action_name}" />"""
+            <BaselineComponent IncludeInRelevance="true" SourceSiteURL="{site_url}" SourceID="{fixlet_id}" ActionName="{action_name}" />"""
 
-    print(baseline_components_xml)
+    # print(baseline_components_xml)
+
+    # generate XML for baseline with template:
+    baseline = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+      <Baseline>
+        <Title>Custom Patching Baseline {datetime.datetime.today().strftime('%Y-%m-%d')}</Title>
+        <Description />
+        <Relevance>true</Relevance>
+        <BaselineComponentCollection>
+          <BaselineComponentGroup>{baseline_components_xml}
+          </BaselineComponentGroup>
+        </BaselineComponentCollection>
+      </Baseline>
+    </BES>"""
+
+    print(baseline)
+
+    # Optionally, write the baseline XML to a file
+    with open("baseline.xml", "w", encoding="utf-8") as f:
+        f.write(baseline)
 
 
 if __name__ == "__main__":
