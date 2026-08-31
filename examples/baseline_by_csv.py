@@ -1,0 +1,29 @@
+import csv
+
+
+def read_items(filepath, indices):
+    with open(filepath, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            # Extract only the specified 3 indices
+            yield [row[i].strip() for i in indices]
+
+
+def main():
+    # Sample usage: read the last 3 items of each N-item row
+    last_three_from_end = [-3, -2, -1]
+    baseline_components_xml = ""
+
+    for selected_fields in read_items("data.csv", indices=last_three_from_end):
+        site_url = selected_fields[0]
+        fixlet_id = selected_fields[1]
+        action_name = selected_fields[2]
+
+        baseline_components_xml += f"""
+                    <BaselineComponent IncludeInRelevance="true" SourceSiteURL="{site_url}" SourceID="{fixlet_id}" ActionName="{action_name}" />"""
+
+    print(baseline_components_xml)
+
+
+if __name__ == "__main__":
+    main()
