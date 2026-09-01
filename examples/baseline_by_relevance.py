@@ -22,7 +22,7 @@ def main():
 
     print(bes_conn.last_connected)
 
-    # change the relevance here to adjust which content gets put in a baseline:
+    # change the relevance above in FIXLET_RELEVANCE.
     fixlets_rel = FIXLET_RELEVANCE
 
     # this gets the info needed from the items to make the baseline:
