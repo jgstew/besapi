@@ -41,7 +41,7 @@ def main():
 
     print(baseline)
 
-    # Optionally, write the baseline XML to a file
+    # Write the baseline XML to a file
     with open("baseline_from_csv.bes", "w", encoding="utf-8") as f:
         f.write(baseline)
 
