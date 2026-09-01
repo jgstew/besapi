@@ -8,6 +8,7 @@ import datetime
 import os
 
 import besapi
+import besapi.plugin_utilities
 
 # This relevance string must start with `fixlets` and return the set of fixlets you wish to turn into a baseline
 FIXLET_RELEVANCE = 'fixlets whose(name of it starts with "Update:") of bes sites whose( external site flag of it AND name of it = "Updates for Windows Applications Extended" )'
@@ -16,7 +17,7 @@ FIXLET_RELEVANCE = 'fixlets whose(name of it starts with "Update:") of bes sites
 def main():
     """Execution starts here."""
     print("main()")
-    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    bes_conn = besapi.plugin_utilities.get_besapi_connection(None)
     bes_conn.login()
 
     print(bes_conn.last_connected)
