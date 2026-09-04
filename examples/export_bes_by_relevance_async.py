@@ -13,36 +13,7 @@ import aiofiles
 import aiohttp
 
 import besapi
-
-
-def get_bes_pass_using_config_file(conf_file=None):
-    """
-    Read connection values from config file
-    return besapi connection.
-    """
-    config_paths = [
-        "/etc/besapi.conf",
-        os.path.expanduser("~/besapi.conf"),
-        os.path.expanduser("~/.besapi.conf"),
-        "besapi.conf",
-    ]
-    # if conf_file specified, then only use that:
-    if conf_file:
-        config_paths = [conf_file]
-
-    configparser_instance = configparser.ConfigParser()
-
-    found_config_files = configparser_instance.read(config_paths)
-
-    if found_config_files and configparser_instance:
-        print("Attempting BESAPI Connection using config file:", found_config_files)
-
-        try:
-            BES_PASSWORD = configparser_instance.get("besapi", "BES_PASSWORD")
-        except BaseException:  # pylint: disable=broad-except
-            BES_PASSWORD = None
-
-        return BES_PASSWORD
+import besapi.plugin_utilities
 
 
 async def fetch(session, url):
@@ -76,7 +47,7 @@ async def main():
     # TODO: get max mod time of existing bes files:
     # https://github.com/jgstew/tools/blob/master/Python/get_max_time_bes_files.py
 
-    bes_conn = besapi.besapi.get_bes_conn_using_config_file()
+    bes_conn = besapi.plugin_utilities.get_besapi_connection()
     bes_conn.login()
 
     print(bes_conn.last_connected)
@@ -97,8 +68,16 @@ async def main():
         absolute_urls.append(bes_conn.url(item))
 
     # Create a session for making HTTP requests
+    session_auth = getattr(bes_conn.session, "auth", None)
+    if isinstance(session_auth, tuple):
+        session_password = session_auth[1]
+    elif hasattr(session_auth, "password"):
+        session_password = session_auth.password
+    else:
+        session_password = getattr(bes_conn, "password", None)
+
     async with aiohttp.ClientSession(
-        auth=aiohttp.BasicAuth(bes_conn.username, get_bes_pass_using_config_file()),
+        auth=aiohttp.BasicAuth(bes_conn.username, str(session_password)),
         connector=aiohttp.TCPConnector(ssl=False),
     ) as session:
         # Define a list of URLs to fetch
