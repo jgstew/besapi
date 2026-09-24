@@ -29,7 +29,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.1.5"
+__version__ = "4.2.0"
 
 besapi_logger = logging.getLogger("besapi")
 
