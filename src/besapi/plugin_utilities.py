@@ -14,8 +14,24 @@ from typing import Union
 
 import besapi
 
-if os.name == "nt":
-    import besapi.plugin_utilities_win
+# the platform specific root server utilities module, or None if unavailable.
+# NOTE: these are conveniences for plugins running on a root server,
+# so a failure to import must never prevent the other connection methods:
+PLATFORM_UTILITIES = None
+
+try:
+    if os.name == "nt":
+        import besapi.plugin_utilities_win
+
+        PLATFORM_UTILITIES = besapi.plugin_utilities_win
+    # NOTE: linux only, not all posix. macOS is never a root server,
+    # so none of these files will be in place there:
+    elif sys.platform.startswith("linux"):
+        import besapi.plugin_utilities_linux
+
+        PLATFORM_UTILITIES = besapi.plugin_utilities_linux
+except BaseException as import_error:  # pylint: disable=broad-exception-caught
+    logging.debug("platform specific plugin utilities unavailable: %s", import_error)
 
 
 # NOTE: This does not work as expected when run from plugin_utilities
@@ -157,6 +173,64 @@ def get_besapi_connection_env_then_config():
     return bes_conn
 
 
+def _try_platform_utility(function_name: str):
+    """Call a function from the platform specific utilities module, if possible.
+
+    These are best effort conveniences for the case where the plugin happens to
+    be running on a root server. If anything at all goes wrong, this is simply
+    not a usable root server, so the caller falls back to the other methods.
+
+    Args:
+        function_name: The name of the function to call, with no arguments.
+
+    Returns:
+        Whatever the function returned, or None if it could not be used.
+    """
+    if not PLATFORM_UTILITIES:
+        logging.debug("no platform specific plugin utilities available.")
+        return None
+
+    platform_function = getattr(PLATFORM_UTILITIES, function_name, None)
+
+    if not platform_function:
+        logging.debug(
+            "`%s` not found in %s", function_name, PLATFORM_UTILITIES.__name__
+        )
+        return None
+
+    try:
+        return platform_function()
+    except BaseException as err:  # pylint: disable=broad-exception-caught
+        # NOTE: intentionally broad, this must never prevent the other methods:
+        logging.debug("`%s` failed, ignoring: %s", function_name, err)
+        return None
+
+
+def get_root_server_rest_pass() -> Union[str, None]:
+    """Get the REST API password from the local root server, if this is one.
+
+    On Windows this reads the registry, otherwise it reads the
+    MasterOperatorCredentials file. Returns None if this is not a root server,
+    or if the attempt failed for any reason.
+    """
+    if os.name == "nt":
+        return _try_platform_utility("get_win_registry_rest_pass")
+
+    return _try_platform_utility("get_linux_credentials_rest_pass")
+
+
+def get_besconn_root_server() -> Union[besapi.besapi.BESConnection, None]:
+    """Get a connection using local root server credentials, if this is one.
+
+    Returns None if this is not a root server, or if the attempt failed for
+    any reason.
+    """
+    if os.name == "nt":
+        return _try_platform_utility("get_besconn_root_windows_registry")
+
+    return _try_platform_utility("get_besconn_root_linux")
+
+
 def get_besapi_connection_args(
     args: argparse.Namespace,
 ) -> Union[besapi.besapi.BESConnection, None]:
@@ -169,10 +243,9 @@ def get_besapi_connection_args(
 
     # if user was provided as arg but password was not:
     if args.user and not password:
-        if os.name == "nt":
-            # attempt to get password from windows root server registry:
-            # this is specifically for the case where user is provided for a plugin
-            password = besapi.plugin_utilities_win.get_win_registry_rest_pass()
+        # attempt to get password from the local root server:
+        # this is specifically for the case where user is provided for a plugin
+        password = get_root_server_rest_pass()
 
     # if user was provided as arg but password was not:
     if args.user and not password:
@@ -242,6 +315,8 @@ def get_besapi_connection(
     """Get connection to besapi.
 
     If on Windows, will attempt to get connection from Windows Registry first.
+    If not on Windows, will attempt to get connection from the root server
+    MasterOperatorCredentials file first.
     If args provided, will attempt to get connection using provided args.
     If no args provided, will attempt to get connection from env vars.
     If no env vars, will attempt to get connection from config file.
@@ -251,11 +326,11 @@ def get_besapi_connection(
     Returns:
         A BESConnection object if successful, otherwise None.
     """
-    # if windows, try to get connection from windows registry:
-    if os.name == "nt":
-        bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
-        if bes_conn:
-            return bes_conn
+    # if this is a root server, try its local credentials first:
+    # (windows registry, or the linux MasterOperatorCredentials file)
+    bes_conn = get_besconn_root_server()
+    if bes_conn:
+        return bes_conn
 
     # if no args provided, try to get connection from env then config file:
     if not args:
