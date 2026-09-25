@@ -33,6 +33,10 @@ __version__ = "4.2.0"
 
 besapi_logger = logging.getLogger("besapi")
 
+# default requests timeout for each REST API request: (connect, read) seconds
+# NOTE: long read timeout since some REST API calls, like exports, are slow
+DEFAULT_TIMEOUT = (90, 600)
+
 # pylint: disable=consider-using-f-string
 
 
@@ -63,6 +67,33 @@ def sanitize_txt(*args):
         )
 
     return tuple(sani_args)
+
+
+def relevance_string_escape(value: str) -> str:
+    """Escape text to embed inside a relevance "string literal".
+
+    Relevance string literals use `%XX` escapes, so `%` itself must be
+    escaped, as must `"` which would end the literal. Control characters
+    (tab, newline, ...) are escaped so the relevance stays on one line.
+
+    NOTE: `%XX` escapes are single bytes, so non-ASCII text is passed through
+    unchanged. Relevance only accepts characters in the FXF character set,
+    such as `é`; others, such as `✓`, are rejected by the evaluator however
+    they are written.
+
+    Verified with the BigFix client QnA, for example:
+        length of "100%25" = 4, "a%22b" = a"b
+
+    Example:
+        f'bes sites whose(name of it = "{relevance_string_escape(site_name)}")'
+    """
+    escaped = []
+    for char in value:
+        if char in ("%", '"') or ord(char) < 0x20 or ord(char) == 0x7F:
+            escaped.append(f"%{ord(char):02X}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
 
 
 def elem2dict(node):
@@ -545,11 +576,22 @@ class HTTPAdapterBlocksize(requests.adapters.HTTPAdapter):
 class BESConnection:
     """BigFix RESTAPI connection abstraction class."""
 
-    def __init__(self, username, password, rootserver, verify=False):
+    def __init__(
+        self, username, password, rootserver, verify=False, timeout=DEFAULT_TIMEOUT
+    ):
+        """Create a connection to the BigFix REST API.
+
+        Arguments:
+            timeout: default `timeout` for each request, as used by
+                `requests`, such as 60 or (connect, read). A timeout passed to a
+                request wins. Defaults to DEFAULT_TIMEOUT, None means requests
+                wait indefinitely.
+        """
         if not verify:
             # disable SSL warnings
             requests.packages.urllib3.disable_warnings()  # pylint: disable=no-member
         self.verify = verify
+        self.timeout = timeout
         self.last_connected = None
 
         self.username = username
@@ -625,6 +667,7 @@ class BESConnection:
 
     def get(self, path="help", **kwargs):
         """HTTP GET request."""
+        kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
         return RESTResult(
             self.session.get(self.url(path), verify=self.verify, **kwargs)
@@ -632,6 +675,7 @@ class BESConnection:
 
     def post(self, path, data, validate_xml=None, **kwargs):
         """HTTP POST request."""
+        kwargs.setdefault("timeout", self.timeout)
 
         # if validate_xml is true, data must validate to xml schema
         # if validate_xml is false, no schema check will be made
@@ -652,6 +696,7 @@ class BESConnection:
 
     def put(self, path, data, validate_xml=None, **kwargs):
         """HTTP PUT request."""
+        kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
 
         # if validate_xml is true, data must validate to xml schema
@@ -672,6 +717,7 @@ class BESConnection:
 
     def delete(self, path, **kwargs):
         """HTTP DELETE request."""
+        kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
         return RESTResult(
             self.session.delete(self.url(path), verify=self.verify, **kwargs)
@@ -917,21 +963,33 @@ class BESConnection:
             besapi_logger.error("%s is not readable", bes_file_path)
             raise FileNotFoundError(f"{bes_file_path} is not readable")
 
+        with open(bes_file_path, "rb") as f:
+            content = f.read()
+
+        return self.import_bes_xml_to_site(content, site_path)
+
+    def import_bes_xml_to_site(self, bes_xml, site_path=None):
+        """Import BES XML content (str or bytes) to site.
+
+        This avoids writing a temporary .bes file for generated content.
+
+        Returns:
+            The RESTResult, or None if the BES XML is not valid.
+        """
+        if isinstance(bes_xml, str):
+            bes_xml = bes_xml.encode("utf-8")
+
         site_path = self.get_current_site_path(site_path)
 
         self.validate_site_path(site_path, False, True)
 
-        with open(bes_file_path, "rb") as f:
-            content = f.read()
+        # validate BES XML contents:
+        if not validate_xsd(bes_xml):
+            besapi_logger.error("BES XML to import to %s is not valid", site_path)
+            return None
 
-            # validate BES File contents:
-            if not validate_xsd(content):
-                besapi_logger.error("%s is not valid", bes_file_path)
-                return None
-
-            # https://developer.bigfix.com/rest-api/api/import.html
-            result = self.post(f"import/{site_path}", content)
-            return result
+        # https://developer.bigfix.com/rest-api/api/import.html
+        return self.post(f"import/{site_path}", bes_xml)
 
     def create_site_from_file(self, bes_file_path, site_type="custom"):
         """Create new site."""
