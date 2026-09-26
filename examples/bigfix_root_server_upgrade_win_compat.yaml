@@ -1,0 +1,146 @@
+---
+# Compatibility data used by bigfix_root_server_upgrade_win.py to plan the order of
+# in-place upgrades of the BigFix server, Microsoft SQL Server and Windows Server.
+#
+# Every section lists its sources and the date they were read. Only add a
+# combination here once it is confirmed from the listed source: anything
+# missing is treated as "not supported / verify manually", never as supported.
+#
+# versions of BigFix are the minimum patch level that supports the item.
+# SQL Server servicing levels are RTM, SP1, SP2, SP3, SP4.
+
+# BigFix server (root server) support, per BigFix version line:
+bigfix_server:
+  "10.0":
+    sources:
+      - https://support.hcl-software.com/csm?id=kb_article&sysparm_article=KB0087327
+      - https://help.hcl-software.com/bigfix/10.0/platform/Platform/Installation/c_database_requirements.html
+    retrieved: "2026-09-26"
+    status: verified
+    windows:
+      "2012 R2": "10.0.0"
+      "2016": "10.0.0"
+      "2019": "10.0.0"
+      "2022": "10.0.5"
+    mssql:
+      "2012": "10.0.0"
+      "2014": "10.0.0"
+      "2016": "10.0.0"
+      "2017": "10.0.0"
+      "2019": "10.0.2"
+      "2022": "10.0.10"
+    min_db_compat_level: 110
+    notes:
+      - "Windows Server 2012 R2: the WebUI installation is no longer supported."
+      - "Up to BigFix 10 Patch 7 the SQL Server Native Client is needed."
+  "11.0":
+    sources:
+      - https://support.hcl-software.com/csm?id=kb_article&sysparm_article=KB0104120
+      - https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/c_database_requirements.html
+    retrieved: "2026-09-26"
+    status: verified
+    windows:
+      "2016": "11.0.0"
+      "2019": "11.0.0"
+      "2022": "11.0.0"
+      "2025": "11.0.3"
+    mssql:
+      "2014": "11.0.0"
+      "2016": "11.0.0"
+      "2017": "11.0.0"
+      "2019": "11.0.0"
+      "2022": "11.0.0"
+      "2025": "11.0.6"
+    min_db_compat_level: 120
+    notes:
+      - "BigFix 11 Patch 8 and later need the Microsoft ODBC Driver 17."
+
+# upgrading the BigFix server into a version line:
+bigfix_upgrade_paths:
+  "11.0":
+    sources:
+      - https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/c_upgrade_paths.html
+      - https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/c_before_upgrading.html
+    retrieved: "2026-09-26"
+    status: verified
+    min_from: "10.0.7"
+    prerequisites:
+      - "The BigFix server must be at 10.0.7 or later."
+      - "Enable Enhanced Security before upgrading."
+      - "Back up the server and databases, plus license.pvk, license.crt and masthead.afxm."
+      - "Stop the WebUI service, close all consoles and stop remote Web Reports servers."
+      - "Temporarily disable SQL Server replication if it is used."
+
+# SQL Server versions supported on each Windows Server version, with the
+# minimum SQL servicing level. Missing means not supported.
+mssql_on_windows:
+  sources:
+    - https://learn.microsoft.com/en-us/troubleshoot/sql/general/use-sql-server-in-windows
+  retrieved: "2026-09-26"
+  status: verified
+  versions:
+    "2025": {"2019": RTM, "2022": RTM, "2025": RTM}
+    "2022": {"2016": RTM, "2019": RTM, "2022": RTM, "2025": RTM}
+    "2019": {"2016": RTM, "2019": RTM, "2022": RTM, "2025": RTM}
+    "2017": {"2012": RTM, "2012 R2": RTM, "2016": RTM, "2019": RTM, "2022": RTM}
+    "2016": {"2012": SP3, "2012 R2": SP3, "2016": SP3, "2019": SP3}
+    "2014": {"2012": SP3, "2012 R2": SP3, "2016": SP3, "2019": SP3}
+    "2012": {"2012": SP4, "2012 R2": SP4, "2016": SP4, "2019": SP4}
+    "2008 R2": {"2012": SP3, "2012 R2": SP3}
+    "2008": {"2012": SP4, "2012 R2": SP4}
+
+# in-place SQL Server upgrades: target version -> source version -> minimum
+# servicing level of the source. Missing means not supported in-place.
+mssql_upgrade_paths:
+  sources:
+    - https://learn.microsoft.com/en-us/sql/database-engine/install-windows/supported-version-and-edition-upgrades-2017
+    - https://learn.microsoft.com/en-us/sql/database-engine/install-windows/supported-version-and-edition-upgrades-version-15
+    - https://learn.microsoft.com/en-us/sql/database-engine/install-windows/supported-version-and-edition-upgrades-2022
+    - https://learn.microsoft.com/en-us/sql/database-engine/install-windows/supported-version-and-edition-upgrades-2025
+  retrieved: "2026-09-26"
+  status: verified
+  versions:
+    "2017": {"2008": SP4, "2008 R2": SP3, "2012": SP2, "2014": RTM, "2016": RTM}
+    "2019": {"2012": SP4, "2014": SP2, "2016": RTM, "2017": RTM}
+    "2022": {"2012": SP4, "2014": SP3, "2016": SP3, "2017": RTM, "2019": RTM}
+    "2025": {"2014": SP3, "2016": SP3, "2017": RTM, "2019": RTM, "2022": RTM}
+  notes:
+    - "Upgrade is blocked if there is a pending restart."
+    - "Upgrade is blocked if the Windows Installer service is not running."
+    - "The SQL Server Agent service account must be a member of the sysadmin role."
+    - "An in-place upgrade does not raise a database compatibility level of 100 or higher."
+
+# in-place Windows Server upgrades with installation media:
+windows_upgrade_paths:
+  sources:
+    - https://learn.microsoft.com/en-us/windows-server/get-started/install-upgrade-migrate
+  retrieved: "2026-09-26"
+  status: verified
+  versions:
+    "2012": ["2012 R2", "2016"]
+    "2012 R2": ["2016", "2019", "2025"]
+    "2016": ["2019", "2022", "2025"]
+    "2019": ["2022", "2025"]
+    "2022": ["2025"]
+  notes:
+    - "Switching between Server Core and Desktop Experience is not supported."
+    - "Changing the OS language or upgrading to an evaluation copy is not supported."
+    - "Disable NIC Teaming before the upgrade, re-enable it after."
+    - "Each Windows Server upgrade needs a license for the target version."
+
+# the native database compatibility level of each SQL Server version:
+mssql_max_compat_level:
+  sources:
+    - https://learn.microsoft.com/en-us/sql/t-sql/statements/alter-database-transact-sql-compatibility-level
+  retrieved: "2026-09-26"
+  status: verified
+  versions:
+    "2008": 100
+    "2008 R2": 100
+    "2012": 110
+    "2014": 120
+    "2016": 130
+    "2017": 140
+    "2019": 150
+    "2022": 160
+    "2025": 170
