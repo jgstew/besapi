@@ -1,9 +1,23 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "besapi[plugins]>=4.3.1",
+# ]
+#
+# [tool.uv]
+# # supply chain: skip releases under a week old, except besapi itself:
+# exclude-newer = "7 days"
+# exclude-newer-package = { besapi = false }
+# ///
 """
 Generate patching baselines from sites.
 
 Config is read from `baseline_plugin.config.yaml` next to this script.
 
 requires `besapi[plugins]`, install with command `pip install besapi[plugins]`
+
+or run it with its PEP 723 dependencies installed automatically:
+`uv run baseline_plugin.py`
 
 Example Usage:
 python baseline_plugin.py -r https://localhost:52311/api -u API_USER -p API_PASSWORD

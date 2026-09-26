@@ -1,7 +1,21 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "besapi>=4.3.1",
+# ]
+#
+# [tool.uv]
+# # supply chain: skip releases under a week old, except besapi itself:
+# exclude-newer = "7 days"
+# exclude-newer-package = { besapi = false }
+# ///
 """
 Setup the root server server plugin service with creds provided.
 
 requires `besapi`, install with command `pip install besapi`
+
+or run it with its PEP 723 dependencies installed automatically:
+`uv run setup_server_plugin_service.py`
 
 Example Usage:
 python setup_server_plugin_service.py -r https://localhost:52311/api -u API_USER -p API_PASSWORD

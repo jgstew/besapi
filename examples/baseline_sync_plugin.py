@@ -1,7 +1,21 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "besapi>=4.3.1",
+# ]
+#
+# [tool.uv]
+# # supply chain: skip releases under a week old, except besapi itself:
+# exclude-newer = "7 days"
+# exclude-newer-package = { besapi = false }
+# ///
 """
 This will sync baselines that are not in sync.
 
 requires `besapi`, install with command `pip install besapi`
+
+or run it with its PEP 723 dependencies installed automatically:
+`uv run baseline_sync_plugin.py`
 
 LIMITATION: This does not work with baselines in the actionsite
 - Only works on baselines in custom sites

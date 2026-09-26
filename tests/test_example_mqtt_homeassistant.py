@@ -5,6 +5,7 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import sys
 import types
 
@@ -346,3 +347,32 @@ def test_main_does_not_protect_secrets_when_publish_fails(plugin, monkeypatch):
         main()
 
     assert calls == [("config", plugin.SECRET_CONFIG_KEYS), "publish"]
+
+
+def read_pep723_metadata(path):
+    """Parse the PEP 723 `script` block, using the PEP's reference regex."""
+    tomllib = pytest.importorskip("tomllib")  # standard library in Python 3.11+
+    regex = r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
+    with open(path, encoding="utf-8") as stream:
+        script = stream.read()
+    matches = [m for m in re.finditer(regex, script) if m.group("type") == "script"]
+    assert len(matches) == 1, "expected exactly one PEP 723 script block"
+    content = "".join(
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in matches[0].group("content").splitlines(keepends=True)
+    )
+    return tomllib.loads(content)
+
+
+def test_pep723_script_metadata():
+    """Test the plugin declares its dependencies, so `uv run` can install them."""
+    metadata = read_pep723_metadata(PLUGIN_PATH)
+
+    assert metadata["requires-python"] == ">=3.9"
+    # 4.4.1 added config secret encryption, [plugins] adds ruamel.yaml:
+    assert "besapi[plugins]>=4.4.1" in metadata["dependencies"]
+    # 2.x raises on a rejected login, before the password is encrypted:
+    assert "paho-mqtt>=2.0" in metadata["dependencies"]
+    # supply chain: skip releases under a week old, except besapi itself:
+    assert metadata["tool"]["uv"]["exclude-newer"] == "7 days"
+    assert metadata["tool"]["uv"]["exclude-newer-package"] == {"besapi": False}

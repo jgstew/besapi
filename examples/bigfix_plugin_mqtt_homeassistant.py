@@ -1,3 +1,15 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "besapi[plugins]>=4.4.1",
+#     "paho-mqtt>=2.0",
+# ]
+#
+# [tool.uv]
+# # supply chain: skip releases under a week old, except besapi itself:
+# exclude-newer = "7 days"
+# exclude-newer-package = { besapi = false }
+# ///
 """
 Publish BigFix server info to MQTT so Home Assistant adds it as a device.
 
@@ -10,6 +22,9 @@ Each run queries BigFix with session relevance and publishes, all retained:
 
 requires `besapi[plugins]` and `paho-mqtt`, install with command:
 `pip install besapi[plugins] paho-mqtt`
+
+or run it with its PEP 723 dependencies installed automatically:
+`uv run bigfix_plugin_mqtt_homeassistant.py`
 
 MQTT settings are read from `bigfix_plugin_mqtt_homeassistant.config.yaml`
 next to this script. Copy `bigfix_plugin_mqtt_homeassistant.config.example.yaml`
