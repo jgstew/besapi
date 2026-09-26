@@ -335,6 +335,8 @@ def test_protect_plugin_config_secrets_missing_key(
     assert open(config_path, encoding="utf-8").read() == contents
 
 
+# NOTE: on Windows, os.chmod only sets the read only flag, there is no 0o600:
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
 def test_protect_plugin_config_secrets_keeps_file_mode(
     root_server, tmp_path
 ):  # pylint: disable=unused-argument
