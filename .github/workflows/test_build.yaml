@@ -45,7 +45,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install build tools
-        run: pip install setuptools wheel build pyinstaller pytest
+        run: pip install setuptools wheel build pyinstaller pytest pytest-cov
 
       - name: Install requirements
         shell: bash
@@ -60,7 +60,7 @@ jobs:
         run: python tests/tests.py
 
       - name: Run PyTest
-        run: python -m pytest
+        run: python -m pytest --cov --cov-report=term
 
       - name: Test invoke directly src/bescli/bescli.py
         run: python src/bescli/bescli.py ls logout clear error_count version exit
