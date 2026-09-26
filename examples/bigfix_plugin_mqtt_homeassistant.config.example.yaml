@@ -4,6 +4,8 @@ mqtt:
   host: homeassistant.local
   port: 1883
   username: <MQTT_USER>
+  # plaintext is encrypted in place, once it has worked, when run by the
+  # root server plugin service:
   password: <MQTT_PASSWORD>
   # true for a TLS broker (usually port 8883), using the system CA certs:
   tls: false

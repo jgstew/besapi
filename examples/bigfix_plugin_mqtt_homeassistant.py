@@ -15,6 +15,13 @@ MQTT settings are read from `bigfix_plugin_mqtt_homeassistant.config.yaml`
 next to this script. Copy `bigfix_plugin_mqtt_homeassistant.config.example.yaml`
 to that name and fill in the real broker and creds.
 
+When run as a BigFix Server Plugin Service on the root server, a plaintext
+mqtt password in the config file is replaced with an encrypted one after the
+first successful publish, using the same method as the server's own REST API
+password (CryptoUtility on Linux, DPAPI on Windows). A password the broker
+rejects stays plaintext. To change it later, put the new plaintext password
+in the config file again.
+
 Example Usage:
 python bigfix_plugin_mqtt_homeassistant.py -r https://localhost:52311/api -u API_USER -p API_PASSWORD
 
@@ -95,6 +102,10 @@ DEFAULT_SENSORS = [
     },
     {"name": "Relevant Critical Patches", "relevance": CRITICAL_PATCHES_RELEVANCE},
 ]
+
+# decrypted when loading the config, and encrypted in the file if plaintext
+# once publishing with it has worked:
+SECRET_CONFIG_KEYS = [("mqtt", "password")]
 
 # always added, the time this run published to MQTT:
 LAST_UPDATE_SENSOR = {"name": "Last Update", "device_class": "timestamp"}
@@ -228,7 +239,9 @@ def publish(messages, mqtt_config):
 def main():
     """Execution starts here."""
     with besapi.plugin_utilities.init_plugin(__version__) as (_args, bes_conn):
-        config = besapi.plugin_utilities.get_plugin_config()
+        config = besapi.plugin_utilities.get_plugin_config(
+            secret_keys=SECRET_CONFIG_KEYS
+        )
         mqtt_config = config["mqtt"]
         sensors = config.get("sensors") or DEFAULT_SENSORS
 
@@ -248,6 +261,9 @@ def main():
             ),
             mqtt_config,
         )
+
+        # only now that the broker accepted it, encrypt a plaintext password:
+        besapi.plugin_utilities.protect_plugin_config_secrets(SECRET_CONFIG_KEYS)
 
     return 0
 

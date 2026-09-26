@@ -31,6 +31,9 @@ except (ImportError, ModuleNotFoundError) as e:
         "This script requires the pywin32 package. Install it via 'pip install pywin32'."
     ) from e
 
+# marks a secret encrypted by protect_secret(), such as in a plugin config file:
+PROTECTED_SECRET_PREFIX = "{dpapi}"
+
 
 def win_dpapi_encrypt_str(
     plaintext: str, scope_flags: int = 4, entropy: Union[str, bytes, None] = None
@@ -113,6 +116,46 @@ def win_dpapi_decrypt_base64(
 
     logger.debug("Decryption returned no data.")
     return None
+
+
+def protect_secret(plaintext: str) -> Union[str, None]:
+    """Encrypt a secret, such as a password in a plugin config file.
+
+    Uses machine scope DPAPI, the same as the BigFix server RESTPassword.
+
+    Args:
+        plaintext: The secret to encrypt.
+
+    Returns:
+        The encrypted secret with the PROTECTED_SECRET_PREFIX, otherwise None.
+    """
+    encrypted = win_dpapi_encrypt_str(plaintext)
+
+    if not encrypted:
+        return None
+
+    return PROTECTED_SECRET_PREFIX + encrypted
+
+
+def unprotect_secret(protected: str) -> Union[str, None]:
+    """Decrypt a secret from protect_secret().
+
+    Args:
+        protected: The encrypted secret, including the PROTECTED_SECRET_PREFIX.
+
+    Returns:
+        The decrypted secret, otherwise None, including if the prefix is missing.
+    """
+    if not protected or not protected.startswith(PROTECTED_SECRET_PREFIX):
+        logger.debug("value is not a protected secret, not decrypting.")
+        return None
+
+    try:
+        return win_dpapi_decrypt_base64(protected[len(PROTECTED_SECRET_PREFIX) :])
+    # NOTE: broad, bad base64 and DPAPI failures raise unrelated error types:
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to decrypt protected secret: %s", e)
+        return None
 
 
 def win_registry_value_read(hive, subkey, value_name):

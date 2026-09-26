@@ -266,3 +266,94 @@ def test_get_besconn_root_linux_not_utf8(tmp_path):
     file_path = tmp_path / plugin_utilities_linux.CREDENTIALS_FILE_NAME
     file_path.write_bytes(b"\xff\xfe\x00\n")
     assert plugin_utilities_linux.get_besconn_root_linux(str(file_path)) is None
+
+
+def test_crypto_utility_encrypt(monkeypatch, tmp_path):
+    """Test that plaintext is passed to CryptoUtility with the encrypt args."""
+    crypto_path = str(tmp_path / plugin_utilities_linux.CRYPTO_UTILITY_NAME)
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout="{aes,1}ENC==\n", stderr="")
+
+    monkeypatch.setattr(plugin_utilities_linux.subprocess, "run", fake_run)
+
+    result = plugin_utilities_linux.crypto_utility_encrypt(
+        "plaintextpw", crypto_utility_path=crypto_path
+    )
+    assert result == "{aes,1}ENC=="
+    cmd, kwargs = calls[0]
+    # encrypting is the CryptoUtility default, there is no `-e` flag:
+    assert cmd == [crypto_path, "-i", "plaintextpw"]
+    # must not go through a shell:
+    assert not kwargs.get("shell", False)
+
+
+def test_crypto_utility_encrypt_failure(monkeypatch, tmp_path):
+    """Test that a non-zero return code results in None."""
+    crypto_path = str(tmp_path / plugin_utilities_linux.CRYPTO_UTILITY_NAME)
+
+    def fake_run(cmd, **_kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="bad input")
+
+    monkeypatch.setattr(plugin_utilities_linux.subprocess, "run", fake_run)
+    assert (
+        plugin_utilities_linux.crypto_utility_encrypt(
+            "plaintextpw", crypto_utility_path=crypto_path
+        )
+        is None
+    )
+
+
+def test_crypto_utility_encrypt_empty_value():
+    """Test that an empty plaintext results in None."""
+    assert plugin_utilities_linux.crypto_utility_encrypt("") is None
+
+
+def test_protect_secret(monkeypatch):
+    """Test that a protected secret is the CryptoUtility output with a prefix."""
+    monkeypatch.setattr(
+        plugin_utilities_linux,
+        "crypto_utility_encrypt",
+        lambda plaintext, **_kw: "{aes,1}ENC_" + plaintext,
+    )
+    assert (
+        plugin_utilities_linux.protect_secret("plaintextpw")
+        == "{cryptoutility}{aes,1}ENC_plaintextpw"
+    )
+
+
+def test_protect_secret_failure(monkeypatch):
+    """Test that a failed encryption results in None, not a bare prefix."""
+    monkeypatch.setattr(
+        plugin_utilities_linux, "crypto_utility_encrypt", lambda *_a, **_kw: None
+    )
+    assert plugin_utilities_linux.protect_secret("plaintextpw") is None
+
+
+def test_unprotect_secret(monkeypatch):
+    """Test that the prefix is removed before decrypting with CryptoUtility."""
+    decrypted = []
+
+    def fake_decrypt(encrypted_value, **_kwargs):
+        decrypted.append(encrypted_value)
+        return "plaintextpw"
+
+    monkeypatch.setattr(plugin_utilities_linux, "crypto_utility_decrypt", fake_decrypt)
+
+    assert (
+        plugin_utilities_linux.unprotect_secret("{cryptoutility}{aes,1}ENC==")
+        == "plaintextpw"
+    )
+    assert decrypted == ["{aes,1}ENC=="]
+
+
+def test_unprotect_secret_not_protected(monkeypatch):
+    """Test that a value without the prefix is not sent to CryptoUtility."""
+
+    def fake_decrypt(*_args, **_kwargs):
+        raise AssertionError("must not decrypt a value without the prefix")
+
+    monkeypatch.setattr(plugin_utilities_linux, "crypto_utility_decrypt", fake_decrypt)
+    assert plugin_utilities_linux.unprotect_secret("plaintextpw") is None

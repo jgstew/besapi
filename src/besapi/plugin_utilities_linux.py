@@ -33,6 +33,14 @@ BES_APPLICATION_DIRS = [
 CRYPTO_UTILITY_NAME = "CryptoUtility"
 CREDENTIALS_FILE_NAME = "MasterOperatorCredentials"
 
+CRYPTO_UTILITY_DECRYPT_ARGS = ["-d", "-i"]
+# NOTE: encrypting is the CryptoUtility default, there is no `-e` flag. From its
+# usage: `CryptoUtility [-d] [-u] [-i <input text> | -f <input file path>]`
+CRYPTO_UTILITY_ENCRYPT_ARGS = ["-i"]
+
+# marks a secret encrypted by protect_secret(), such as in a plugin config file:
+PROTECTED_SECRET_PREFIX = "{cryptoutility}"
+
 # env var overrides, keyed by the file name they override:
 BES_APPLICATION_FILE_ENV_VARS = {
     CRYPTO_UTILITY_NAME: "BESAPI_CRYPTO_UTILITY",
@@ -135,6 +143,66 @@ def parse_credentials_file(file_path: Union[str, None] = None) -> Dict[str, str]
     return dict(config[_INI_SECTION])
 
 
+def _run_crypto_utility(
+    crypto_args: List[str],
+    value: str,
+    crypto_utility_path: Union[str, None] = None,
+    timeout: int = 30,
+) -> Union[str, None]:
+    """Run the BigFix server CryptoUtility binary on one value.
+
+    Args:
+        crypto_args: The args that go before the value, such as `["-d", "-i"]`.
+        value: The value to encrypt or decrypt.
+        crypto_utility_path: Path to CryptoUtility, located automatically if not given.
+        timeout: Seconds to wait for CryptoUtility before giving up.
+
+    Returns:
+        The stripped stdout of CryptoUtility, otherwise None.
+    """
+    if not crypto_utility_path:
+        crypto_utility_path = find_bes_application_file(CRYPTO_UTILITY_NAME)
+        if not crypto_utility_path:
+            logger.debug("CryptoUtility not found, cannot run it.")
+            return None
+
+    # NOTE: the command is a list and shell is False,
+    # so the value is never interpreted by a shell:
+    try:
+        result = subprocess.run(  # nosec B603
+            [crypto_utility_path, *crypto_args, value],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=timeout,
+        )
+    # TimeoutExpired covers a hung CryptoUtility,
+    # OSError covers it being missing or not executable:
+    except (subprocess.TimeoutExpired, OSError) as err:
+        logger.error("failed to run CryptoUtility: %s", err)
+        return None
+
+    if result.returncode != 0:
+        # NOTE: never log stdout here, it could contain the plaintext:
+        logger.error(
+            "CryptoUtility failed with return code %s: %s",
+            result.returncode,
+            (result.stderr or "").strip(),
+        )
+        return None
+
+    output = (result.stdout or "").strip()
+
+    if not output:
+        logger.debug("CryptoUtility returned no data.")
+        return None
+
+    # NOTE: only the length is logged, never the value:
+    logger.debug("CryptoUtility output length: %s", len(output))
+    return output
+
+
 def crypto_utility_decrypt(
     encrypted_value: str,
     crypto_utility_path: Union[str, None] = None,
@@ -156,47 +224,70 @@ def crypto_utility_decrypt(
         logger.warning("No encrypted value provided for decryption.")
         return None
 
-    if not crypto_utility_path:
-        crypto_utility_path = find_bes_application_file(CRYPTO_UTILITY_NAME)
-        if not crypto_utility_path:
-            logger.debug("CryptoUtility not found, cannot decrypt.")
-            return None
+    return _run_crypto_utility(
+        CRYPTO_UTILITY_DECRYPT_ARGS, encrypted_value, crypto_utility_path, timeout
+    )
 
-    # NOTE: the command is a list and shell is False,
-    # so the encrypted value is never interpreted by a shell:
-    try:
-        result = subprocess.run(  # nosec B603
-            [crypto_utility_path, "-d", "-i", encrypted_value],
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=False,
-            timeout=timeout,
-        )
-    # TimeoutExpired covers a hung CryptoUtility,
-    # OSError covers it being missing or not executable:
-    except (subprocess.TimeoutExpired, OSError) as err:
-        logger.error("failed to run CryptoUtility: %s", err)
+
+def crypto_utility_encrypt(
+    plaintext: str,
+    crypto_utility_path: Union[str, None] = None,
+    timeout: int = 30,
+) -> Union[str, None]:
+    """Encrypt a value using the BigFix server CryptoUtility binary.
+
+    Equivalent to: `CryptoUtility -i "<plaintext>"`
+
+    The output is a `{aes,1}` prefixed value.
+
+    Args:
+        plaintext: The value to encrypt.
+        crypto_utility_path: Path to CryptoUtility, located automatically if not given.
+        timeout: Seconds to wait for CryptoUtility before giving up.
+
+    Returns:
+        The encrypted string exactly as CryptoUtility printed it, otherwise None.
+    """
+    if not plaintext or plaintext.strip() == "":
+        logger.warning("No plaintext provided for encryption.")
         return None
 
-    if result.returncode != 0:
-        # NOTE: never log stdout here, it would contain the plaintext:
-        logger.error(
-            "CryptoUtility failed with return code %s: %s",
-            result.returncode,
-            (result.stderr or "").strip(),
-        )
+    return _run_crypto_utility(
+        CRYPTO_UTILITY_ENCRYPT_ARGS, plaintext, crypto_utility_path, timeout
+    )
+
+
+def protect_secret(plaintext: str) -> Union[str, None]:
+    """Encrypt a secret, such as a password in a plugin config file.
+
+    Args:
+        plaintext: The secret to encrypt.
+
+    Returns:
+        The encrypted secret with the PROTECTED_SECRET_PREFIX, otherwise None.
+    """
+    encrypted = crypto_utility_encrypt(plaintext)
+
+    if not encrypted:
         return None
 
-    decrypted = (result.stdout or "").strip()
+    return PROTECTED_SECRET_PREFIX + encrypted
 
-    if not decrypted:
-        logger.debug("CryptoUtility returned no data.")
+
+def unprotect_secret(protected: str) -> Union[str, None]:
+    """Decrypt a secret from protect_secret().
+
+    Args:
+        protected: The encrypted secret, including the PROTECTED_SECRET_PREFIX.
+
+    Returns:
+        The decrypted secret, otherwise None, including if the prefix is missing.
+    """
+    if not protected or not protected.startswith(PROTECTED_SECRET_PREFIX):
+        logger.debug("value is not a protected secret, not decrypting.")
         return None
 
-    # NOTE: only the length is logged, never the plaintext:
-    logger.debug("CryptoUtility decrypted value length: %s", len(decrypted))
-    return decrypted
+    return crypto_utility_decrypt(protected[len(PROTECTED_SECRET_PREFIX) :])
 
 
 def get_linux_credentials_rest_pass(

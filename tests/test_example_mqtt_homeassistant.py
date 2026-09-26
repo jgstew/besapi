@@ -1,5 +1,6 @@
 """Tests for examples/bigfix_plugin_mqtt_homeassistant.py, without a broker."""
 
+import contextlib
 import datetime
 import importlib.util
 import json
@@ -281,3 +282,67 @@ def test_publish_requires_host(plugin):
     """Test a config without a broker host fails clearly."""
     with pytest.raises(ValueError, match="host"):
         plugin.publish([], {"port": 1883})
+
+
+def run_main_with_fakes(plugin, monkeypatch, publish):
+    """Run main() with fake BigFix, config and publish, return the call log."""
+    calls = []
+
+    @contextlib.contextmanager
+    def fake_init_plugin(_version):
+        yield None, FakeConnection(
+            {plugin.MASTHEAD_RELEVANCE: [[SERIAL, FQDN]], "number of bes users": [10]},
+            {"serverinfo": '{"version": "11.0.6.137"}'},
+        )
+
+    def fake_get_plugin_config(*_args, **kwargs):
+        calls.append(("config", kwargs.get("secret_keys")))
+        return {
+            "mqtt": {"host": "broker", "password": "plaintextpw"},
+            "sensors": [{"name": "Users", "relevance": "number of bes users"}],
+        }
+
+    def fake_publish(messages, mqtt_config):
+        calls.append("publish")
+        publish(messages, mqtt_config)
+
+    def fake_protect(secret_keys, *_args, **_kwargs):
+        calls.append(("protect", secret_keys))
+        return []
+
+    utils = plugin.besapi.plugin_utilities
+    monkeypatch.setattr(utils, "init_plugin", fake_init_plugin)
+    monkeypatch.setattr(utils, "get_plugin_config", fake_get_plugin_config)
+    monkeypatch.setattr(utils, "protect_plugin_config_secrets", fake_protect)
+    monkeypatch.setattr(plugin, "publish", fake_publish)
+
+    return calls, plugin.main
+
+
+def test_main_protects_secrets_after_publish(plugin, monkeypatch):
+    """Test the plaintext password is only encrypted once it has worked."""
+    calls, main = run_main_with_fakes(plugin, monkeypatch, lambda *_a: None)
+
+    assert main() == 0
+
+    assert ("mqtt", "password") in plugin.SECRET_CONFIG_KEYS
+    assert calls == [
+        # decrypts an already encrypted password:
+        ("config", plugin.SECRET_CONFIG_KEYS),
+        "publish",
+        ("protect", plugin.SECRET_CONFIG_KEYS),
+    ]
+
+
+def test_main_does_not_protect_secrets_when_publish_fails(plugin, monkeypatch):
+    """Test a password the broker rejected is left as plaintext to fix."""
+
+    def failing_publish(*_args):
+        raise ConnectionRefusedError("not authorised")
+
+    calls, main = run_main_with_fakes(plugin, monkeypatch, failing_publish)
+
+    with pytest.raises(ConnectionRefusedError):
+        main()
+
+    assert calls == [("config", plugin.SECRET_CONFIG_KEYS), "publish"]
