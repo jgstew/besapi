@@ -1,91 +1,31 @@
 """
 Generate patching baselines from sites.
 
-requires `besapi`, install with command `pip install besapi`
+Config is read from `baseline_plugin.config.yaml` next to this script.
+
+requires `besapi[plugins]`, install with command `pip install besapi[plugins]`
 
 Example Usage:
 python baseline_plugin.py -r https://localhost:52311/api -u API_USER -p API_PASSWORD
 
+Example Usage with besapi config file:
+python baseline_plugin.py
+
+This can also be run as a BigFix Server Plugin Service.
+
 References:
 - https://github.com/jgstew/besapi/blob/master/examples/rest_cmd_args.py
 - https://github.com/jgstew/besapi/blob/master/examples/baseline_by_relevance.py
-- https://github.com/jgstew/tools/blob/master/Python/locate_self.py
 """
 
 import datetime
 import logging
 import os
-import platform
-import sys
 
-import ruamel.yaml
-
-import besapi
 import besapi.plugin_utilities
 
-__version__ = "1.2.1"
-verbose = 0
+__version__ = "1.3.0"
 bes_conn = None
-invoke_folder = None
-config_yaml = None
-
-
-def get_invoke_folder():
-    """Get the folder the script was invoked from.
-
-    References:
-    - https://github.com/jgstew/tools/blob/master/Python/locate_self.py
-    """
-    # using logging here won't actually log it to the file:
-
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        if verbose:
-            print("running in a PyInstaller bundle")
-        invoke_folder = os.path.abspath(os.path.dirname(sys.executable))
-    else:
-        if verbose:
-            print("running in a normal Python process")
-        invoke_folder = os.path.abspath(os.path.dirname(__file__))
-
-    if verbose:
-        print(f"invoke_folder = {invoke_folder}")
-
-    return invoke_folder
-
-
-def get_config(path="baseline_plugin.config.yaml"):
-    """Load config from yaml file."""
-
-    if not (os.path.isfile(path) and os.access(path, os.R_OK)):
-        path = os.path.join(invoke_folder, path)
-
-    logging.info("loading config from: `%s`", path)
-
-    if not (os.path.isfile(path) and os.access(path, os.R_OK)):
-        raise FileNotFoundError(path)
-
-    with open(path, encoding="utf-8") as stream:
-        yaml = ruamel.yaml.YAML(typ="safe", pure=True)
-        config_yaml = yaml.load(stream)
-
-    if verbose > 1:
-        logging.debug(config_yaml["bigfix"])
-
-    return config_yaml
-
-
-def test_file_exists(path):
-    """Return true if file exists."""
-
-    if not (os.path.isfile(path) and os.access(path, os.R_OK)):
-        path = os.path.join(invoke_folder, path)
-
-    logging.info("testing if exists: `%s`", path)
-
-    if os.path.isfile(path) and os.access(path, os.R_OK) and os.access(path, os.W_OK):
-        return path
-
-    return False
 
 
 def create_baseline_from_site(site):
@@ -247,57 +187,22 @@ def process_baselines(config):
 
 def main():
     """Execution starts here."""
-    print("main() start")
+    global bes_conn
 
-    parser = besapi.plugin_utilities.setup_plugin_argparse()
+    with besapi.plugin_utilities.init_plugin(__version__) as (_args, conn):
+        bes_conn = conn
 
-    # allow unknown args to be parsed instead of throwing an error:
-    args, _unknown = parser.parse_known_args()
+        config = besapi.plugin_utilities.get_plugin_config()
+        automation = config["bigfix"]["content"]["Baselines"]["automation"]
 
-    # allow set global scoped vars
-    global bes_conn, verbose, config_yaml, invoke_folder
-    verbose = args.verbose
+        if besapi.plugin_utilities.consume_trigger_file(
+            automation["trigger_file_path"]
+        ):
+            process_baselines(automation["sites"])
+        else:
+            logging.info("Trigger File Does Not Exist, skipping execution!")
 
-    # get folder the script was invoked from:
-    invoke_folder = get_invoke_folder()
-
-    # get path to put log file in:
-    log_filename = os.path.join(invoke_folder, "baseline_plugin.log")
-
-    logging_config = besapi.plugin_utilities.get_plugin_logging_config(
-        log_filename, verbose, args.console
-    )
-
-    logging.basicConfig(**logging_config)
-
-    logging.log(99, "----- Starting New Session ------")
-    logging.debug("invoke folder: %s", invoke_folder)
-    logging.debug("Python version: %s", platform.sys.version)
-    logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
-    logging.debug("this plugin's version: %s", __version__)
-
-    bes_conn = besapi.plugin_utilities.get_besapi_connection(args)
-
-    # get config:
-    config_yaml = get_config()
-
-    trigger_path = config_yaml["bigfix"]["content"]["Baselines"]["automation"][
-        "trigger_file_path"
-    ]
-
-    # check if file exists, if so, return path, else return false:
-    trigger_path = test_file_exists(trigger_path)
-
-    if trigger_path:
-        process_baselines(
-            config_yaml["bigfix"]["content"]["Baselines"]["automation"]["sites"]
-        )
-        # delete trigger file
-        os.remove(trigger_path)
-    else:
-        logging.info("Trigger File Does Not Exists, skipping execution!")
-
-    logging.log(99, "----- Ending Session ------")
+    return 0
 
 
 if __name__ == "__main__":
