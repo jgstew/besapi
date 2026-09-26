@@ -22,16 +22,22 @@ import random
 import site
 import string
 import sys
+import threading
 import urllib.parse
+from xml.sax.saxutils import escape as xml_escape
 
 import lxml.etree
 import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.1.5"
+__version__ = "4.3.1"
 
 besapi_logger = logging.getLogger("besapi")
+
+# default requests timeout for each REST API request: (connect, read) seconds
+# NOTE: long read timeout since some REST API calls, like exports, are slow
+DEFAULT_TIMEOUT = (90, 600)
 
 # pylint: disable=consider-using-f-string
 
@@ -63,6 +69,41 @@ def sanitize_txt(*args):
         )
 
     return tuple(sani_args)
+
+
+def relevance_string_escape(value: str) -> str:
+    """Escape text to embed inside a relevance "string literal".
+
+    Relevance string literals use `%XX` escapes, so `%` itself must be
+    escaped, as must `"` which would end the literal. Control characters
+    (tab, newline, ...) are escaped so the relevance stays on one line.
+
+    NOTE: `%XX` escapes are single bytes, so non-ASCII text is passed through
+    unchanged. Relevance only accepts characters in the FXF character set,
+    such as `é`; others, such as `✓`, are rejected by the evaluator however
+    they are written.
+
+    Verified with the BigFix client QnA, for example:
+        length of "100%25" = 4, "a%22b" = a"b
+
+    Example:
+        f'bes sites whose(name of it = "{relevance_string_escape(site_name)}")'
+    """
+    escaped = []
+    for char in value:
+        if char in ("%", '"') or ord(char) < 0x20 or ord(char) == 0x7F:
+            escaped.append(f"%{ord(char):02X}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
+
+
+def cdata_escape(text: str) -> str:
+    """Make text safe to place inside `<![CDATA[ ... ]]>`.
+
+    A literal `]]>` would end the CDATA section, so it is split across two.
+    """
+    return str(text).replace("]]>", "]]]]><![CDATA[>")
 
 
 def elem2dict(node):
@@ -182,7 +223,7 @@ def get_target_xml(targets=None):
                 # return "<AllComputers>false</AllComputers>"
             return "<AllComputers>true</AllComputers>"
         # treat as custom relevance:
-        return f"<CustomRelevance><![CDATA[{targets}]]></CustomRelevance>"
+        return f"<CustomRelevance><![CDATA[{cdata_escape(targets)}]]></CustomRelevance>"
 
     # if targets is array:
     if isinstance(targets, list):
@@ -198,7 +239,7 @@ def get_target_xml(targets=None):
             # array of computer names
             return (
                 "<ComputerName>"
-                + "</ComputerName><ComputerName>".join(targets)
+                + "</ComputerName><ComputerName>".join(map(xml_escape, targets))
                 + "</ComputerName>"
             )
 
@@ -208,6 +249,37 @@ def get_target_xml(targets=None):
     return "<CustomRelevance>False</CustomRelevance>"
 
 
+# compiled XSD schemas, cached per thread:
+_xsd_schemas_cache = threading.local()
+
+
+def _get_xsd_schemas():
+    """Load and compile the BES XML schemas, once per thread.
+
+    NOTE: compiling them takes a few ms, and every REST API result is validated.
+    Cached per thread since sharing lxml schema objects across threads is not
+    guaranteed to be safe, and besapi is used from threads.
+    """
+    cached = getattr(_xsd_schemas_cache, "schemas", None)
+    if cached is not None:
+        return cached
+
+    schemas = []
+    for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
+        schema_path = importlib.resources.files(__package__) / f"schemas/{xsd}"
+        with schema_path.open("r") as xsd_file:
+            xmlschema_doc = lxml.etree.parse(xsd_file)
+        try:
+            schemas.append(lxml.etree.XMLSchema(xmlschema_doc))
+        except lxml.etree.XMLSchemaParseError as err:
+            # this should only error if the XSD itself is malformed
+            besapi_logger.error("ERROR with `%s`: %s", xsd, err)
+            raise err
+
+    _xsd_schemas_cache.schemas = tuple(schemas)
+    return _xsd_schemas_cache.schemas
+
+
 def validate_xsd(doc):
     """Validate results using XML XSDs."""
     try:
@@ -215,23 +287,8 @@ def validate_xsd(doc):
     except BaseException:  # pylint: disable=broad-except
         return False
 
-    for xsd in ["BES.xsd", "BESAPI.xsd", "BESActionSettings.xsd"]:
-        schema_path = importlib.resources.files(__package__) / f"schemas/{xsd}"
-        with schema_path.open("r") as xsd_file:
-            xmlschema_doc = lxml.etree.parse(xsd_file)
-
-        # one schema may throw an error while another will validate
-        try:
-            xmlschema = lxml.etree.XMLSchema(xmlschema_doc)
-        except lxml.etree.XMLSchemaParseError as err:
-            # this should only error if the XSD itself is malformed
-            besapi_logger.error("ERROR with `%s`: %s", xsd, err)
-            raise err
-
-        if xmlschema.validate(xmldoc):
-            return True
-
-    return False
+    # one schema may fail while another will validate
+    return any(xmlschema.validate(xmldoc) for xmlschema in _get_xsd_schemas())
 
 
 def validate_xml_bes_file(file_path):
@@ -321,7 +378,7 @@ def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
         else:
             custom_relevance = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/text()")[0]
 
-        custom_relevance_xml = f"<![CDATA[{custom_relevance}]]>"
+        custom_relevance_xml = f"<![CDATA[{cdata_escape(custom_relevance)}]]>"
 
     logging.debug("success_criteria: %s", success_criteria)
 
@@ -351,10 +408,10 @@ def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
     action_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<SingleAction>
-		<Title>{title}</Title>
-		<Relevance><![CDATA[{relevance_clauses_combined}]]></Relevance>
+		<Title>{xml_escape(title)}</Title>
+		<Relevance><![CDATA[{cdata_escape(relevance_clauses_combined)}]]></Relevance>
 		<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[// Start:
-{actionscript}
+{cdata_escape(actionscript)}
 // End]]></ActionScript>
 		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>{settings_xml_string}
 		<Target>
@@ -545,11 +602,33 @@ class HTTPAdapterBlocksize(requests.adapters.HTTPAdapter):
 class BESConnection:
     """BigFix RESTAPI connection abstraction class."""
 
-    def __init__(self, username, password, rootserver, verify=False):
+    def __init__(
+        self,
+        username,
+        password,
+        rootserver,
+        verify=False,
+        timeout=DEFAULT_TIMEOUT,
+        raise_for_status=False,
+    ):
+        """Create a connection to the BigFix REST API.
+
+        Arguments:
+            timeout: default `timeout` for each request, as used by
+                `requests`, such as 60 or (connect, read). A timeout passed to a
+                request wins. Defaults to DEFAULT_TIMEOUT, None means requests
+                wait indefinitely.
+            raise_for_status: if True, raise requests.HTTPError for 4xx / 5xx
+                responses instead of returning them. 403 always raises
+                PermissionError. NOTE: session relevance errors are returned
+                with HTTP 200, see session_relevance_array(raise_errors=True).
+        """
         if not verify:
             # disable SSL warnings
             requests.packages.urllib3.disable_warnings()  # pylint: disable=no-member
         self.verify = verify
+        self.timeout = timeout
+        self.raise_for_status = raise_for_status
         self.last_connected = None
 
         self.username = username
@@ -623,15 +702,25 @@ class BESConnection:
 
         return url
 
+    def _to_result(self, response):
+        """Wrap a response as a RESTResult, raising for errors if configured."""
+        # NOTE: RESTResult raises PermissionError for 403 first
+        result = RESTResult(response)
+        if self.raise_for_status:
+            response.raise_for_status()
+        return result
+
     def get(self, path="help", **kwargs):
         """HTTP GET request."""
+        kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
-        return RESTResult(
+        return self._to_result(
             self.session.get(self.url(path), verify=self.verify, **kwargs)
         )
 
     def post(self, path, data, validate_xml=None, **kwargs):
         """HTTP POST request."""
+        kwargs.setdefault("timeout", self.timeout)
 
         # if validate_xml is true, data must validate to xml schema
         # if validate_xml is false, no schema check will be made
@@ -646,12 +735,13 @@ class BESConnection:
                 besapi_logger.warning(err_msg)
 
         self.last_connected = datetime.datetime.now()
-        return RESTResult(
+        return self._to_result(
             self.session.post(self.url(path), data=data, verify=self.verify, **kwargs)
         )
 
     def put(self, path, data, validate_xml=None, **kwargs):
         """HTTP PUT request."""
+        kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
 
         # if validate_xml is true, data must validate to xml schema
@@ -666,14 +756,15 @@ class BESConnection:
                 # this is intended it validate_xml is None, but not used currently
                 besapi_logger.warning(err_msg)
 
-        return RESTResult(
+        return self._to_result(
             self.session.put(self.url(path), data=data, verify=self.verify, **kwargs)
         )
 
     def delete(self, path, **kwargs):
         """HTTP DELETE request."""
+        kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
-        return RESTResult(
+        return self._to_result(
             self.session.delete(self.url(path), verify=self.verify, **kwargs)
         )
 
@@ -699,15 +790,7 @@ class BESConnection:
         """
         session_relevance = urllib.parse.quote(relevance, safe=":+")
         rel_data = {"output": "json", "relevance": session_relevance}
-        self.last_connected = datetime.datetime.now()
-        result = RESTResult(
-            self.session.post(
-                self.url("query"),
-                data=rel_data,
-                verify=self.verify,
-                **kwargs,
-            )
-        )
+        result = self.post("query", data=rel_data, **kwargs)
         return json.loads(result.text)
 
     def session_relevance_json_array(self, relevance, **kwargs):
@@ -731,18 +814,24 @@ class BESConnection:
 
     def session_relevance_xml(self, relevance, **kwargs):
         """Get Session Relevance Results XML."""
-        self.last_connected = datetime.datetime.now()
-        return RESTResult(
-            self.session.post(
-                self.url("query"),
-                data=f"relevance={urllib.parse.quote(relevance, safe=':')}",
-                verify=self.verify,
-                **kwargs,
-            )
+        # NOTE: the server URL decodes the query twice, so quote here and let
+        # requests form encode it again, same as session_relevance_json.
+        # Otherwise relevance escapes such as %22 are decoded too early.
+        return self.post(
+            "query",
+            data={"relevance": urllib.parse.quote(relevance, safe=":+")},
+            **kwargs,
         )
 
-    def session_relevance_array(self, relevance, **kwargs):
-        """Get Session Relevance Results array."""
+    def session_relevance_array(self, relevance, raise_errors=False, **kwargs):
+        """Get Session Relevance Results array.
+
+        Arguments:
+            raise_errors: if True, raise ValueError with the server's message
+                when the relevance has an error (such as a syntax error),
+                instead of returning ["ERROR: <message>"].
+                NOTE: the server returns these errors with HTTP 200.
+        """
         rel_result = self.session_relevance_xml(relevance, **kwargs)
         # print(rel_result)
         result = []
@@ -753,7 +842,7 @@ class BESConnection:
             # print(err)
             if "no such child: Answer" in str(err):
                 try:
-                    result.append("ERROR: " + rel_result.besobj.Query.Error.text)
+                    error_text = rel_result.besobj.Query.Error.text
                 except AttributeError as err2:
                     if "no such child: Error" in str(err2):
                         result.append("<Nothing> Nothing returned, but no error.")
@@ -762,16 +851,28 @@ class BESConnection:
                         besapi_logger.error("%s\n%s", err2, rel_result.text)
                         result.append("ERROR: " + rel_result.text)
                         raise
+                else:
+                    if raise_errors:
+                        raise ValueError(
+                            f"Session relevance error: {error_text}"
+                        ) from err
+                    result.append("ERROR: " + error_text)
             else:
                 besapi_logger.error("%s\n%s", err, rel_result.text)
                 result.append("ERROR: " + rel_result.text)
                 raise
         return result
 
-    def session_relevance_string(self, relevance, **kwargs):
-        """Get Session Relevance Results string."""
+    def session_relevance_string(self, relevance, raise_errors=False, **kwargs):
+        """Get Session Relevance Results string.
+
+        Arguments:
+            raise_errors: see session_relevance_array()
+        """
         rel_result_array = self.session_relevance_array(
-            "(it as string) of ( " + relevance + " )", **kwargs
+            "(it as string) of ( " + relevance + " )",
+            raise_errors=raise_errors,
+            **kwargs,
         )
         return "\n".join(rel_result_array)
 
@@ -795,6 +896,9 @@ class BESConnection:
         if not bool(self.last_connected):
             result_login = self.get("login", timeout=timeout)
             if not result_login.request.status_code == 200:
+                # NOTE: get() sets last_connected before the request, clear it
+                # so a failed login is not treated as connected on the next call
+                self.last_connected = None
                 result_login.request.raise_for_status()
             if result_login.request.status_code == 200:
                 # set time of connection
@@ -821,10 +925,10 @@ class BESConnection:
 
         dash_var_xml = f"""<BESAPI xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BESAPI.xsd">
             <DashboardData>
-                    <Dashboard>{dashboard_name}</Dashboard>
-                    <Name>{var_name}</Name>
+                    <Dashboard>{xml_escape(str(dashboard_name))}</Dashboard>
+                    <Name>{xml_escape(str(var_name))}</Name>
                     <IsPrivate>{str(private).lower()}</IsPrivate>
-                    <Value>{var_value}</Value>
+                    <Value>{xml_escape(str(var_value))}</Value>
             </DashboardData>
     </BESAPI>
     """
@@ -917,21 +1021,33 @@ class BESConnection:
             besapi_logger.error("%s is not readable", bes_file_path)
             raise FileNotFoundError(f"{bes_file_path} is not readable")
 
+        with open(bes_file_path, "rb") as f:
+            content = f.read()
+
+        return self.import_bes_xml_to_site(content, site_path)
+
+    def import_bes_xml_to_site(self, bes_xml, site_path=None):
+        """Import BES XML content (str or bytes) to site.
+
+        This avoids writing a temporary .bes file for generated content.
+
+        Returns:
+            The RESTResult, or None if the BES XML is not valid.
+        """
+        if isinstance(bes_xml, str):
+            bes_xml = bes_xml.encode("utf-8")
+
         site_path = self.get_current_site_path(site_path)
 
         self.validate_site_path(site_path, False, True)
 
-        with open(bes_file_path, "rb") as f:
-            content = f.read()
+        # validate BES XML contents:
+        if not validate_xsd(bes_xml):
+            besapi_logger.error("BES XML to import to %s is not valid", site_path)
+            return None
 
-            # validate BES File contents:
-            if not validate_xsd(content):
-                besapi_logger.error("%s is not valid", bes_file_path)
-                return None
-
-            # https://developer.bigfix.com/rest-api/api/import.html
-            result = self.post(f"import/{site_path}", content)
-            return result
+        # https://developer.bigfix.com/rest-api/api/import.html
+        return self.post(f"import/{site_path}", bes_xml)
 
     def create_site_from_file(self, bes_file_path, site_type="custom"):
         """Create new site."""
@@ -1010,7 +1126,7 @@ class BESConnection:
 
         besapi_logger.debug("group creation result:\n%s", create_group_result)
 
-        return self.get_computergroup(site_path, new_group_name)
+        return self.get_computergroup(new_group_name, site_path)
 
     def get_upload(self, file_name, file_hash):
         """
@@ -1045,8 +1161,8 @@ class BESConnection:
         https://developer.bigfix.com/rest-api/api/upload.html
         """
         if not os.access(file_path, os.R_OK):
-            besapi_logger.error(file_path, "is not readable")
-            raise FileNotFoundError
+            besapi_logger.error("%s is not readable", file_path)
+            raise FileNotFoundError(f"{file_path} is not readable")
 
         # if file_name not specified, then get it from tail of file_path
         if not file_name:
@@ -1134,7 +1250,14 @@ class BESConnection:
         return content
 
     def update_item_from_file(self, file_path, site_path=None):
-        """Update an item by name and last modified."""
+        """Update an item by name and last modified.
+
+        NOTE: not implemented yet.
+        """
+        raise NotImplementedError("besapi.update_item_from_file() is not implemented")
+
+        # pylint: disable=unreachable
+        # NOTE: work in progress, kept for later, never runs because of the raise
         site_path = self.get_current_site_path(site_path)
         bes_tree = lxml.etree.parse(file_path)
 
@@ -1338,8 +1461,15 @@ class BESConnection:
                     )
 
     __call__ = login
-    # https://stackoverflow.com/q/40536821/861745
-    __enter__ = login
+
+    def __enter__(self):
+        """Log in and return this connection, for use with `with`."""
+        self.login()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Log out when leaving a `with` block."""
+        self.logout()
 
 
 class RESTResult:
@@ -1348,7 +1478,8 @@ class RESTResult:
     def __init__(self, request):
         self.request = request
         self.text = request.text
-        self.valid = None
+        # computed on first access of `valid`, see the property:
+        self._valid = None
         self._besxml = None
         self._besobj = None
         self._besdict = None
@@ -1370,23 +1501,35 @@ class RESTResult:
         except AttributeError as err:
             besapi_logger.warning("Error (expected during tests) %s", err)
 
-        if (
-            "content-type" in request.headers
-            and request.headers["content-type"] == "application/xml"
-        ):
-            self.valid = True
-        elif type(request.text) is str and self.validate_xsd(
-            request.text.encode("utf-8")
-        ):
-            self.valid = True
-        else:
-            if self.validate_xsd(request.text):
-                self.valid = True
+    @property
+    def valid(self):
+        """Whether the result is BES XML, validated on first access.
+
+        NOTE: this is lazy since XSD validation of every result is costly,
+        and many results (such as JSON queries) are never used as XML.
+        """
+        if self._valid is None:
+            headers = self.request.headers
+            # NOTE: membership test, headers may not be a dict in all callers
+            content_type = headers["content-type"] if "content-type" in headers else ""
+            if content_type == "application/xml":
+                self._valid = True
+            elif content_type.startswith("application/json"):
+                self._valid = False
+            elif isinstance(self.text, str):
+                self._valid = validate_xsd(self.text.encode("utf-8"))
             else:
+                self._valid = validate_xsd(self.text)
+
+            if not self._valid:
                 besapi_logger.debug(
                     "INFO: REST API Result does not appear to be XML, this could be expected."
                 )
-                self.valid = False
+        return self._valid
+
+    @valid.setter
+    def valid(self, value):
+        self._valid = value
 
     def __str__(self):
         if self.valid:
@@ -1438,9 +1581,9 @@ class RESTResult:
 
     def validate_xsd(self, doc):
         """Validate results using XML XSDs."""
-        # return self.valid if already set
-        if self.valid is not None and isinstance(self.valid, bool):
-            return self.valid
+        # return self._valid if already set
+        if isinstance(self._valid, bool):
+            return self._valid
         return validate_xsd(doc)
 
     def xmlparse_text(self, text):

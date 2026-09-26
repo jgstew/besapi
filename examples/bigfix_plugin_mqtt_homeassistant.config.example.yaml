@@ -1,0 +1,31 @@
+---
+# Copy to bigfix_plugin_mqtt_homeassistant.config.yaml (git ignored) and fill in.
+mqtt:
+  host: homeassistant.local
+  port: 1883
+  username: <MQTT_USER>
+  password: <MQTT_PASSWORD>
+  # true for a TLS broker (usually port 8883), using the system CA certs:
+  tls: false
+  # Home Assistant's MQTT discovery prefix, the default is homeassistant:
+  discovery_prefix: homeassistant
+  base_topic: bigfix
+
+# optional, replaces the default sensors (Computers: reported in 45 days, Actions: open, Users,
+# Computers Not Reporting: in 45 days, Data Age, Relevant Critical Patches):
+# a Last Update timestamp sensor is always added.
+# sensors:
+#   - name: Computers
+#     relevance: number of bes computers whose (last report time of it >= now - 45 * day)
+#   - name: Actions
+#     relevance: number of bes actions whose (state of it = "Open")
+#   - name: Users
+#     relevance: number of bes users
+#   - name: Computers Not Reporting
+#     relevance: number of bes computers whose (last report time of it < now - 45 * day)
+#   - name: Data Age
+#     relevance: ((now - it) / second) of maximum of last report times of bes computers
+#     device_class: duration
+#     unit: s
+#   - name: All Computers
+#     relevance: number of bes computers

@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 
 import pytest
 
@@ -58,3 +59,67 @@ def test_get_plugin_args_parses_known_args(monkeypatch):
     assert args.user == "me"
     assert args.password == "pw"
     assert args.besserver is None
+
+
+def make_failing_utilities():
+    """Build a stand-in platform utilities module where every function raises."""
+
+    def raise_error():
+        raise RuntimeError("CryptoUtility exploded")
+
+    return types.SimpleNamespace(
+        __name__="fake_platform_utilities",
+        get_linux_credentials_rest_pass=raise_error,
+        get_besconn_root_linux=raise_error,
+        get_win_registry_rest_pass=raise_error,
+        get_besconn_root_windows_registry=raise_error,
+    )
+
+
+def test_get_root_server_rest_pass_swallows_errors(monkeypatch):
+    """Test that a failure in the root server password lookup does not raise."""
+    monkeypatch.setattr(
+        plugin_utilities, "PLATFORM_UTILITIES", make_failing_utilities()
+    )
+    assert plugin_utilities.get_root_server_rest_pass() is None
+
+
+def test_get_besconn_root_server_swallows_errors(monkeypatch):
+    """Test that a failure in the root server connection does not raise."""
+    monkeypatch.setattr(
+        plugin_utilities, "PLATFORM_UTILITIES", make_failing_utilities()
+    )
+    assert plugin_utilities.get_besconn_root_server() is None
+
+
+def test_get_besapi_connection_falls_back_when_root_server_errors(monkeypatch):
+    """Test that get_besapi_connection falls back when the root server lookup
+    raises.
+    """
+    monkeypatch.setattr(
+        plugin_utilities, "PLATFORM_UTILITIES", make_failing_utilities()
+    )
+    # env/config fallback is stubbed out so no real connection is attempted:
+    monkeypatch.setattr(
+        plugin_utilities, "get_besapi_connection_env_then_config", lambda: "fallback"
+    )
+    assert plugin_utilities.get_besapi_connection() == "fallback"
+
+
+def test_get_root_server_rest_pass_no_module(monkeypatch):
+    """Test that a missing platform module is handled without raising.
+
+    This is the normal case on macOS, where the module is never imported.
+    """
+    monkeypatch.setattr(plugin_utilities, "PLATFORM_UTILITIES", None)
+    assert plugin_utilities.get_root_server_rest_pass() is None
+    assert plugin_utilities.get_besconn_root_server() is None
+
+
+def test_platform_utilities_not_imported_on_darwin():
+    """Test that the linux utilities are only used on linux."""
+    if sys.platform.startswith("linux"):
+        assert plugin_utilities.PLATFORM_UTILITIES is not None
+    elif os.name != "nt":
+        # macOS and other non-linux posix: no platform utilities at all
+        assert plugin_utilities.PLATFORM_UTILITIES is None

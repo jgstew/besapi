@@ -24,7 +24,7 @@ async def fetch(session, url):
         # Extract the filename from the URL
         url_parts = url.split("/")
 
-        file_dir = "./tmp/" + url_parts[-2] + "/" + url_parts[-4]
+        file_dir = "./tmp/" + url_parts[-2]
 
         os.makedirs(file_dir, exist_ok=True)
 
@@ -53,10 +53,10 @@ async def main():
     print(bes_conn.last_connected)
 
     # change the relevance here to adjust which content gets exported:
-    fixlets_rel = 'custom bes fixlets whose(name of it as lowercase contains "oracle")'
+    actions_relevance = 'bes actions whose(name of issuer of it != "jgstew")'
 
     # this does not currently work with things in the actionsite:
-    session_relevance = f'(type of it as lowercase & "/custom/" & name of site of it & "/" & id of it as string) of {fixlets_rel}'
+    session_relevance = f'("action/" & id of it as string) of {actions_relevance}'
 
     result = bes_conn.session_relevance_array(session_relevance)
 

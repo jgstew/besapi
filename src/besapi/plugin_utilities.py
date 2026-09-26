@@ -4,33 +4,83 @@ see example here: https://github.com/jgstew/besapi/blob/master/examples/export_a
 """
 
 import argparse
+import contextlib
 import getpass
 import logging
 import logging.handlers
 import ntpath
 import os
+import platform
+import shutil
+import subprocess  # nosec B404
 import sys
-from typing import Union
+from typing import Any, Iterator, List, Sequence, Tuple, Union
 
 import besapi
 
-if os.name == "nt":
-    import besapi.plugin_utilities_win
+# the platform specific root server utilities module, or None if unavailable.
+# NOTE: these are conveniences for plugins running on a root server,
+# so a failure to import must never prevent the other connection methods:
+PLATFORM_UTILITIES = None
+
+try:
+    if os.name == "nt":
+        import besapi.plugin_utilities_win
+
+        PLATFORM_UTILITIES = besapi.plugin_utilities_win
+    # NOTE: linux only, not all posix. macOS is never a root server,
+    # so none of these files will be in place there:
+    elif sys.platform.startswith("linux"):
+        import besapi.plugin_utilities_linux
+
+        PLATFORM_UTILITIES = besapi.plugin_utilities_linux
+except BaseException as import_error:  # pylint: disable=broad-exception-caught
+    logging.debug("platform specific plugin utilities unavailable: %s", import_error)
 
 
-# NOTE: This does not work as expected when run from plugin_utilities
-def get_invoke_folder(verbose=0):
-    """Get the folder the script was invoked from."""
+# custom log level for session start / end banners in plugin logs:
+SESSION_LOG_LEVEL = 99
+
+# default requests timeout for plugin connections: (connect, read) seconds
+# NOTE: long read timeout since some REST API calls, like exports, are slow
+DEFAULT_PLUGIN_TIMEOUT = (30, 600)
+
+
+def get_invoke_path(verbose=0) -> Union[str, None]:
+    """Get the path of the running plugin script or frozen executable.
+
+    NOTE: `__file__` cannot be used here, it would be this module, not the
+    plugin that imported it. The running plugin is `__main__` instead.
+
+    Returns:
+        The absolute path, or None if it cannot be determined (interactive).
+    """
     # using logging here won't actually log it to the file:
 
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    # frozen by PyInstaller or similar, the plugin is the executable itself:
+    if getattr(sys, "frozen", False):
         if verbose:
-            print("running in a PyInstaller bundle")
-        invoke_folder = os.path.abspath(os.path.dirname(sys.executable))
-    else:
-        if verbose:
-            print("running in a normal Python process")
-        invoke_folder = os.path.abspath(os.path.dirname(__file__))
+            print("running in a frozen bundle")
+        return os.path.abspath(sys.executable)
+
+    main_file = getattr(sys.modules.get("__main__"), "__file__", None)
+    if main_file:
+        return os.path.abspath(main_file)
+
+    # fallback, such as a script run with `python -c` or embedded:
+    if sys.argv and sys.argv[0] and sys.argv[0] != "-c":
+        return os.path.abspath(sys.argv[0])
+
+    return None
+
+
+def get_invoke_folder(verbose=0):
+    """Get the folder the plugin was invoked from.
+
+    Falls back to the current working directory if not running from a file.
+    """
+    invoke_path = get_invoke_path(verbose)
+    invoke_folder = os.path.dirname(invoke_path) if invoke_path else os.getcwd()
 
     if verbose:
         print(f"invoke_folder = {invoke_folder}")
@@ -38,31 +88,24 @@ def get_invoke_folder(verbose=0):
     return invoke_folder
 
 
-# NOTE: This does not work as expected when run from plugin_utilities
 def get_invoke_file_name(verbose=0):
-    """Get the filename the script was invoked from."""
-    # using logging here won't actually log it to the file:
+    """Get the file name of the plugin, without file extension.
 
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        if verbose:
-            print("running in a PyInstaller bundle")
-        invoke_file_path = sys.executable
-    else:
-        if verbose:
-            print("running in a normal Python process")
-        invoke_file_path = __file__
-
-    if verbose:
-        print(f"invoke_file_path = {invoke_file_path}")
+    Falls back to `besapi_plugin` if not running from a file.
+    """
+    invoke_path = get_invoke_path(verbose)
+    if not invoke_path:
+        return "besapi_plugin"
 
     # get just the file name, return without file extension:
-    return os.path.splitext(ntpath.basename(invoke_file_path))[0]
+    return os.path.splitext(ntpath.basename(invoke_path))[0]
 
 
-def setup_plugin_argparse(plugin_args_required=False):
+def setup_plugin_argparse(plugin_args_required=False, description=None):
     """Setup argparse for plugin use."""
     arg_parser = argparse.ArgumentParser(
-        description="Provide command line arguments for REST URL, username, and password"
+        description=description
+        or "Provide command line arguments for REST URL, username, and password"
     )
     arg_parser.add_argument(
         "-v",
@@ -127,12 +170,13 @@ def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
         )
     ]
 
-    logging.addLevelName(99, "SESSION")
+    logging.addLevelName(SESSION_LOG_LEVEL, "SESSION")
 
     # log output to console if arg provided:
     if console:
         handlers.append(logging.StreamHandler())
-        print("INFO: also logging to console")
+        if verbose:
+            print("INFO: also logging to console")
 
     # return logging config:
     return {
@@ -142,6 +186,165 @@ def get_plugin_logging_config(log_file_path="", verbose=0, console=True):
         "handlers": handlers,
         "force": True,
     }
+
+
+@contextlib.contextmanager
+def plugin_session(plugin_version: str = "") -> Iterator[None]:
+    """Log the start and end of a plugin run, and any uncaught error.
+
+    Configure logging first, then use this like:
+
+        with besapi.plugin_utilities.plugin_session(__version__):
+            ...
+
+    Arguments:
+        plugin_version: the plugin's own version, logged for troubleshooting.
+    """
+    logging.log(SESSION_LOG_LEVEL, "----- Starting New Session ------")
+    logging.debug("invoke folder: %s", get_invoke_folder())
+    logging.debug("%s version: %s", get_invoke_file_name(), plugin_version)
+    logging.debug("BESAPI Module version: %s", besapi.besapi.__version__)
+    logging.debug("Python version: %s", platform.python_version())
+    try:
+        yield
+    except Exception:
+        # NOTE: SystemExit and KeyboardInterrupt are not errors, not logged here
+        logging.exception("----- ERROR: uncaught exception in plugin ------")
+        raise
+    finally:
+        logging.log(SESSION_LOG_LEVEL, "----- Ending Session ------")
+
+
+def resolve_plugin_path(path: str) -> Union[str, None]:
+    """Find a file as given, otherwise relative to the plugin's folder.
+
+    A plugin run as a service usually has an unrelated working directory, so
+    files that ship next to the plugin (config, trigger files) must be found
+    relative to the plugin itself.
+
+    Returns:
+        The absolute path of the file found, otherwise None.
+    """
+    if os.path.isfile(path):
+        return os.path.abspath(path)
+
+    plugin_relative = os.path.join(get_invoke_folder(), path)
+    if os.path.isfile(plugin_relative):
+        return plugin_relative
+
+    return None
+
+
+def get_plugin_config(file_name: Union[str, None] = None) -> Any:
+    """Load the plugin's YAML config file.
+
+    Requires the optional `ruamel.yaml` library: `pip install besapi[plugins]`
+
+    Arguments:
+        file_name: config file, resolved with resolve_plugin_path(). Defaults
+            to `<plugin name>.config.yaml` next to the plugin.
+
+    Returns:
+        The parsed YAML, usually a dict.
+    """
+    file_name = file_name or get_invoke_file_name() + ".config.yaml"
+
+    config_path = resolve_plugin_path(file_name)
+    if not config_path:
+        raise FileNotFoundError(f"plugin config file not found: {file_name}")
+
+    try:
+        import ruamel.yaml  # pylint: disable=import-outside-toplevel
+    except ImportError as err:
+        raise ImportError(
+            "ruamel.yaml is required to read plugin config files, "
+            "install it with: pip install besapi[plugins]"
+        ) from err
+
+    logging.info("loading config from: `%s`", config_path)
+    with open(config_path, encoding="utf-8") as stream:
+        return ruamel.yaml.YAML(typ="safe", pure=True).load(stream)
+
+
+def consume_trigger_file(path: str) -> bool:
+    """Check for a trigger file, and delete it if found.
+
+    This lets an action on the root server request a plugin run by creating
+    the trigger file. The file is resolved with resolve_plugin_path().
+
+    Returns:
+        True if the trigger file existed (it is now deleted), otherwise False.
+    """
+    trigger_path = resolve_plugin_path(path)
+    if not trigger_path:
+        logging.info("trigger file `%s` does not exist.", path)
+        return False
+
+    logging.info("trigger file found, removing: `%s`", trigger_path)
+    os.remove(trigger_path)
+    return True
+
+
+def find_executable(
+    name: str,
+    extra_paths: Union[Sequence[str], None] = None,
+    default: Union[str, None] = None,
+) -> Union[str, None]:
+    """Find an executable on the PATH, then in extra_paths.
+
+    Arguments:
+        name: executable name to look for on the PATH, such as `git`.
+        extra_paths: full paths to try if not on the PATH, such as
+            `C:\\Program Files\\Git\\bin\\git.exe`, since services often run
+            with a minimal PATH.
+        default: returned if nothing is found.
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+
+    for path in extra_paths or []:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+
+    logging.debug("executable `%s` not found, using default: %s", name, default)
+    return default
+
+
+def run_logged(
+    cmd: List[str], check: bool = True, **kwargs
+) -> subprocess.CompletedProcess:
+    """Run a command, logging its stdout and stderr.
+
+    Output is logged at DEBUG, or stderr at WARNING if the command fails.
+    Many tools (like git) write progress and errors to stderr, which is easy
+    to lose otherwise.
+
+    Arguments:
+        cmd: the command and its arguments. No shell is used.
+        check: raise subprocess.CalledProcessError on a non zero exit code.
+        kwargs: passed to subprocess.run
+    """
+    logging.debug("running: %s", cmd)
+    result = subprocess.run(  # nosec B603
+        cmd, capture_output=True, text=True, check=False, **kwargs
+    )
+
+    if result.stdout:
+        logging.debug("stdout: %s", result.stdout)
+
+    stderr_level = logging.WARNING if result.returncode else logging.DEBUG
+    if result.stderr:
+        logging.log(stderr_level, "stderr: %s", result.stderr)
+
+    if result.returncode:
+        logging.warning("command exited with code %s: %s", result.returncode, cmd)
+        if check:
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd, output=result.stdout, stderr=result.stderr
+            )
+
+    return result
 
 
 def get_besapi_connection_env_then_config():
@@ -157,6 +360,64 @@ def get_besapi_connection_env_then_config():
     return bes_conn
 
 
+def _try_platform_utility(function_name: str):
+    """Call a function from the platform specific utilities module, if possible.
+
+    These are best effort conveniences for the case where the plugin happens to
+    be running on a root server. If anything at all goes wrong, this is simply
+    not a usable root server, so the caller falls back to the other methods.
+
+    Args:
+        function_name: The name of the function to call, with no arguments.
+
+    Returns:
+        Whatever the function returned, or None if it could not be used.
+    """
+    if not PLATFORM_UTILITIES:
+        logging.debug("no platform specific plugin utilities available.")
+        return None
+
+    platform_function = getattr(PLATFORM_UTILITIES, function_name, None)
+
+    if not platform_function:
+        logging.debug(
+            "`%s` not found in %s", function_name, PLATFORM_UTILITIES.__name__
+        )
+        return None
+
+    try:
+        return platform_function()
+    except BaseException as err:  # pylint: disable=broad-exception-caught
+        # NOTE: intentionally broad, this must never prevent the other methods:
+        logging.debug("`%s` failed, ignoring: %s", function_name, err)
+        return None
+
+
+def get_root_server_rest_pass() -> Union[str, None]:
+    """Get the REST API password from the local root server, if this is one.
+
+    On Windows this reads the registry, otherwise it reads the
+    MasterOperatorCredentials file. Returns None if this is not a root server,
+    or if the attempt failed for any reason.
+    """
+    if os.name == "nt":
+        return _try_platform_utility("get_win_registry_rest_pass")
+
+    return _try_platform_utility("get_linux_credentials_rest_pass")
+
+
+def get_besconn_root_server() -> Union[besapi.besapi.BESConnection, None]:
+    """Get a connection using local root server credentials, if this is one.
+
+    Returns None if this is not a root server, or if the attempt failed for
+    any reason.
+    """
+    if os.name == "nt":
+        return _try_platform_utility("get_besconn_root_windows_registry")
+
+    return _try_platform_utility("get_besconn_root_linux")
+
+
 def get_besapi_connection_args(
     args: argparse.Namespace,
 ) -> Union[besapi.besapi.BESConnection, None]:
@@ -169,13 +430,18 @@ def get_besapi_connection_args(
 
     # if user was provided as arg but password was not:
     if args.user and not password:
-        if os.name == "nt":
-            # attempt to get password from windows root server registry:
-            # this is specifically for the case where user is provided for a plugin
-            password = besapi.plugin_utilities_win.get_win_registry_rest_pass()
+        # attempt to get password from the local root server:
+        # this is specifically for the case where user is provided for a plugin
+        password = get_root_server_rest_pass()
 
     # if user was provided as arg but password was not:
     if args.user and not password:
+        # a plugin run as a service has no terminal, prompting would hang:
+        if not (sys.stdin and sys.stdin.isatty()):
+            logging.error(
+                "Password was not provided and there is no terminal to prompt for it."
+            )
+            return None
         logging.warning("Password was not provided, provide REST API password.")
         print("Password was not provided, provide REST API password:")
         password = getpass.getpass()
@@ -187,8 +453,9 @@ def get_besapi_connection_args(
     rest_url = args.rest_url
 
     # normalize url to https://HostOrIP:52311
-    if rest_url and rest_url.endswith("/api"):
-        rest_url = rest_url.replace("/api", "")
+    # NOTE: only strip a trailing /api, the host itself may contain "/api"
+    if rest_url:
+        rest_url = rest_url.rstrip("/").removesuffix("/api")
 
     # attempt bigfix connection with provided args:
     if args.user and password:
@@ -241,9 +508,12 @@ def get_besapi_connection(
 ) -> Union[besapi.besapi.BESConnection, None]:
     """Get connection to besapi.
 
-    If on Windows, will attempt to get connection from Windows Registry first.
-    If args provided, will attempt to get connection using provided args.
-    If no args provided, will attempt to get connection from env vars.
+    If a user is provided in args, will attempt to connect using the args
+    first, then fall back to the local root server credentials.
+    Otherwise, will attempt the local root server credentials first:
+    on Windows from the Windows Registry, otherwise from the root server
+    MasterOperatorCredentials file.
+    Then, if no user in args, will attempt to get connection from env vars.
     If no env vars, will attempt to get connection from config file.
 
     Arguments:
@@ -251,24 +521,73 @@ def get_besapi_connection(
     Returns:
         A BESConnection object if successful, otherwise None.
     """
-    # if windows, try to get connection from windows registry:
-    if os.name == "nt":
-        bes_conn = besapi.plugin_utilities_win.get_besconn_root_windows_registry()
+    user_provided = args is not None and bool(args.user)
+
+    # explicit args always win, even on a root server:
+    if args is not None and user_provided:
+        bes_conn = get_besapi_connection_args(args)
         if bes_conn:
             return bes_conn
-
-    # if no args provided, try to get connection from env then config file:
-    if not args:
-        logging.info("no args provided, attempting connection using env then config.")
-        return get_besapi_connection_env_then_config()
-
-    # attempt bigfix connection with provided args:
-    if args.user:
-        bes_conn = get_besapi_connection_args(args)
-    else:
-        logging.info(
-            "no user arg provided, attempting connection using env then config."
+        logging.warning(
+            "connection using provided args failed, trying root server credentials."
         )
-        return get_besapi_connection_env_then_config()
 
-    return bes_conn
+    # if this is a root server, try its local credentials:
+    # (windows registry, or the linux MasterOperatorCredentials file)
+    bes_conn = get_besconn_root_server()
+    if bes_conn:
+        return bes_conn
+
+    # NOTE: if a user was provided, don't silently connect as someone else:
+    if user_provided:
+        return None
+
+    logging.info("no user arg provided, attempting connection using env then config.")
+    return get_besapi_connection_env_then_config()
+
+
+@contextlib.contextmanager
+def init_plugin(
+    plugin_version: str = "",
+    parser: Union[argparse.ArgumentParser, None] = None,
+    log_file_path: str = "",
+    require_connection: bool = True,
+    timeout=DEFAULT_PLUGIN_TIMEOUT,
+) -> Iterator[Tuple[argparse.Namespace, Union[besapi.besapi.BESConnection, None]]]:
+    """Set up a plugin run: args, logging, session banners and connection.
+
+    Use this like:
+
+        with besapi.plugin_utilities.init_plugin(__version__) as (args, bes_conn):
+            ...
+
+    Arguments:
+        plugin_version: the plugin's own version, logged for troubleshooting.
+        parser: from setup_plugin_argparse() with any plugin specific args
+            added, defaults to setup_plugin_argparse().
+        log_file_path: defaults to `<plugin name>.log` next to the plugin.
+        require_connection: if True and no connection can be made, log an
+            error and exit with code 1 instead of running the plugin body.
+        timeout: request timeout for the connection, replacing the besapi
+            wide default, so a plugin service can never hang forever.
+    """
+    parser = parser or setup_plugin_argparse()
+    # allow unknown args to be parsed instead of throwing an error:
+    args, _unknown = parser.parse_known_args()
+
+    logging.basicConfig(
+        **get_plugin_logging_config(log_file_path, args.verbose, args.console)
+    )
+
+    with plugin_session(plugin_version):
+        bes_conn = get_besapi_connection(args)
+
+        if not bes_conn and require_connection:
+            logging.error("----- ERROR: BigFix connection failed, exiting ------")
+            raise SystemExit(1)
+
+        # NOTE: only for connections that support a default timeout (BESConnection)
+        if timeout and bes_conn is not None and hasattr(bes_conn, "timeout"):
+            bes_conn.timeout = timeout
+
+        yield args, bes_conn
