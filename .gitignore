@@ -135,3 +135,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# real creds for the example mqtt plugin, see *.config.example.yaml
+examples/bigfix_plugin_mqtt_homeassistant.config.yaml
