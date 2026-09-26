@@ -43,13 +43,17 @@ def plugin():
 
 
 class FakeConnection:
-    """Answers session relevance from a dict of query -> result."""
+    """Answers session relevance and REST GETs from dicts of query/path -> result."""
 
-    def __init__(self, answers):
+    def __init__(self, answers, get_responses=None):
         self.answers = answers
+        self.get_responses = get_responses or {}
 
     def session_relevance_json(self, relevance, **kwargs):
         return {"result": self.answers[relevance]}
+
+    def get(self, path, **kwargs):
+        return types.SimpleNamespace(text=self.get_responses[path])
 
 
 def by_topic(messages):
@@ -86,6 +90,34 @@ def test_get_bigfix_info(plugin):
     }
 
 
+def test_get_root_server_version(plugin):
+    """Test the root server's own installed BigFix version is queried."""
+    conn = FakeConnection({}, {"serverinfo": '{"version": "10.0.7.52"}'})
+
+    assert plugin.get_root_server_version(conn) == "10.0.7.52"
+
+
+def test_build_messages_includes_sw_version(plugin):
+    """Test sw_version is set, and model/manufacturer stay the generic ones."""
+    messages = by_topic(
+        plugin.build_messages(
+            str(SERIAL),
+            FQDN,
+            {},
+            [],
+            last_update=LAST_UPDATE,
+            sw_version="10.0.7.52",
+        )
+    )
+    config = json.loads(
+        messages[f"homeassistant/sensor/bigfix_{SERIAL}/last_update/config"]["payload"]
+    )
+
+    assert config["device"]["sw_version"] == "10.0.7.52"
+    assert config["device"]["model"] == "BigFix Server"
+    assert config["device"]["manufacturer"] == "HCL BigFix"
+
+
 def test_discovery_messages_make_one_device(plugin):
     """Test HA discovery config: one device keyed by masthead serial."""
     values = {"computers": 8, "actions": 92}
@@ -110,6 +142,7 @@ def test_discovery_messages_make_one_device(plugin):
         config = json.loads(messages[topic]["payload"])
         assert config["device"]["identifiers"] == [f"bigfix_{SERIAL}"]
         assert config["device"]["name"] == FQDN
+        assert config["device"]["configuration_url"] == f"https://{FQDN}:52311/api/help"
         assert config["state_topic"] == f"bigfix/{SERIAL}/state"
         assert config["unique_id"].startswith(f"bigfix_{SERIAL}_")
 

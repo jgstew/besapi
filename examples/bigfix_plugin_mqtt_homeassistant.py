@@ -36,7 +36,7 @@ import re
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.0.1"
+__version__ = "1.0.0"
 
 # masthead serial number and the FQDN from the masthead gather url:
 MASTHEAD_RELEVANCE = (
@@ -120,6 +120,11 @@ def get_bigfix_info(bes_conn, sensors):
     return str(serial), fqdn, values
 
 
+def get_root_server_version(bes_conn):
+    """Query the root server's own installed BigFix version."""
+    return json.loads(bes_conn.get("serverinfo").text)["version"]
+
+
 def build_messages(
     serial,
     fqdn,
@@ -128,12 +133,15 @@ def build_messages(
     discovery_prefix="homeassistant",
     base_topic="bigfix",
     last_update=None,
+    sw_version=None,
 ):
     """Build the retained discovery and state messages for paho publish.multiple.
 
     Arguments:
         last_update: timezone aware datetime for the Last Update sensor,
             defaults to now.
+        sw_version: the root server's own version, from
+            get_root_server_version(), omitted from the device if not given.
     """
     last_update = last_update or datetime.datetime.now(datetime.timezone.utc)
     device_id = f"bigfix_{serial}"
@@ -144,7 +152,11 @@ def build_messages(
         "manufacturer": "HCL BigFix",
         "model": "BigFix Server",
         "serial_number": serial,
+        # HA shows this as a link on the device page, surfacing the FQDN there too:
+        "configuration_url": f"https://{fqdn}:52311/api/help",
     }
+    if sw_version:
+        device["sw_version"] = sw_version
 
     messages = []
     for sensor in [*sensors, LAST_UPDATE_SENSOR, PLUGIN_VERSION_SENSOR]:
@@ -221,6 +233,7 @@ def main():
         sensors = config.get("sensors") or DEFAULT_SENSORS
 
         serial, fqdn, values = get_bigfix_info(bes_conn, sensors)
+        sw_version = get_root_server_version(bes_conn)
         logging.info("masthead %s (%s): %s", serial, fqdn, values)
 
         publish(
@@ -231,6 +244,7 @@ def main():
                 sensors,
                 discovery_prefix=mqtt_config.get("discovery_prefix", "homeassistant"),
                 base_topic=mqtt_config.get("base_topic", "bigfix"),
+                sw_version=sw_version,
             ),
             mqtt_config,
         )
