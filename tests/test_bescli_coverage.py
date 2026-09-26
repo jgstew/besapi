@@ -51,7 +51,11 @@ def cli(isolated):
 
     NOTE: its own stdout, since cmd2 binds the output stream when created.
     """
-    return bescli.BESCLInterface(stdout=io.StringIO())
+    interface = bescli.BESCLInterface(stdout=io.StringIO())
+    # cmd2 2.x (python 3.9) sends pfeedback to stderr unless this is set,
+    # cmd2 4.x always sends it to stdout:
+    interface.feedback_to_output = True
+    return interface
 
 
 def output(cli_obj):
@@ -383,7 +387,14 @@ def test_export_site_command(cli, export_conn, isolated):
 
 
 @pytest.mark.parametrize(
-    "command", ["do_upload", "do_create_group", "do_create_user", "do_create_site"]
+    "command",
+    [
+        "do_upload",
+        "do_create_group",
+        "do_create_user",
+        "do_create_site",
+        "do_update_item",
+    ],
 )
 def test_file_commands_unreadable_file(connected_cli, command):
     """Test that file based commands report an unreadable file."""

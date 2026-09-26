@@ -118,6 +118,7 @@ def test_sample_plugin_no_trigger_file(plugin_dir, other_cwd):
 
 def test_sample_plugin_loads_config_next_to_it(plugin_dir, other_cwd):
     """Test that sample_plugin.config.yaml next to the plugin is loaded."""
+    pytest.importorskip("ruamel.yaml", reason="optional: pip install besapi[plugins]")
     (plugin_dir / "sample_plugin.config.yaml").write_text(
         "trigger_file_path: sample_plugin_run_now\n", encoding="utf-8"
     )

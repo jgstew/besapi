@@ -427,6 +427,7 @@ def test_init_plugin_connection_optional(monkeypatch, fake_main, reset_root_logg
 
 def test_get_plugin_config_default_name(fake_main):
     """Test that <plugin>.config.yaml next to the plugin is loaded by default."""
+    pytest.importorskip("ruamel.yaml", reason="optional: pip install besapi[plugins]")
     (fake_main.parent / "my_plugin.config.yaml").write_text(
         "bigfix:\n  sites:\n    - name: Demo\n", encoding="utf-8"
     )
@@ -436,6 +437,7 @@ def test_get_plugin_config_default_name(fake_main):
 
 def test_get_plugin_config_explicit_name(fake_main):
     """Test that an explicit config file name is resolved next to the plugin."""
+    pytest.importorskip("ruamel.yaml", reason="optional: pip install besapi[plugins]")
     (fake_main.parent / "other.yaml").write_text("key: value\n", encoding="utf-8")
     assert plugin_utilities.get_plugin_config("other.yaml") == {"key": "value"}
 

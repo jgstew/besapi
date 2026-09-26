@@ -485,7 +485,7 @@ class BESCLInterface(Cmd):
     def do_upload(self, file_path):
         """Upload file to root server."""
         if not os.access(file_path, os.R_OK):
-            self.poutput(file_path, "is not a readable file")
+            self.poutput(f"{file_path} is not a readable file")
         else:
             upload_result = self.bes_conn.upload(file_path)
             self.poutput(upload_result)
@@ -496,7 +496,7 @@ class BESCLInterface(Cmd):
     def do_create_group(self, file_path):
         """Create bigfix group from bes file."""
         if not os.access(file_path, os.R_OK):
-            self.poutput(file_path, "is not a readable file")
+            self.poutput(f"{file_path} is not a readable file")
         else:
             self.poutput(self.bes_conn.create_group_from_file(file_path))
 
@@ -505,7 +505,7 @@ class BESCLInterface(Cmd):
     def do_create_user(self, file_path):
         """Create bigfix user from bes file."""
         if not os.access(file_path, os.R_OK):
-            self.poutput(file_path, "is not a readable file")
+            self.poutput(f"{file_path} is not a readable file")
         else:
             self.poutput(self.bes_conn.create_user_from_file(file_path))
 
@@ -514,7 +514,7 @@ class BESCLInterface(Cmd):
     def do_create_site(self, file_path):
         """Create bigfix site from bes file."""
         if not os.access(file_path, os.R_OK):
-            self.poutput(file_path, "is not a readable file")
+            self.poutput(f"{file_path} is not a readable file")
         else:
             self.poutput(self.bes_conn.create_site_from_file(file_path))
 
@@ -523,7 +523,7 @@ class BESCLInterface(Cmd):
     def do_update_item(self, file_path):
         """Update bigfix content item from bes file."""
         if not os.access(file_path, os.R_OK):
-            self.poutput(file_path, " is not a readable file")
+            self.poutput(f"{file_path} is not a readable file")
         else:
             self.poutput(self.bes_conn.update_item_from_file(file_path))
 

@@ -45,7 +45,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install build tools
-        run: pip install setuptools wheel build pyinstaller pytest pytest-cov
+        run: pip install setuptools wheel build pyinstaller pytest pytest-cov ruamel.yaml
 
       - name: Install requirements
         shell: bash

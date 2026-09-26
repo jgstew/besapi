@@ -102,7 +102,9 @@ def written_files(folder):
     found = []
     for dirpath, _dirs, files in os.walk(folder):
         for name in files:
-            found.append(os.path.relpath(os.path.join(dirpath, name), folder))
+            relative = os.path.relpath(os.path.join(dirpath, name), folder)
+            # same separator on every OS, so expected paths can use "/":
+            found.append(relative.replace(os.sep, "/"))
     return sorted(found)
 
 
