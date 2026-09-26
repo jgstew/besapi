@@ -19,16 +19,16 @@ DATA_AGE_RELEVANCE = (
 )
 CRITICAL_PATCHES_RELEVANCE = (
     "number of bes fixlets whose (fixlet flag of it"
-    " and applicable computer count of it > 0"
-    " and exists applicable computers whose"
+    " AND applicable computer count of it > 0"
+    " AND exists applicable computers whose"
     " (now - last report time of it < 60 * day) of it"
-    ' and exists (name of site of it) whose (it = "Enterprise Security"'
+    ' AND exists (name of site of it) whose (it = "Enterprise Security"'
     ' or it starts with "Updates for" or it starts with "Patches for")'
-    " and exists (source severity of it as lowercase) whose"
+    " AND exists (source severity of it as lowercase) whose"
     ' (it is contained by set of ("high";"important";"critical"))'
-    " and exists default action of it"
-    " and globally visible flag of it"
-    ' and name of it does not contain "(Superseded)")'
+    " AND exists default action of it"
+    " AND globally visible flag of it"
+    ' AND name of it does not contain "(Superseded)")'
 )
 LAST_UPDATE = datetime.datetime(2026, 9, 25, 22, 0, tzinfo=datetime.timezone.utc)
 
