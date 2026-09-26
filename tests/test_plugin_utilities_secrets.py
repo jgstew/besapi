@@ -3,6 +3,7 @@
 The platform specific utilities module is faked, so these run on any OS.
 """
 
+import logging
 import os
 import sys
 import types
@@ -136,6 +137,51 @@ def test_protect_secret_platform_error(monkeypatch):
         plugin_utilities, "PLATFORM_UTILITIES", make_platform(protect=broken_protect)
     )
     assert plugin_utilities.protect_secret("plaintextpw") is None
+
+
+def test_protect_secret_platform_error_is_logged(monkeypatch, caplog):
+    """Test that an error encrypting shows at the default plugin log level.
+
+    Plugins log at WARNING by default, so a DEBUG message would hide why a
+    secret was left as plaintext.
+    """
+
+    def broken_protect(_plaintext):
+        raise OSError("DPAPI exploded")
+
+    monkeypatch.setattr(
+        plugin_utilities, "PLATFORM_UTILITIES", make_platform(protect=broken_protect)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert plugin_utilities.protect_secret("plaintextpw") is None
+
+    assert any(
+        record.levelno >= logging.ERROR and "DPAPI exploded" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_unprotect_secret_platform_error_is_logged(monkeypatch, caplog):
+    """Test that an error decrypting shows at the default plugin log level."""
+
+    def broken_unprotect(_protected):
+        raise OSError("CryptoUtility exploded")
+
+    monkeypatch.setattr(
+        plugin_utilities,
+        "PLATFORM_UTILITIES",
+        make_platform(unprotect=broken_unprotect),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert plugin_utilities.unprotect_secret(FAKE_PREFIX + "x") is None
+
+    assert any(
+        record.levelno >= logging.ERROR
+        and "CryptoUtility exploded" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_unprotect_secret(root_server):  # pylint: disable=unused-argument

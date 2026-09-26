@@ -528,7 +528,9 @@ def get_besapi_connection_env_then_config():
     return bes_conn
 
 
-def _try_platform_utility(function_name: str, *args):
+def _try_platform_utility(
+    function_name: str, *args, failure_log_level: int = logging.DEBUG
+):
     """Call a function from the platform specific utilities module, if possible.
 
     These are best effort conveniences for the case where the plugin happens to
@@ -538,6 +540,8 @@ def _try_platform_utility(function_name: str, *args):
     Args:
         function_name: The name of the function to call.
         *args: Arguments to pass to the function.
+        failure_log_level: The level to log an error raised by the function at.
+            DEBUG by default, since that usually just means not a root server.
 
     Returns:
         Whatever the function returned, or None if it could not be used.
@@ -558,7 +562,7 @@ def _try_platform_utility(function_name: str, *args):
         return platform_function(*args)
     except BaseException as err:  # pylint: disable=broad-exception-caught
         # NOTE: intentionally broad, this must never prevent the other methods:
-        logging.debug("`%s` failed, ignoring: %s", function_name, err)
+        logging.log(failure_log_level, "`%s` failed, ignoring: %s", function_name, err)
         return None
 
 
@@ -603,13 +607,16 @@ def protect_secret(plaintext: str) -> Union[str, None]:
         logging.debug("not a usable root server, cannot protect secret.")
         return None
 
-    protected = _try_platform_utility("protect_secret", plaintext)
+    # NOTE: this is a root server by now, so an error here is a real problem:
+    protected = _try_platform_utility(
+        "protect_secret", plaintext, failure_log_level=logging.ERROR
+    )
 
     if not protected:
         return None
 
     # never trust an encrypted value that cannot be decrypted back:
-    if _try_platform_utility("unprotect_secret", protected) != plaintext:
+    if unprotect_secret(protected) != plaintext:
         logging.warning("encrypted secret did not decrypt back, not using it.")
         return None
 
@@ -618,7 +625,9 @@ def protect_secret(plaintext: str) -> Union[str, None]:
 
 def unprotect_secret(protected: str) -> Union[str, None]:
     """Decrypt a secret from protect_secret(), otherwise return None."""
-    return _try_platform_utility("unprotect_secret", protected)
+    return _try_platform_utility(
+        "unprotect_secret", protected, failure_log_level=logging.ERROR
+    )
 
 
 def get_besconn_root_server() -> Union[besapi.besapi.BESConnection, None]:
