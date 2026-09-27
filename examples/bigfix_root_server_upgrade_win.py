@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.17"
+__version__ = "0.2.18"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2719,6 +2719,9 @@ def _action_client_data(ctx: WalkthroughContext) -> None:
     key_storage = os.path.join(
         _client_folder(ctx.state.get("baseline") or {}), "KeyStorage"
     )
+    if not ctx.dry_run:
+        # reg.exe can't create folders:
+        os.makedirs(folder, exist_ok=True)
     ctx.execute(
         [
             "reg.exe",

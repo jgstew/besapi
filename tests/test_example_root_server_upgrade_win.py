@@ -6524,3 +6524,22 @@ def test_unknown_command_lists_every_command(upgrade):
 
     asyncio.run(scenario())
     assert any(upgrade.SESSION_COMMANDS in line for line in output)
+
+
+def test_client_data_folder_exists_before_reg_export(upgrade, tmp_path):
+    """Test the client_data folder is made before reg.exe exports into it, since
+    reg.exe can't create folders.
+    """
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    seen = []
+
+    def check_folder(cmd):
+        if cmd[:2] == ["reg.exe", "export"]:
+            seen.append(os.path.isdir(os.path.dirname(cmd[3])))
+        return ""
+
+    ctx.host.run_handler = check_folder
+
+    upgrade.ACTIONS["client_data"](ctx)
+
+    assert seen == [True]
