@@ -3154,3 +3154,57 @@ def test_build_report_hyperv_root_from_masthead(upgrade, compat, monkeypatch):
 
     assert seen == [upgrade.CLIENT_MASTHEAD_PATHS]
     assert report["hyperv"]["bigfix_vms"] == ["bigfix-root"]
+
+
+def test_build_report_hyperv_without_root_versions(upgrade, compat, monkeypatch):
+    """Test with nothing known about the root server, the target Windows is still
+    checked against the host, so a 2012 R2 host isn't reported as fine.
+    """
+    monkeypatch.setattr(upgrade, "discover_root_ip", lambda paths: None)
+    host = hyperv_host(upgrade, product="Windows Server 2012 R2 Datacenter")
+
+    report = upgrade.build_report(None, host, compat)
+
+    check = report["upgrade_assessment"]["hyperv"]
+    assert check["guests"] == ["2025"]
+    assert check["supported"] is False
+    assert check["host_upgrades"]
+
+
+def test_collect_hyperv_info_vm_by_name(upgrade):
+    """Test with no root address, the one VM named like BigFix is picked, and
+    says it was matched by name.
+    """
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade), None)
+
+    assert info["bigfix_vms"] == ["bigfix-root"]
+    assert info["bigfix_vms_matched_by"] == "name"
+    assert info["root_ip"] is None
+
+
+def test_collect_hyperv_info_vm_by_address(upgrade):
+    """Test the address match is preferred and recorded."""
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade), "192.168.5.40")
+
+    assert info["bigfix_vms_matched_by"] == "address"
+    assert info["root_ip"] == "192.168.5.40"
+
+
+def test_vm_disk_bytes_counts_checkpoint_chain(upgrade):
+    """Test a VM's disk size includes the parents of a checkpoint's .avhdx."""
+    vm = {
+        "Disks": [
+            {
+                "Path": r"C:\vhd\root_1.avhdx",
+                "Bytes": 100,
+                "Chain": [
+                    {"Path": r"C:\vhd\root_1.avhdx", "Bytes": 100},
+                    {"Path": r"C:\vhd\root.vhdx", "Bytes": 900},
+                ],
+            },
+            # an older report without the chain:
+            {"Path": r"D:\data.vhdx", "Bytes": 50},
+        ]
+    }
+
+    assert upgrade.vm_disk_bytes(vm) == 1050

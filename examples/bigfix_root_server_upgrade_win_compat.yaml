@@ -146,8 +146,8 @@ mssql_max_compat_level:
     "2025": 170
 
 # the oldest Hyper-V host (Windows Server) each Windows Server guest runs on.
-# Guests not listed have no minimum host among the versions planned here, check
-# an old guest is still supported on a newer host on the source page:
+# The source lists 2019 and older guests (2012 R2 included) with no host limit,
+# and says every guest and host must be up to date to be supported:
 hyperv_guests:
   sources:
     - https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/supported-windows-guest-operating-systems-for-hyper-v-on-windows

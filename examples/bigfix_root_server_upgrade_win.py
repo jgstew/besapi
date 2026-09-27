@@ -1378,6 +1378,7 @@ def collect_hyperv_info(
         "errors": [],
     }
     names = {str(vm.get("Name")) for vm in vms}
+    info["root_ip"] = root_ip
     if vm_names:
         info["bigfix_vms"] = [name for name in vm_names if name in names]
         info["errors"] += [
@@ -1385,13 +1386,35 @@ def collect_hyperv_info(
             for name in vm_names
             if name not in names
         ]
+        info["bigfix_vms_matched_by"] = "--vm-name"
+        return info
+    by_address = [
+        str(vm.get("Name"))
+        for vm in vms
+        if root_ip and root_ip in (vm.get("IPAddresses") or [])
+    ]
+    # with no address to match, a single VM named like BigFix, to confirm:
+    by_name = [name for name in sorted(names) if "bigfix" in name.lower()]
+    if by_address:
+        info["bigfix_vms"], info["bigfix_vms_matched_by"] = by_address, "address"
+    elif not root_ip and len(by_name) == 1:
+        info["bigfix_vms"], info["bigfix_vms_matched_by"] = by_name, "name"
     else:
-        info["bigfix_vms"] = [
-            str(vm.get("Name"))
-            for vm in vms
-            if root_ip and root_ip in (vm.get("IPAddresses") or [])
-        ]
+        info["bigfix_vms"], info["bigfix_vms_matched_by"] = [], None
+        info["errors"].append(
+            "could not tell which VM is the root server, give --vm-name"
+            + ("" if root_ip else ", the root server's address wasn't found")
+        )
     return info
+
+
+def vm_disk_bytes(vm: dict) -> int:
+    """A VM's disk space, with every parent of a checkpoint's differencing disk."""
+    total = 0
+    for disk in vm.get("Disks") or []:
+        chain = disk.get("Chain") or [disk]
+        total += sum(int(link.get("Bytes") or 0) for link in chain)
+    return total
 
 
 # ---------------------------------------------------------------- report
@@ -1661,6 +1684,9 @@ def build_report(
             for step in (path or {}).get("steps", [])
             if step["component"] == "windows"
         ]
+        # the target, even when the root server's own versions aren't known:
+        if target.get("windows") and target["windows"] not in guests:
+            guests.append(target["windows"])
         check = hyperv_guest_check(compat, hyperv.get("windows_version"), guests)
         assessment["hyperv"] = dict(check, guests=guests)
     assessment["sources"] = sorted(
@@ -4289,10 +4315,14 @@ PS_HYPERV_VMS = (
     " { $_.IPAddresses });"
     " SwitchNames = @($vm | Get-VMNetworkAdapter | ForEach-Object"
     " { $_.SwitchName });"
-    " Disks = @($vm | Get-VMHardDiskDrive | ForEach-Object { [pscustomobject]@{"
-    " Path = $_.Path; Bytes = (Get-Item -LiteralPath $_.Path"
-    " -ErrorAction SilentlyContinue).Length } }) } })"
-    " | ConvertTo-Json -Compress -Depth 4"
+    # each disk with its chain of parents, a checkpoint's .avhdx up to the .vhdx:
+    " Disks = @($vm | Get-VMHardDiskDrive | ForEach-Object { $p = $_.Path;"
+    " $chain = @(); while ($p) { $chain += [pscustomobject]@{ Path = $p;"
+    " Bytes = (Get-Item -LiteralPath $p -ErrorAction SilentlyContinue).Length };"
+    " $p = (Get-VHD -Path $p -ErrorAction SilentlyContinue).ParentPath };"
+    " [pscustomobject]@{ Path = $_.Path; Bytes = $chain[0].Bytes;"
+    " Chain = $chain } }) } })"
+    " | ConvertTo-Json -Compress -Depth 5"
 )
 PS_HYPERV_SWITCHES = (
     "@(Get-VMSwitch | Select-Object Name, SwitchType,"
