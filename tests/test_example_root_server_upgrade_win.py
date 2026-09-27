@@ -6300,3 +6300,69 @@ def test_dry_run_local_backup_doesnt_mention_share(upgrade, tmp_path, capsys):
     ctx.backup_dir()
 
     assert "would connect" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- REST outages
+
+
+def test_connection_errors_logged_without_traceback(upgrade):
+    """Test besapi's connection failures become a one line warning, and other
+    errors keep their traceback.
+    """
+    quiet = upgrade.QuietConnectionErrors()
+    try:
+        raise ConnectionError("root server down")
+    except ConnectionError:
+        import sys as _sys
+
+        exc = _sys.exc_info()
+    record = logging.LogRecord(
+        "root",
+        logging.ERROR,
+        "/x/besapi/plugin_utilities.py",
+        1,
+        "----- ERROR: BigFix Connection Failed ------",
+        None,
+        exc,
+    )
+    other = logging.LogRecord(
+        "root", logging.ERROR, "/x/other.py", 1, "boom", None, exc
+    )
+
+    assert quiet.filter(record) and quiet.filter(other)
+    assert record.levelno == logging.WARNING and record.exc_info is None
+    assert other.levelno == logging.ERROR and other.exc_info is not None
+
+
+def test_rest_connection_retries_until_root_is_back(upgrade):
+    """Test with no connection, REST is tried again, no more than every so often,
+    and kept once it works.
+    """
+    attempts = []
+    clock = {"now": 0.0}
+    answers = iter([None, None, "conn"])
+
+    def connect(args):
+        attempts.append(clock["now"])
+        return next(answers)
+
+    rest = upgrade.RestConnection(None, None, connect=connect, now=lambda: clock["now"])
+
+    assert rest.get() is None  # first try
+    clock["now"] = 10
+    assert rest.get() is None  # too soon, not tried
+    clock["now"] = 40
+    assert rest.get() is None  # tried, still down
+    clock["now"] = 80
+    assert rest.get() == "conn"  # back up
+    clock["now"] = 81
+    assert rest.get() == "conn"
+    assert attempts == [0.0, 40, 80]
+
+
+def test_rest_unavailable_message(upgrade, capsys):
+    """Test joining without REST says so plainly."""
+    upgrade.explain_rest(None)
+    assert "joining the session anyway" in capsys.readouterr().out
+    upgrade.explain_rest(object())
+    assert capsys.readouterr().out == ""

@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.14"
+__version__ = "0.2.15"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -7224,6 +7224,7 @@ def run_share_session(args, bes_conn, host) -> int:
         f"share session as {node}, masthead serial {serial}, script {__version__}"
         f" {script_fingerprint()}"
     )
+    explain_rest(bes_conn)
     if node == "coordinator":
         return _run_coordinator(
             args, bes_conn, host, serial, psk, psk_source, given_code
@@ -7292,6 +7293,61 @@ def save_oneshot_token(state: dict, token: Optional[dict]) -> None:
         state["session_resume_oneshot"] = token
     else:
         state.pop("session_resume_oneshot", None)
+
+
+class QuietConnectionErrors(logging.Filter):
+    """Besapi's connection failures as a one line warning, not a traceback: the
+    root server being down or rebooting is expected during an upgrade.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if (
+            record.pathname.replace("\\", "/").endswith("besapi/plugin_utilities.py")
+            and record.levelno >= logging.ERROR
+        ):
+            if record.exc_info and record.exc_info[1] is not None:
+                record.msg = f"{record.getMessage()} ({record.exc_info[1]})"
+                record.args = None
+            record.exc_info = None
+            record.exc_text = None
+            record.levelno = logging.WARNING
+            record.levelname = "WARNING"
+        return True
+
+
+def explain_rest(bes_conn) -> None:
+    """Say plainly when the session starts without BigFix REST."""
+    if bes_conn is None:
+        print(
+            "BigFix REST isn't reachable now (is the root server up?), joining the"
+            " session anyway, REST checks retry later"
+        )
+
+
+class RestConnection:
+    """The BigFix REST connection, tried again when it's needed and missing, no
+    more often than every `retry` seconds, and kept once it works.
+    """
+
+    def __init__(self, args, conn=None, connect=None, now=time.monotonic, retry=30):
+        # pylint: disable=too-many-arguments
+        self.args = args
+        self.conn = conn
+        self.connect = connect or besapi.plugin_utilities.get_besapi_connection
+        self.now = now
+        self.retry = retry
+        self._last_try: Optional[float] = None
+
+    def get(self):
+        """The connection, or None while the root server can't be reached."""
+        if self.conn is None and (
+            self._last_try is None or self.now() - self._last_try >= self.retry
+        ):
+            self._last_try = self.now()
+            self.conn = self.connect(self.args)
+            if self.conn is not None:
+                logging.info("BigFix REST is reachable again")
+        return self.conn
 
 
 def session_state_path(state_file: str) -> str:
@@ -7534,9 +7590,11 @@ def _run_node(
             state.pop(resume_key, None)
         save_state(session_path, state)
 
+    rest = RestConnection(args, bes_conn)
+
     def node_report() -> dict:
         return build_report(
-            bes_conn,
+            rest.get(),
             host,
             load_compat(args.compat_file),
             _target_from_args(args),
@@ -7551,7 +7609,7 @@ def _run_node(
 
         def session_walkthrough(bridge) -> None:
             tee.claim()
-            run_walkthrough(args, bes_conn, host, compat, session=bridge)
+            run_walkthrough(args, rest.get(), host, compat, session=bridge)
 
         walkthrough = session_walkthrough
 
@@ -7563,7 +7621,11 @@ def _run_node(
             tee.claim()
             dry_args = types.SimpleNamespace(**dict(vars(args), dry_run=True))
             run_walkthrough(
-                dry_args, bes_conn, host, load_compat(args.compat_file), session=bridge
+                dry_args,
+                rest.get(),
+                host,
+                load_compat(args.compat_file),
+                session=bridge,
             )
 
         dry_run_fn = session_dry_run
@@ -7880,6 +7942,8 @@ def main():
 
 
 def _main(parser, args, host):
+    # the root server can be down during an upgrade, so no connection tracebacks:
+    logging.getLogger().addFilter(QuietConnectionErrors())
     if args.walkthrough and not args.share_session:
         with besapi.plugin_utilities.init_plugin(
             __version__, parser, require_connection=False
