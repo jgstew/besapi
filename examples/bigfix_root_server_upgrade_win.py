@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.16"
+__version__ = "0.2.17"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -5710,6 +5710,12 @@ class WalkthroughBridge:
         )
         self.node.send_threadsafe({"type": "question", **question})
         self._answered.wait()
+        if not self._running.is_set():
+            # answered, but held: say so, so this terminal doesn't look stuck
+            self.node._print(  # pylint: disable=protected-access
+                f"answered {self._answer}, waiting: the session is halted, it goes on"
+                " after continue"
+            )
         self.wait_if_halted()
         return str(self._answer)
 
@@ -6337,7 +6343,15 @@ class ShareSessionCoordinator:
             self.output(f"{choice!r} is not one of {'/'.join(question['choices'])}")
             return
         self.question = None
-        self.output(f"{source} answered {choice} to {question['node']}")
+        self.output(
+            f"{source} answered {choice} to {question['node']}"
+            + (
+                ", it goes on after continue, the session is halted by"
+                f" {self.halted.get('by')}"
+                if self.halted
+                else ""
+            )
+        )
         await self._send(
             question["node"],
             {"type": "answer", "id": question["id"], "choice": choice, "by": source},
@@ -6428,6 +6442,11 @@ class ShareSessionCoordinator:
             f" {len(self.nodes)} node(s) connected, coordinator script {__version__}"
             f" {script_fingerprint()}"
         ]
+        if self.halted:
+            lines.append(
+                f"HALTED by {self.halted.get('by')}: {self.halted.get('reason')},"
+                " type continue to resume"
+            )
         for name, node in self.nodes.items():
             history = self.results.get(name)
             last = history[-1] if history else None
@@ -6528,11 +6547,7 @@ class ShareSessionCoordinator:
             self._tokens_changed()
             self.done.set()
         else:
-            self.output(
-                f"unknown command {command!r}, use status, retry, state <node>,"
-                " diag <node> [check], log <node> [lines], halt [reason], continue,"
-                " answer <choice>, revoke <node> or end"
-            )
+            self.output(f"unknown command {command!r}, use: {SESSION_COMMANDS}")
 
     async def _wait(self, condition, timeout: float) -> None:
         async def waiter():

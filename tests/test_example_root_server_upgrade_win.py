@@ -6451,3 +6451,76 @@ def test_prepare_share_uses_given_ask(upgrade, monkeypatch):
     upgrade._prepare_share(args, hyperv_host(upgrade), {}, None, None, ask=marker)
 
     assert seen == [marker]
+
+
+# ---------------------------------------------------------------- showing a halt
+
+
+def test_status_shows_halt(upgrade):
+    """Test status says the session is halted, by whom, and how to go on."""
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            **coordinator_options(upgrade),
+        )
+        assert not any("HALTED" in line for line in coordinator.status_lines())
+        await coordinator.handle_command("halt checking disk", source="coordinator")
+        return coordinator.status_lines()
+
+    lines = asyncio.run(scenario())
+    assert lines[1] == "HALTED by coordinator: checking disk, type continue to resume"
+
+
+def test_answer_while_halted_says_it_waits(upgrade):
+    """Test an answer while halted says it goes on after continue, on the
+    coordinator and on the node that asked.
+    """
+    answers = []
+    shown = []
+
+    def walkthrough(bridge):
+        answers.append(bridge.ask("Which share?", ["1", "2", "new"], "1"))
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        rig.nodes["root"]._print = shown.append
+        await rig.until(lambda: rig.coordinator.question)
+        await rig.coordinator.handle_command("halt version check", source="coordinator")
+        await rig.coordinator.handle_command("2", source="coordinator")
+        await rig.until(lambda: any("waiting" in line for line in shown))
+        waited = list(answers)
+        await rig.coordinator.handle_command("continue", source="coordinator")
+        await rig.until(lambda: answers)
+        await rig.finish()
+        return rig, waited
+
+    rig, waited = asyncio.run(scenario())
+    assert waited == []
+    assert answers == ["2"]
+    assert (
+        "coordinator answered 2 to root, it goes on after continue, the session is"
+        " halted by coordinator" in rig.text("coordinator")
+    )
+    assert any(
+        "answered 2, waiting: the session is halted, it goes on after continue" in line
+        for line in shown
+    )
+
+
+def test_unknown_command_lists_every_command(upgrade):
+    """Test an unknown command shows the full, current list of commands."""
+    output = []
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=output.append,
+            **coordinator_options(upgrade),
+        )
+        await coordinator.handle_command("frobnicate", source="coordinator")
+
+    asyncio.run(scenario())
+    assert any(upgrade.SESSION_COMMANDS in line for line in output)
