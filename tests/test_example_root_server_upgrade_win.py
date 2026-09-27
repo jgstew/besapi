@@ -6701,3 +6701,66 @@ def test_pairing_code_prompt_without_input(upgrade, monkeypatch):
 
     with pytest.raises(SystemExit, match="pairing code"):
         upgrade.ask_pairing_code()
+
+
+# ---------------------------------------------------------------- waiting for REST
+
+
+def validate_ctx(upgrade, tmp_path, monkeypatch, answers, rest_wait=600):
+    """A walkthrough whose REST answers as given, one per attempt."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.rest_wait = rest_wait
+    attempts = iter(answers)
+    sleeps = []
+    monkeypatch.setattr(
+        upgrade.besapi.plugin_utilities, "get_besapi_connection", lambda args: None
+    )
+    monkeypatch.setattr(upgrade, "collect_rest_info", lambda conn: next(attempts))
+    monkeypatch.setattr(upgrade.time, "sleep", sleeps.append)
+    return ctx, sleeps
+
+
+def test_validate_waits_for_rest(upgrade, tmp_path, monkeypatch, capsys):
+    """Test validate tries REST every 30 seconds until the root server answers."""
+    down = {"skipped": "no BigFix REST connection"}
+    up = {"serverinfo": {"version": "11.0.6.1"}}
+    ctx, sleeps = validate_ctx(upgrade, tmp_path, monkeypatch, [down, down, up])
+
+    upgrade.ACTIONS["validate"](ctx)
+
+    out = capsys.readouterr().out
+    assert sleeps == [30, 30]
+    assert "waiting for BigFix REST, 30s so far" in out
+    assert "OK, BigFix REST answers" in out
+    assert "not answering" not in out
+
+
+def test_validate_rest_wait_times_out(upgrade, tmp_path, monkeypatch, capsys):
+    """Test validate gives up after --rest-wait, with a clear warning."""
+    down = {"skipped": "no BigFix REST connection"}
+    ctx, sleeps = validate_ctx(
+        upgrade, tmp_path, monkeypatch, [down] * 10, rest_wait=60
+    )
+
+    upgrade.ACTIONS["validate"](ctx)
+
+    assert sleeps == [30, 30]
+    assert "WARNING: BigFix REST didn't answer within 60s" in capsys.readouterr().out
+
+
+def test_validate_dry_run_doesnt_wait(upgrade, tmp_path, monkeypatch):
+    """Test a dry run checks REST once, without waiting."""
+    down = {"skipped": "no BigFix REST connection"}
+    ctx, sleeps = validate_ctx(upgrade, tmp_path, monkeypatch, [down] * 3)
+    ctx.args.dry_run = True
+
+    upgrade.ACTIONS["validate"](ctx)
+
+    assert sleeps == []
+
+
+def test_rest_wait_argument(upgrade):
+    """Test --rest-wait defaults to 10 minutes."""
+    parser = upgrade.build_parser()
+    assert parser.parse_args([]).rest_wait == 600
+    assert parser.parse_args(["--rest-wait", "120"]).rest_wait == 120

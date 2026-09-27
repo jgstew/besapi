@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.20"
+__version__ = "0.2.21"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -3112,13 +3112,47 @@ def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
     )
 
 
+REST_WAIT_INTERVAL = 30
+DEFAULT_REST_WAIT = 600
+
+
+def _rest_answers(rest: dict) -> bool:
+    return "skipped" not in rest and "error" not in (rest.get("serverinfo") or {})
+
+
+def wait_for_rest(ctx: WalkthroughContext) -> dict:
+    """BigFix REST, waiting in a real run for the root server to answer, which
+    can take minutes after its services start, longer after an upgrade.
+    """
+    limit = float(getattr(ctx.args, "rest_wait", DEFAULT_REST_WAIT) or 0)
+    waited = 0
+    while True:
+        rest = collect_rest_info(
+            besapi.plugin_utilities.get_besapi_connection(ctx.args)
+        )
+        if _rest_answers(rest):
+            if waited:
+                print(f"OK, BigFix REST answers, after {waited}s")
+            return rest
+        if ctx.dry_run or waited >= limit:
+            break
+        time.sleep(REST_WAIT_INTERVAL)
+        waited += REST_WAIT_INTERVAL
+        print(f"waiting for BigFix REST, {waited}s so far, up to {limit:.0f}s")
+    if ctx.dry_run:
+        print("WARNING: the REST API is not answering:", rest)
+    else:
+        print(
+            f"WARNING: BigFix REST didn't answer within {limit:.0f}s: {rest}. Check"
+            " the root server service and its log before continuing"
+        )
+    return rest
+
+
 def _action_validate(ctx: WalkthroughContext) -> None:
     local = redact(collect_local_info(ctx.host, ctx.args.sql_instance))
     ctx.state["reports"][utc_now().isoformat()] = local
-    bes_conn = besapi.plugin_utilities.get_besapi_connection(ctx.args)
-    rest = collect_rest_info(bes_conn)
-    if "error" in rest.get("serverinfo", {}) or "skipped" in rest:
-        print("WARNING: the REST API is not answering:", rest)
+    rest = wait_for_rest(ctx)
     differences = compare_baselines(ctx.state.get("baseline") or {}, local)
     for difference in differences:
         print("DIFFERENCE:", difference)
@@ -7987,6 +8021,13 @@ def build_parser():
         default=300,
         help="in a session, seconds a command typed as `localcmd <command>` on a"
         " node may run, default 300",
+    )
+    parser.add_argument(
+        "--rest-wait",
+        type=float,
+        default=600,
+        help="in a real walkthrough, seconds validate waits for BigFix REST to"
+        " answer after the services start, default 600",
     )
     parser.add_argument(
         "--heartbeat-wait",
