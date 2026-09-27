@@ -6764,3 +6764,131 @@ def test_rest_wait_argument(upgrade):
     parser = upgrade.build_parser()
     assert parser.parse_args([]).rest_wait == 600
     assert parser.parse_args(["--rest-wait", "120"]).rest_wait == 120
+
+
+# ---------------------------------------------------------------- stale share connections
+
+
+def stale_connection_host(upgrade, existing):
+    """A node with an old connection to the share, from its previous password."""
+    host = client_host(upgrade)
+    root = r"\\192.168.5.39\_tmp_backup"
+    host.share_errors[root] = win_error(1219)
+    host.run_handler = lambda cmd: (
+        "\n".join(
+            f"OK           {unc}    Microsoft Windows Network" for unc in existing
+        )
+        if cmd == ["net.exe", "use"]
+        else ""
+    )
+
+    def disconnect(share_root):
+        host.disconnected.append(share_root)
+        host.share_errors.pop(share_root, None)
+
+    host.disconnect_share = disconnect
+    return host, root
+
+
+def test_stale_session_share_connection_replaced(upgrade):
+    """Test an old connection to the session's own share, made with its previous
+    password, is replaced, so the new password connects.
+    """
+    host, root = stale_connection_host(upgrade, [r"\\192.168.5.39\_tmp_backup"])
+
+    findings = upgrade.diagnose_share_access(
+        host, SHARE_UNC, r"HyperV\bfupgrade_share", "new"
+    )
+
+    connect = next(f for f in findings if f["check"] == "connect")
+    assert connect["ok"] is True
+    # the old one first, the share check disconnects its own at the end too:
+    assert host.disconnected[0] == root
+    assert "replaced" in connect["detail"]
+
+
+def test_other_connection_to_server_left_alone(upgrade):
+    """Test a connection to another share on that server, which may be the
+    person's own, isn't removed, and 1219 is still reported.
+    """
+    host, _root = stale_connection_host(upgrade, [r"\\192.168.5.39\other"])
+
+    findings = upgrade.diagnose_share_access(
+        host, SHARE_UNC, r"HyperV\bfupgrade_share", "new"
+    )
+
+    connect = next(f for f in findings if f["check"] == "connect")
+    assert connect["ok"] is False and "1219" in connect["detail"]
+    assert host.disconnected == []
+
+
+def test_backup_replaces_stale_session_share_connection(upgrade, tmp_path):
+    """Test the walkthrough's backup connection replaces a stale one too."""
+    host, root = stale_connection_host(upgrade, [r"\\192.168.5.39\_tmp_backup"])
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.args.backup_dir = SHARE_UNC + r"\bigfix"
+    ctx.session = ShareSession()
+
+    upgrade.connect_backup_share(ctx)
+
+    assert host.disconnected == [root]
+    assert host.shares[-1] == (root, r"HyperV\bfupgrade_share", "temp-Pw-123!")
+
+
+# ---------------------------------------------------------------- walkthrough command
+
+
+def test_walkthrough_typed_at_node_starts_it(upgrade):
+    """Test `walkthrough` typed at a node started without --walkthrough runs its
+    real walkthrough, once at a time.
+    """
+    runs = []
+    release = threading.Event()
+    printed = []
+
+    def real_walkthrough(bridge):
+        runs.append("real")
+        release.wait(5)
+
+    async def scenario():
+        rig = WalkRig(upgrade, None)
+        rig.server = await rig.coordinator.start("127.0.0.1", 0)
+        rig.port = rig.server.sockets[0].getsockname()[1]
+        node = rig.add(
+            "BIGFIX", ["root"], client_host(upgrade), walkthrough_fn=real_walkthrough
+        )
+        node._print = printed.append
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await asyncio.sleep(0.2)
+        assert runs == []  # not on connect
+        node.on_typed("walkthrough")
+        await rig.until(lambda: runs)
+        node.on_typed("walkthrough")
+        release.set()
+        await rig.finish()
+
+    asyncio.run(scenario())
+    assert runs == ["real"]
+    assert any("already running" in line for line in printed)
+
+
+def test_walkthrough_never_starts_from_the_session(upgrade):
+    """Test `walkthrough <node>` sent over the session, like from a one-shot,
+    starts nothing and says to type it at the node.
+    """
+    runs = []
+
+    async def scenario():
+        rig = WalkRig(upgrade, None)
+        rig.server = await rig.coordinator.start("127.0.0.1", 0)
+        rig.port = rig.server.sockets[0].getsockname()[1]
+        rig.add("BIGFIX", ["root"], client_host(upgrade), walkthrough_fn=runs.append)
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.coordinator.handle_command("walkthrough BIGFIX", source="coordinator")
+        await asyncio.sleep(0.2)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert runs == []
+    assert "walkthrough only starts typed at the node" in rig.text("coordinator")

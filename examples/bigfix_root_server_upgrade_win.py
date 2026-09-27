@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.21"
+__version__ = "0.2.22"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2310,7 +2310,9 @@ def connect_backup_share(ctx, getpass_fn=getpass.getpass) -> None:
         # in a session, the share account the coordinator handed out:
         share = session_share(ctx)
         if share.get("user") and unc_share_root(share.get("unc") or "") == root:
-            ctx.host.connect_share(root, share["user"], share.get("password") or "")
+            connect_replacing_stale(
+                ctx.host, root, share["user"], share.get("password") or ""
+            )
             logging.info("connected to %s as %s, from the session", root, share["user"])
         return
     if not root or not user:
@@ -4434,6 +4436,35 @@ def _existing_connections(host, server: str) -> List[str]:
     ]
 
 
+def connect_replacing_stale(host, share_root: str, user: str, password: str) -> bool:
+    """Connect to the share, replacing this computer's old connection to that same
+    share, like one made with the password before the share owner restarted.
+
+    Returns whether an old connection was replaced. Connections to other shares
+    on that server are left alone, they may be the person's own.
+    """
+    try:
+        host.connect_share(share_root, user, password)
+        return False
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        if _win_error_code(err) != 1219:
+            raise
+        server = share_root.lstrip("\\").split("\\", 1)[0]
+        existing = [
+            unc.rstrip("\\").lower() for unc in _existing_connections(host, server)
+        ]
+        if not existing or any(
+            unc != share_root.rstrip("\\").lower() for unc in existing
+        ):
+            raise
+        logging.info(
+            "replacing the old connection to %s, from a previous password", share_root
+        )
+        host.disconnect_share(share_root)
+        host.connect_share(share_root, user, password)
+        return True
+
+
 def diagnose_share_access(
     host, unc: str, user: Optional[str], password: Optional[str], sql_server=None
 ) -> List[dict]:
@@ -4490,9 +4521,20 @@ def diagnose_share_access(
     connected = False
     if user:
         try:
-            host.connect_share(root, user, password)
+            replaced = connect_replacing_stale(host, root, user, password or "")
             connected = True
-            findings.append(_finding("connect", True, f"connected as {user}"))
+            findings.append(
+                _finding(
+                    "connect",
+                    True,
+                    f"connected as {user}"
+                    + (
+                        ", replaced this computer's old connection to the share"
+                        if replaced
+                        else ""
+                    ),
+                )
+            )
         except Exception as err:  # pylint: disable=broad-exception-caught
             code = _win_error_code(err)
             cause, fix = NET_ERRORS.get(
@@ -5204,7 +5246,7 @@ RESUME_TOKEN_SECONDS = 24 * 60 * 60
 SESSION_COMMANDS = (
     "status, retry, state <node>, diag <node> [check], report <node>,"
     " dryrun <node>, suggest <node> <command>, and typed at a node:"
-    " localcmd <command>, send <file>,"
+    " walkthrough, localcmd <command>, send <file>,"
     " log <node> [lines],"
     " halt [reason], continue, answer <choice>, revoke <node>, end"
 )
@@ -6554,6 +6596,11 @@ class ShareSessionCoordinator:
                 )
         elif words[0] == "suggest":
             await self._suggest(text, source)
+        elif words[0] == "walkthrough":
+            self.output(
+                "walkthrough only starts typed at the node it runs on, a real run"
+                " never starts over the session: use dryrun <node> from here"
+            )
         elif words[0] in ("localcmd", "send"):
             self.output(
                 f"{words[0]} only works typed at the node it's for: it never runs"
@@ -6641,6 +6688,7 @@ class ShareSessionNode:
         serial_confirmed=True,
         password_for=None,
         on_serial=None,
+        walkthrough_fn=None,
     ):
         # pylint: disable=too-many-arguments,too-many-locals
         self.name = name
@@ -6673,9 +6721,11 @@ class ShareSessionNode:
         # the share owner's setup, run once connected, asking through the session:
         self.share_setup_fn = share_setup_fn
         self._share_setup_started = False
+        # the real walkthrough, started by `walkthrough` typed here:
+        self.walkthrough_fn = walkthrough_fn or walkthrough
         self.bridge = (
             WalkthroughBridge(self)
-            if walkthrough or dry_run_fn or share_setup_fn
+            if walkthrough or dry_run_fn or share_setup_fn or walkthrough_fn
             else None
         )
         self._walk_running = threading.Event()
@@ -6727,6 +6777,21 @@ class ShareSessionNode:
             self.log("INFO", "a person continued here despite the version mismatch")
             return True
         return False
+
+    def _start_local_walkthrough(self) -> None:
+        """`walkthrough` typed here: start this node's real walkthrough, resuming
+        from its state file. Never started by a message from the session.
+        """
+        if not self.walkthrough_fn:
+            self._print("this node has no walkthrough, only the root and Hyper-V host")
+        elif self._walk_running.is_set():
+            self._print("a walkthrough is already running here")
+        else:
+            self._print(
+                "starting the walkthrough here, its questions go to the session"
+            )
+            self.log("INFO", "walkthrough started here")
+            self._start_walkthrough(self.walkthrough_fn)
 
     def _local_command(self, command: str) -> None:
         """`localcmd <command>` typed here: run it on this computer only, as the
@@ -6795,6 +6860,9 @@ class ShareSessionNode:
             return
         if word == "send":
             self._send_file(text[len(word) :].strip().strip('"'))
+            return
+        if word == "walkthrough":
+            self._start_local_walkthrough()
             return
         self.on_typed_local(line)
         if self._channel is not None:
@@ -7815,14 +7883,18 @@ def _run_node(
         )
 
     walkthrough = None
-    if args.walkthrough and ("root" in roles or "hyperv" in roles):
-        compat = load_compat(args.compat_file)
+    real_walkthrough = None
+    if "root" in roles or "hyperv" in roles:
 
         def session_walkthrough(bridge) -> None:
             tee.claim()
-            run_walkthrough(args, rest.get(), host, compat, session=bridge)
+            run_walkthrough(
+                args, rest.get(), host, load_compat(args.compat_file), session=bridge
+            )
 
-        walkthrough = session_walkthrough
+        real_walkthrough = session_walkthrough
+        if args.walkthrough:
+            walkthrough = session_walkthrough
 
     dry_run_fn = None
     if "root" in roles or "hyperv" in roles:
@@ -7914,6 +7986,7 @@ def _run_node(
             share_setup_fn=share_setup,
             report_fn=None if node == "console" else node_report,
             dry_run_fn=dry_run_fn,
+            walkthrough_fn=real_walkthrough,
             localcmd_timeout=args.localcmd_timeout,
         )
         if node == "console":
