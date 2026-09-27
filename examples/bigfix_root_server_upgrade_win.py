@@ -271,6 +271,9 @@ SERVER_BACKUP_ITEMS = [
     ("UploadManagerData",),
     ("wwwrootbes",),
 ]
+# left out of the server files unless --backup-download-cache is given, the
+# cache of downloads BigFix can fetch again, often most of wwwrootbes:
+BACKUP_DOWNLOAD_CACHE = {"wwwrootbes": ["bfmirror/downloads"]}
 # asked about before copying, UploadManagerData can hold years of uploads:
 LARGE_BACKUP_BYTES = 5 * 1024**3
 DB_INFO_TABLES = ["DBINFO", "REPLICATION_SERVERS"]
@@ -1175,20 +1178,35 @@ def _key_file_folders(values: dict, install_folder: Optional[str]) -> List[str]:
     return folders
 
 
+def _drive_roots(values: dict, install_folder: Optional[str]) -> List[str]:
+    """The root of the server's drive, where a license.pvk is often kept."""
+    server_folder = str(values.get("EnterpriseServerFolder") or install_folder or "")
+    drive = ntpath.splitdrive(server_folder)[0]
+    return [drive + "\\"] if len(drive) == 2 else []
+
+
 def find_key_files(
-    host, folders: List[str], max_depth: int = KEY_FILE_SEARCH_DEPTH
+    host,
+    folders: List[str],
+    max_depth: int = KEY_FILE_SEARCH_DEPTH,
+    top_only: Optional[List[str]] = None,
 ) -> dict:
-    """Find the masthead and license files by name, reporting paths only."""
+    """Find the masthead and license files by name, reporting paths only.
+
+    Folders in top_only, like the drive root, are searched without subfolders.
+    """
     found: Dict[str, List[str]] = {name: [] for name in SEARCHED_KEY_FILES}
     other_afxm = []
-    for root in folders:
+    top_only = [folder for folder in top_only or [] if folder not in folders]
+    for root in folders + top_only:
+        limit = 0 if root in top_only else max_depth
         for dirpath, dirnames, filenames in host.walk(root):
             relative = dirpath[len(root) :].strip("\\")
             depth = len(relative.split("\\")) if relative else 0
             # prune in place, so the walk doesn't descend into these:
             dirnames[:] = (
                 []
-                if depth >= max_depth
+                if depth >= limit
                 else [d for d in dirnames if d.lower() not in KEY_FILE_SKIP_FOLDERS]
             )
             for filename in filenames:
@@ -1198,7 +1216,7 @@ def find_key_files(
                 elif filename.lower().endswith(".afxm"):
                     other_afxm.append(path)
     return {
-        "searched": folders,
+        "searched": folders + top_only,
         "found": {name: sorted(paths) for name, paths in found.items()},
         "other_afxm": sorted(other_afxm)[:20],
     }
@@ -1220,7 +1238,11 @@ def _bigfix_info(host, services: list) -> dict:
         "registry": _probe(_reg_tree, host, BIGFIX_SERVER_KEY),
         # paths only, never contents:
         "key_files": _probe(
-            find_key_files, host, _key_file_folders(values, install_folder)
+            find_key_files,
+            host,
+            _key_file_folders(values, install_folder),
+            KEY_FILE_SEARCH_DEPTH,
+            _drive_roots(values, install_folder),
         ),
     }
     return info
@@ -1862,6 +1884,19 @@ def unc_share_root(path: str) -> Optional[str]:
     return f"\\\\{server}\\{share}"
 
 
+def check_backup_dir_arg(path: str) -> None:
+    """Refuse a --backup-dir that isn't a full path, such as a UNC path whose
+    backslashes a bash-like shell (Git Bash, MSYS) removed.
+    """
+    if is_unc_path(path) or ntpath.splitdrive(path)[0] or path.startswith("/"):
+        return
+    raise SystemExit(
+        f'--backup-dir "{path}" is not a full path. If you gave a share like'
+        r" \\server\share, your shell removed a backslash: run from cmd or"
+        " PowerShell, or quote it in single quotes"
+    )
+
+
 def backup_run_folder(base: str, hostname: str, now: datetime.datetime) -> str:
     """A folder per run under the backup location, so runs never overwrite."""
     return os.path.join(base, f"{hostname}_{now:%Y%m%d_%H%M%S}")
@@ -2008,6 +2043,7 @@ class WalkthroughContext:
         """
         if not self.args.backup_dir:
             raise SystemExit("--backup-dir is required for the backup step")
+        check_backup_dir_arg(self.args.backup_dir)
         if not self.share_connected:
             if self.dry_run:
                 if self.args.backup_share_user:
@@ -2159,12 +2195,25 @@ def server_backup_items(baseline: dict) -> List[tuple]:
     ]
 
 
-def _tree_size(path: str) -> tuple:
-    """(files, bytes) of a file or a folder tree."""
+def _excluded_paths(path: str, excluded: List[str]) -> set:
+    return {
+        os.path.normcase(os.path.join(path, *relative.split("/")))
+        for relative in excluded
+    }
+
+
+def _tree_size(path: str, excluded: Optional[List[str]] = None) -> tuple:
+    """(files, bytes) of a file or a folder tree, less its excluded subfolders."""
     if os.path.isfile(path):
         return 1, os.path.getsize(path)
+    skip = _excluded_paths(path, excluded or [])
     files = size = 0
-    for dirpath, _dirnames, filenames in os.walk(path):
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if os.path.normcase(os.path.join(dirpath, name)) not in skip
+        ]
         for filename in filenames:
             with contextlib.suppress(OSError):
                 size += os.path.getsize(os.path.join(dirpath, filename))
@@ -2172,9 +2221,18 @@ def _tree_size(path: str) -> tuple:
     return files, size
 
 
-def _copy_item(source: str, dest: str) -> None:
+def _copy_item(source: str, dest: str, excluded: Optional[List[str]] = None) -> None:
     if os.path.isdir(source):
-        shutil.copytree(source, dest, dirs_exist_ok=True)
+        skip = _excluded_paths(source, excluded or [])
+
+        def ignore(folder: str, names: List[str]) -> List[str]:
+            return [
+                name
+                for name in names
+                if os.path.normcase(os.path.join(folder, name)) in skip
+            ]
+
+        shutil.copytree(source, dest, dirs_exist_ok=True, ignore=ignore)
     else:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(source, dest)
@@ -2192,21 +2250,34 @@ def _action_folder_backup(ctx: WalkthroughContext) -> None:
     run_dir = ctx.backup_dir()
     dest_root = os.path.join(run_dir, "server_files")
     record = ctx.state.setdefault("server_files", {})
+    keep_cache = getattr(ctx.args, "backup_download_cache", False)
     chosen = []
     for label, path in server_backup_items(ctx.state.get("baseline") or {}):
         if not os.path.exists(path):
             record[label] = {"missing": True}
             continue
-        files, size = _tree_size(path)
+        excluded = [] if keep_cache else BACKUP_DOWNLOAD_CACHE.get(label, [])
+        files, size = _tree_size(path, excluded)
         if size > LARGE_BACKUP_BYTES and not ctx.confirm(
             f"{label} is {size / 1024**3:.1f} GB in {files} files, back it up too?"
         ):
             record[label] = {"skipped": True, "files": files, "bytes": size}
             continue
-        chosen.append((label, path, files, size))
+        chosen.append((label, path, files, size, excluded))
 
-    needed = sum(size for *_rest, size in chosen) * BACKUP_SPACE_FACTOR
-    if not ctx.dry_run:
+    needed = sum(item[3] for item in chosen) * BACKUP_SPACE_FACTOR
+    if ctx.dry_run:
+        # the run folder isn't made in a dry run, check its parent if it exists:
+        if os.path.isdir(ctx.args.backup_dir):
+            free = shutil.disk_usage(ctx.args.backup_dir).free
+            print(
+                f"{'WARNING: only' if free < needed else 'OK,'}"
+                f" {free / 1024**3:.1f} GB free in {ctx.args.backup_dir} for about"
+                f" {needed / 1024**3:.1f} GB of server files"
+            )
+        else:
+            print(f"NOTE: {ctx.args.backup_dir} isn't reachable, free space unchecked")
+    else:
         free = shutil.disk_usage(run_dir).free
         if free < needed and not ctx.confirm(
             f"only {free / 1024**3:.1f} GB free for about {needed / 1024**3:.1f} GB"
@@ -2217,13 +2288,23 @@ def _action_folder_backup(ctx: WalkthroughContext) -> None:
                 f"not enough free space in {run_dir} for the server files"
             )
 
-    for label, path, files, size in chosen:
+    for label, path, files, size, excluded in chosen:
         dest = os.path.join(dest_root, *label.split("/"))
+        if excluded:
+            print(
+                f"NOTE: leaving out {', '.join(excluded)} from {label}, the"
+                " download cache, use --backup-download-cache to keep it"
+            )
         if ctx.dry_run:
-            print(f"DRY RUN, would copy {path} ({files} files) to {dest}")
+            print(
+                f"DRY RUN, would copy {path} ({files} files,"
+                f" {size / 1024**3:.1f} GB) to {dest}"
+            )
             continue
-        _copy_item(path, dest)
+        _copy_item(path, dest, excluded)
         record[label] = {"files": files, "bytes": size, "copied_to": dest}
+        if excluded:
+            record[label]["excluded"] = excluded
         save_state(ctx.state_path, ctx.state)
 
 
@@ -2259,7 +2340,10 @@ def _action_client_data(ctx: WalkthroughContext) -> None:
     """
     folder = os.path.join(ctx.backup_dir(), "client_data")
     values = ctx.host.reg_values(CLIENT_GLOBAL_OPTIONS_KEY) or {}
-    computer_id = values.get("ComputerID")
+    # registry value names ignore case, the client writes ComputerId:
+    computer_id = next(
+        (data for name, data in values.items() if name.lower() == "computerid"), None
+    )
     key_storage = os.path.join(
         _client_folder(ctx.state.get("baseline") or {}), "KeyStorage"
     )
@@ -2347,7 +2431,16 @@ def _action_server_keys(ctx: WalkthroughContext) -> None:
     ):
         ctx.state["server_keys"] = {"skipped": True}
         return
-    pvk = ctx.read("Path to license.pvk, like a USB drive: ").strip('"')
+    found = _get(ctx.state, "baseline", "bigfix", "key_files", "found", "license.pvk")
+    default = found[0] if isinstance(found, list) and found else ""
+    pvk = (
+        ctx.read(
+            f"Path to license.pvk [{default}]: "
+            if default
+            else "Path to license.pvk, like a USB drive: "
+        ).strip('"')
+        or default
+    )
     if not pvk:
         ctx.state["server_keys"] = {"skipped": True}
         return
@@ -4816,6 +4909,12 @@ def build_parser():
     parser.add_argument(
         "--backup-dir",
         help="walkthrough backups: a local folder or a UNC share path",
+    )
+    parser.add_argument(
+        "--backup-download-cache",
+        action="store_true",
+        help="also back up wwwrootbes/bfmirror/downloads, the download cache"
+        " BigFix can fetch again, left out by default",
     )
     parser.add_argument(
         "--backup-share-user",

@@ -8,6 +8,7 @@ import datetime
 import importlib.util
 import json
 import logging
+import ntpath
 import os
 import re
 import types
@@ -182,10 +183,11 @@ class FakeHost:
 
     def walk(self, top):
         """Like os.walk over `files`, honouring edits to the yielded dirnames."""
-        stack = [top.rstrip("\\")]
+        # like os.walk, a drive root keeps its backslash:
+        stack = [top if top.endswith(":\\") else top.rstrip("\\")]
         while stack:
             folder = stack.pop()
-            prefix = (folder + "\\").lower()
+            prefix = ntpath.join(folder, "").lower()
             dirnames, filenames = set(), []
             for path in self.files:
                 if path.lower().startswith(prefix):
@@ -196,7 +198,7 @@ class FakeHost:
                         dirnames.add(parts[0])
             dirnames = sorted(dirnames)
             yield folder, dirnames, sorted(filenames)
-            stack.extend(folder + "\\" + name for name in reversed(dirnames))
+            stack.extend(ntpath.join(folder, name) for name in reversed(dirnames))
 
     def connect_share(self, share_root, user, password):
         self.shares.append((share_root, user, password))
@@ -776,7 +778,7 @@ def test_key_files_searched(upgrade):
     """
     key_files = upgrade.collect_local_info(local_host(upgrade))["bigfix"]["key_files"]
 
-    assert key_files["searched"] == [BIGFIX_FOLDER]
+    assert key_files["searched"] == [BIGFIX_FOLDER, "C:\\"]
     assert key_files["found"] == {
         "masthead.afxm": [
             BIGFIX_FOLDER + r"\BES Installers\license\masthead.afxm",
@@ -2744,3 +2746,117 @@ def test_dry_run_doesnt_connect_share(upgrade, tmp_path, monkeypatch):
     ctx.backup_dir()
 
     assert ctx.host.shares == []
+
+
+def test_client_data_computer_id_any_case(upgrade, tmp_path):
+    """Test the client's ComputerId value is found, registry names ignore case."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    ctx.host.registry[upgrade.CLIENT_GLOBAL_OPTIONS_KEY] = {"ComputerId": 11333902}
+
+    upgrade.ACTIONS["client_data"](ctx)
+
+    assert ctx.state["client_data"]["computer_id"] == 11333902
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"\192.168.5.39_tmp_backup",  # \\ and \_ eaten by a bash-like shell
+        "192.168.5.39_tmp_backup",
+    ],
+)
+def test_backup_dir_mangled_path_refused(upgrade, tmp_path, path):
+    """Test a UNC path that lost its backslashes is refused with a hint."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.dry_run = True
+    ctx.args.backup_dir = path
+
+    with pytest.raises(SystemExit, match="backslash"):
+        ctx.backup_dir()
+
+
+def test_dry_run_folder_backup_reports_space(upgrade, tmp_path, monkeypatch, capsys):
+    """Test a dry run still reports free space when the backup folder exists."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    ctx.args.dry_run = True
+    ctx.args.backup_dir = str(tmp_path)
+    usage = types.SimpleNamespace(total=10, used=10, free=10)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    upgrade.ACTIONS["folder_backup"](ctx)
+
+    assert "WARNING: only" in capsys.readouterr().out
+
+
+def _with_download_cache(server):
+    cache = server / "wwwrootbes" / "bfmirror" / "downloads" / "sha1"
+    cache.mkdir(parents=True)
+    (cache / "0123abcd").write_bytes(b"d" * 1000)
+
+
+def test_folder_backup_leaves_out_download_cache(upgrade, tmp_path):
+    """Test wwwrootbes is backed up without bfmirror/downloads by default."""
+    ctx, server = hcl_ctx(upgrade, tmp_path)
+    _with_download_cache(server)
+
+    upgrade.ACTIONS["folder_backup"](ctx)
+
+    wwwroot = os.path.join(ctx.backup_dir(), "server_files", "wwwrootbes")
+    assert os.path.isfile(os.path.join(wwwroot, "masthead", "masthead.afxm"))
+    assert not os.path.exists(os.path.join(wwwroot, "bfmirror", "downloads"))
+    assert ctx.state["server_files"]["wwwrootbes"]["bytes"] == len(b"masthead")
+    assert ctx.state["server_files"]["wwwrootbes"]["excluded"] == ["bfmirror/downloads"]
+
+
+def test_folder_backup_download_cache_option(upgrade, tmp_path):
+    """Test --backup-download-cache keeps the download cache in the backup."""
+    ctx, server = hcl_ctx(upgrade, tmp_path)
+    _with_download_cache(server)
+    ctx.args.backup_download_cache = True
+
+    upgrade.ACTIONS["folder_backup"](ctx)
+
+    cached = os.path.join(
+        ctx.backup_dir(), "server_files", "wwwrootbes", "bfmirror", "downloads"
+    )
+    assert os.path.isfile(os.path.join(cached, "sha1", "0123abcd"))
+
+
+def test_backup_download_cache_argument(upgrade):
+    """Test the download cache is left out unless asked for."""
+    parser = upgrade.build_parser()
+    assert parser.parse_args([]).backup_download_cache is False
+    assert parser.parse_args(["--backup-download-cache"]).backup_download_cache
+
+
+def test_key_files_found_at_drive_root(upgrade):
+    """Test license.pvk kept at the root of the server's drive is found, without
+    searching the rest of the drive.
+    """
+    host = local_host(upgrade)
+    host.files.add(r"C:\license.pvk")
+    host.files.add(r"C:\Users\someone\license.pvk")
+
+    key_files = upgrade.collect_local_info(host)["bigfix"]["key_files"]
+
+    assert key_files["found"]["license.pvk"] == [r"C:\license.pvk"]
+    assert "C:\\" in key_files["searched"]
+
+
+def test_server_keys_found_pvk_is_default(upgrade, tmp_path):
+    """Test Enter uses the license.pvk found on the server."""
+    ctx, _server = hcl_ctx(
+        upgrade,
+        tmp_path,
+        ask=lambda prompt, choices, default=None: "yes",
+        input_fn=lambda prompt: "",
+        getpass_fn=lambda prompt: "pw",
+    )
+    ctx.state["baseline"]["bigfix"]["key_files"]["found"]["license.pvk"] = [
+        r"C:\license.pvk"
+    ]
+
+    upgrade.ACTIONS["server_keys"](ctx)
+
+    (command,) = ctx.host.secret_runs
+    assert r"/sitePvkLocation:C:\license.pvk" in command
