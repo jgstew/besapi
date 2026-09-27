@@ -195,6 +195,7 @@ repos:
           - requests
           - setuptools
           - ruamel.yaml
+          - spake2
 
   # - repo: https://github.com/pycqa/pylint
   #   rev: v3.3.5
