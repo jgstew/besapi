@@ -6543,3 +6543,161 @@ def test_client_data_folder_exists_before_reg_export(upgrade, tmp_path):
     upgrade.ACTIONS["client_data"](ctx)
 
     assert seen == [True]
+
+
+def test_connection_that_raises_joins_anyway(upgrade, monkeypatch, caplog):
+    """Test a connection attempt that raises, like besapi's config file path on a
+    timeout, gives no connection and a one line warning, not a crash.
+    """
+
+    def raising(args=None):
+        raise TimeoutError("Connection to 192.168.5.40 timed out")
+
+    monkeypatch.setattr(
+        upgrade.besapi.plugin_utilities, "get_besapi_connection", raising
+    )
+    upgrade.make_connection_safe()
+
+    with caplog.at_level(logging.WARNING):
+        assert upgrade.besapi.plugin_utilities.get_besapi_connection(None) is None
+
+    (record,) = (r for r in caplog.records if "timed out" in r.getMessage())
+    assert record.levelno == logging.WARNING and record.exc_info is None
+    # safe to call twice, it doesn't wrap the wrapper:
+    upgrade.make_connection_safe()
+    assert upgrade.besapi.plugin_utilities.get_besapi_connection(None) is None
+
+
+def test_masthead_serial_saved_for_rest_outages(upgrade, tmp_path):
+    """Test the serial found once is saved, and used when REST and the local
+    masthead are both unavailable, with --masthead-serial still first.
+    """
+    state = {}
+    rest = FakeConnection(
+        {upgrade.MASTHEAD_RELEVANCE: [[152178487, "bigfix.example.com"]]}
+    )
+
+    assert upgrade.session_masthead_serial(None, rest, [], state) == ("152178487", True)
+    assert state["masthead_serial"] == "152178487"
+    # REST down, no local client:
+    assert upgrade.session_masthead_serial(None, None, [], state) == ("152178487", True)
+    assert upgrade.session_masthead_serial("999", None, [], state) == ("999", True)
+    with pytest.raises(SystemExit, match="masthead serial"):
+        upgrade.session_masthead_serial(None, None, [], {})
+
+
+def test_saved_serial_beats_local_masthead(upgrade, tmp_path):
+    """Test with REST down, a serial saved from REST or the coordinator beats this
+    computer's client masthead, which can be for another deployment, and the.
+
+    local one alone is only a guess, not saved.
+    """
+    masthead = tmp_path / "actionsite.afxm"
+    masthead.write_text("X-Fixlet-Site-Serial-Number: 152322981\r\n", encoding="utf-8")
+    saved = {"masthead_serial": "152178487"}
+    assert upgrade.session_masthead_serial(None, None, [str(masthead)], saved) == (
+        "152178487",
+        True,
+    )
+
+    fresh = {}
+    assert upgrade.session_masthead_serial(None, None, [str(masthead)], fresh) == (
+        "152322981",
+        False,
+    )
+    assert "masthead_serial" not in fresh
+
+
+def serial_password(upgrade, serial, code=CODE):
+    return upgrade.derive_password(None, serial, code)
+
+
+async def serial_rig(upgrade, coordinator_serial="152178487"):
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=lambda line: None,
+        password=serial_password(upgrade, coordinator_serial),
+        serial=coordinator_serial,
+        share_unc=SHARE_UNC,
+        allow=[],
+    )
+    server = await coordinator.start("127.0.0.1", 0)
+    return coordinator, server, server.sockets[0].getsockname()[1]
+
+
+def test_node_takes_coordinator_serial_when_only_guessing(upgrade):
+    """Test a node whose serial came only from its own client masthead, for
+    another deployment, takes the coordinator's serial and joins.
+    """
+    saved = []
+    printed = []
+
+    async def scenario():
+        coordinator, server, port = await serial_rig(upgrade)
+        node = upgrade.ShareSessionNode(
+            "mac",
+            ["console"],
+            None,
+            output=printed.append,
+            password=serial_password(upgrade, "152322981"),
+            serial="152322981",
+            serial_confirmed=False,
+            password_for=lambda serial: serial_password(upgrade, serial),
+            on_serial=saved.append,
+        )
+        task = asyncio.create_task(node.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return node
+
+    node = asyncio.run(scenario())
+    assert node.serial == "152178487"
+    assert saved == ["152178487"]
+    assert any(
+        "using the coordinator's masthead serial 152178487" in line for line in printed
+    )
+
+
+def test_node_with_confirmed_serial_never_switches(upgrade):
+    """Test a node whose serial is confirmed refuses another deployment's
+    coordinator, instead of joining it.
+    """
+
+    async def scenario():
+        coordinator, server, port = await serial_rig(upgrade)
+        node = upgrade.ShareSessionNode(
+            "mac",
+            ["console"],
+            None,
+            output=lambda line: None,
+            password=serial_password(upgrade, "152322981"),
+            serial="152322981",
+            password_for=lambda serial: serial_password(upgrade, serial),
+        )
+        try:
+            with pytest.raises(
+                upgrade.HandshakeError, match="different BigFix deployment"
+            ):
+                await asyncio.wait_for(node.run("127.0.0.1", port), timeout=10)
+        finally:
+            server.close()
+        return coordinator
+
+    coordinator = asyncio.run(scenario())
+    assert coordinator.nodes == {}
+
+
+def test_pairing_code_prompt_without_input(upgrade, monkeypatch):
+    """Test no input at the pairing code prompt stops with a message, not a
+    traceback.
+    """
+
+    def no_input(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_input)
+
+    with pytest.raises(SystemExit, match="pairing code"):
+        upgrade.ask_pairing_code()

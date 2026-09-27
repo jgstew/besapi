@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.18"
+__version__ = "0.2.20"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -4618,6 +4618,14 @@ class HandshakeError(Exception):
     """The other node could not be authenticated."""
 
 
+class DifferentDeployment(HandshakeError):
+    """The other side is for another masthead serial, which it names."""
+
+    def __init__(self, message: str, peer_serial: Optional[str] = None):
+        super().__init__(message)
+        self.peer_serial = peer_serial
+
+
 class WrongCode(HandshakeError):
     """The other node has a different pairing code or PSK."""
 
@@ -4884,9 +4892,10 @@ def _check_peer_hello(peer: dict, own: dict) -> None:
     if not re.fullmatch(r"[0-9a-f]{64}", str(peer.get("nonce"))):
         raise HandshakeError("the other node sent an invalid hello")
     if str(peer.get("serial")) != str(own["serial"]):
-        raise HandshakeError(
+        raise DifferentDeployment(
             "the other node is for a different BigFix deployment: masthead serial"
-            f" {peer.get('serial')}, this node has {own['serial']}"
+            f" {peer.get('serial')}, this node has {own['serial']}",
+            str(peer.get("serial")) if peer.get("serial") else None,
         )
 
 
@@ -6595,6 +6604,9 @@ class ShareSessionNode:
         dry_run_fn=None,
         localcmd_timeout=300,
         share_setup_fn=None,
+        serial_confirmed=True,
+        password_for=None,
+        on_serial=None,
     ):
         # pylint: disable=too-many-arguments,too-many-locals
         self.name = name
@@ -6619,6 +6631,11 @@ class ShareSessionNode:
         self.walkthrough = walkthrough
         # a dry run of this node's walkthrough, started by `dryrun <node>`:
         self.dry_run_fn = dry_run_fn
+        # a serial only guessed from this computer's client masthead is replaced
+        # by the coordinator's, with the password for it:
+        self.serial_confirmed = serial_confirmed
+        self.password_for = password_for
+        self.on_serial = on_serial
         # the share owner's setup, run once connected, asking through the session:
         self.share_setup_fn = share_setup_fn
         self._share_setup_started = False
@@ -6967,6 +6984,22 @@ class ShareSessionNode:
                 return  # already kept, from an earlier connection
         self._print(f"[{node}] {clean_log_text(entry['message'])}")
 
+    def _take_coordinator_serial(self, err: "DifferentDeployment") -> bool:
+        """Use the coordinator's serial when this node's was only a guess."""
+        if self.serial_confirmed or not err.peer_serial:
+            return False
+        self.output(
+            f"using the coordinator's masthead serial {err.peer_serial}, this"
+            f" computer's BigFix client is for another deployment ({self.serial})"
+        )
+        self.serial = err.peer_serial
+        self.serial_confirmed = True
+        if self.password_for:
+            self.password = self.password_for(self.serial)
+        if self.on_serial:
+            self.on_serial(self.serial)
+        return True
+
     def _set_resume(self, token: Optional[dict]) -> None:
         self.resume = token
         if self.on_resume:
@@ -7029,7 +7062,12 @@ class ShareSessionNode:
         for attempt in range(1, attempts + 1):
             try:
                 try:
-                    return await self._open(host, port)
+                    try:
+                        return await self._open(host, port)
+                    except DifferentDeployment as err:
+                        if not self._take_coordinator_serial(err):
+                            raise
+                        return await self._open(host, port)
                 except NeedCode:
                     if not self.prompt_code:
                         raise
@@ -7250,9 +7288,12 @@ def run_share_session(args, bes_conn, host) -> int:
     pairing code, so on most nodes `--share-session` is all that's needed.
     """
     require_session_packages()
-    serial = resolve_masthead_serial(
-        args.masthead_serial, bes_conn, CLIENT_MASTHEAD_PATHS
+    saved_path = session_state_path(args.state_file)
+    saved = load_state(saved_path)
+    serial, serial_confirmed = session_masthead_serial(
+        args.masthead_serial, bes_conn, CLIENT_MASTHEAD_PATHS, saved
     )
+    save_state(saved_path, saved)
     psk, psk_source = load_psk(os.environ, args.psk_file)
     given_code = args.pairing_code
     node = args.node or (
@@ -7301,6 +7342,7 @@ def run_share_session(args, bes_conn, host) -> int:
         given_code,
         share_offer=share_offer,
         share_setup=share_setup,
+        serial_confirmed=serial_confirmed,
     )
 
 
@@ -7374,6 +7416,71 @@ class QuietConnectionErrors(logging.Filter):
             record.levelno = logging.WARNING
             record.levelname = "WARNING"
         return True
+
+
+def make_connection_safe() -> None:
+    """Make besapi's connection attempts return None instead of raising, like on
+    a timeout while the root server is down, so the session joins anyway.
+    """
+    utilities = besapi.plugin_utilities
+    original = utilities.get_besapi_connection
+    if getattr(original, "upgrade_safe", False):
+        return
+
+    def safe_connection(args=None):
+        try:
+            return original(args)
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            logging.warning("BigFix REST connection failed: %s", err)
+            return None
+
+    safe_connection.upgrade_safe = True  # type: ignore[attr-defined]
+    utilities.get_besapi_connection = safe_connection
+
+
+def session_masthead_serial(
+    override, bes_conn, masthead_paths: List[str], state: dict
+) -> Tuple[str, bool]:
+    """The masthead serial, and whether it's confirmed.
+
+    From --masthead-serial, REST, or one saved before, which are confirmed. Else
+    this computer's client masthead, only a guess: its client can be for another
+    deployment, so the coordinator's serial is taken if it differs.
+    """
+    if override:
+        return str(override), True
+    rest_serial: Optional[str] = None
+    if bes_conn is not None:
+        with contextlib.suppress(SystemExit):
+            rest_serial = resolve_masthead_serial(None, bes_conn, [])
+    if rest_serial:
+        state["masthead_serial"] = rest_serial
+        return rest_serial, True
+    if state.get("masthead_serial"):
+        # from REST or the coordinator before, this computer's client can be for
+        # another deployment:
+        return str(state["masthead_serial"]), True
+    local = next(
+        (found for found in (read_masthead_serial(p) for p in masthead_paths) if found),
+        None,
+    )
+    if local:
+        # only a guess, the coordinator's serial is taken if it differs:
+        return local, False
+    raise SystemExit(
+        "no masthead serial found: give --masthead-serial, or a REST connection"
+    )
+
+
+def ask_pairing_code() -> str:
+    """The pairing code, typed by the person here."""
+    try:
+        return input("Pairing code shown on the coordinator: ").strip()
+    except EOFError as err:
+        raise SystemExit(
+            "no pairing code given: type the code the coordinator shows, or set"
+            f" {PSK_ENV_VAR} on every node"
+        ) from err
 
 
 def explain_rest(bes_conn) -> None:
@@ -7635,6 +7742,7 @@ def _run_node(
     given_code,
     share_offer=None,
     share_setup=None,
+    serial_confirmed=True,
 ) -> int:
     # pylint: disable=too-many-arguments,too-many-locals,too-many-statements
     if node == "peer" and not host.is_windows():
@@ -7699,11 +7807,24 @@ def _run_node(
 
         dry_run_fn = session_dry_run
 
-    def prompt_code() -> bytes:
-        code = input("Pairing code shown on the coordinator: ").strip()
-        return derive_password(psk, serial, code)
+    codes = {"code": given_code, "serial": serial}
 
-    password = derive_password(psk, serial, given_code) if psk or given_code else None
+    def password_for(for_serial: str) -> Optional[bytes]:
+        if not psk and not codes["code"]:
+            return None
+        return derive_password(psk, for_serial, codes["code"])
+
+    def prompt_code() -> bytes:
+        codes["code"] = ask_pairing_code()
+        return password_for(codes["serial"])  # type: ignore[return-value]
+
+    def on_serial(new_serial: str) -> None:
+        # from the coordinator, confirmed, kept for when REST is down:
+        codes["serial"] = new_serial
+        state["masthead_serial"] = new_serial
+        save_state(session_path, state)
+
+    password = password_for(serial)
 
     def save_oneshot(token: Optional[dict]) -> None:
         # its own token, the console's is never changed by a one-shot:
@@ -7722,6 +7843,9 @@ def _run_node(
             name=args.oneshot_name or f"{default_node_id()}-oneshot",
             password=password,
             serial=serial,
+            serial_confirmed=serial_confirmed,
+            password_for=password_for,
+            on_serial=on_serial,
             resume=oneshot_resume(state),
             on_resume=save_oneshot,
             prompt_code=prompt_code,
@@ -7744,6 +7868,9 @@ def _run_node(
             read_stdin=True,
             password=password,
             serial=serial,
+            serial_confirmed=serial_confirmed,
+            password_for=password_for,
+            on_serial=on_serial,
             resume=state.get(resume_key),
             on_resume=on_resume,
             prompt_code=prompt_code,
@@ -8014,6 +8141,7 @@ def main():
 def _main(parser, args, host):
     # the root server can be down during an upgrade, so no connection tracebacks:
     logging.getLogger().addFilter(QuietConnectionErrors())
+    make_connection_safe()
     if args.walkthrough and not args.share_session:
         with besapi.plugin_utilities.init_plugin(
             __version__, parser, require_connection=False
