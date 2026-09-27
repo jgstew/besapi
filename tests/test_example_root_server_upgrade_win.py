@@ -141,6 +141,8 @@ class FakeHost:
         self.user_passwords = {}
         self.run_handler = None
         self.secret_runs = []
+        self.captured = []
+        self.capture_result = (0, "Status Name\nRunning BESClient\n")
 
     def is_windows(self):
         return self.windows
@@ -253,6 +255,10 @@ class FakeHost:
 
     def run_secret(self, cmd):
         self.secret_runs.append(cmd)
+
+    def run_capture(self, cmd, timeout=300):
+        self.captured.append(cmd)
+        return self.capture_result
 
 
 # ---------------------------------------------------------------- parsing
@@ -5352,3 +5358,838 @@ def test_node_holds_walkthrough_for_other_coordinator_code(upgrade):
     held = asyncio.run(scenario())
     assert held == []
     assert progress == ["ran"]
+
+
+# ---------------------------------------------------------------- compat level and host checks
+
+
+def real_path(upgrade, compat):
+    return upgrade.find_upgrade_path(
+        compat,
+        {
+            "bigfix": "10.0.7.52",
+            "windows": "2012 R2",
+            "mssql": "2008 R2",
+            "mssql_level": "SP1",
+            "db_compat_level": 100,
+        },
+        {"windows": "2025", "mssql": "2025"},
+    )
+
+
+def test_steps_raise_and_check_compat_level(upgrade, compat):
+    """Test the level BigFix 11 needs is raised after the first SQL Server upgrade
+    that supports it, and checked before the BigFix upgrade.
+    """
+    steps = {s.id: s for s in upgrade.build_steps(real_path(upgrade, compat))}
+
+    assert steps["start_services_1"].actions == ["raise_compat:120", "start_services"]
+    assert steps["upgrade_3_bigfix_11_0_6"].actions == ["check_compat:120"]
+    # already raised by then, so no more raising:
+    assert steps["start_services_4"].actions == ["start_services"]
+
+
+def test_steps_check_hyperv_host_before_windows_2025(upgrade, compat):
+    """Test only the Windows 2025 upgrade checks the Hyper-V host first."""
+    steps = {s.id: s for s in upgrade.build_steps(real_path(upgrade, compat))}
+
+    assert steps["upgrade_5_windows_2025"].actions == ["check_hyperv_host:2022"]
+    assert steps["upgrade_2_windows_2019"].actions == []
+
+
+def compat_ctx(upgrade, tmp_path, levels, answer="yes"):
+    ran = []
+
+    def handler(server, query):
+        ran.append(query)
+        if query == upgrade.SQL_COMPAT_LEVELS:
+            return [[name, str(level)] for name, level in levels.items()]
+        return []
+
+    host = local_host(upgrade, sql_handler=handler)
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.ask = lambda prompt, choices, default=None: answer
+    ctx.args.db_compat_level = None
+    return ctx, ran
+
+
+def test_raise_compat_level(upgrade, tmp_path, capsys):
+    """Test both databases are raised after the operator agrees."""
+    ctx, ran = compat_ctx(upgrade, tmp_path, {"BFEnterprise": 100, "BESReporting": 100})
+
+    upgrade.ACTIONS["raise_compat"](ctx, "120")
+
+    assert "ALTER DATABASE [BFEnterprise] SET COMPATIBILITY_LEVEL = 120" in ran
+    assert "ALTER DATABASE [BESReporting] SET COMPATIBILITY_LEVEL = 120" in ran
+    assert "BFEnterprise 100" in capsys.readouterr().out
+
+
+def test_raise_compat_level_declined(upgrade, tmp_path, capsys):
+    """Test nothing is changed when the operator says no."""
+    ctx, ran = compat_ctx(
+        upgrade, tmp_path, {"BFEnterprise": 100, "BESReporting": 100}, answer="no"
+    )
+
+    upgrade.ACTIONS["raise_compat"](ctx, "120")
+
+    assert not any(q.startswith("ALTER") for q in ran)
+    assert "not changed" in capsys.readouterr().out
+
+
+def test_raise_compat_level_already_there(upgrade, tmp_path):
+    """Test a database already at the level, or above, isn't changed."""
+    ctx, ran = compat_ctx(upgrade, tmp_path, {"BFEnterprise": 130, "BESReporting": 120})
+
+    upgrade.ACTIONS["raise_compat"](ctx, "120")
+
+    assert not any(q.startswith("ALTER") for q in ran)
+
+
+def test_raise_compat_level_override(upgrade, tmp_path):
+    """Test --db-compat-level picks another level."""
+    ctx, ran = compat_ctx(upgrade, tmp_path, {"BFEnterprise": 100, "BESReporting": 100})
+    ctx.args.db_compat_level = 140
+
+    upgrade.ACTIONS["raise_compat"](ctx, "120")
+
+    assert "ALTER DATABASE [BFEnterprise] SET COMPATIBILITY_LEVEL = 140" in ran
+
+
+def test_raise_compat_level_dry_run(upgrade, tmp_path, capsys):
+    """Test a dry run only says what it would run."""
+    ctx, ran = compat_ctx(upgrade, tmp_path, {"BFEnterprise": 100, "BESReporting": 100})
+    ctx.args.dry_run = True
+
+    upgrade.ACTIONS["raise_compat"](ctx, "120")
+
+    assert not any(q.startswith("ALTER") for q in ran)
+    assert (
+        "DRY RUN, would run SQL: ALTER DATABASE [BFEnterprise]"
+        in capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize("level", ["abc", "95", "1000", "120; DROP"])
+def test_compat_level_validated(upgrade, tmp_path, level):
+    """Test only a real compatibility level reaches the SQL."""
+    ctx, ran = compat_ctx(upgrade, tmp_path, {"BFEnterprise": 100, "BESReporting": 100})
+
+    with pytest.raises((ValueError, SystemExit)):
+        upgrade.ACTIONS["raise_compat"](ctx, level)
+    assert not any(q.startswith("ALTER") for q in ran)
+
+
+def test_check_compat_level(upgrade, tmp_path, capsys):
+    """Test the BigFix upgrade stops while a database is below the level."""
+    ctx, _ran = compat_ctx(
+        upgrade, tmp_path, {"BFEnterprise": 120, "BESReporting": 100}
+    )
+    with pytest.raises(SystemExit, match="BESReporting"):
+        upgrade.ACTIONS["check_compat"](ctx, "120")
+
+    ctx.args.dry_run = True
+    upgrade.ACTIONS["check_compat"](ctx, "120")
+    assert "WARNING" in capsys.readouterr().out
+
+    ok, _ = compat_ctx(
+        upgrade, tmp_path / "ok", {"BFEnterprise": 120, "BESReporting": 140}
+    )
+    upgrade.ACTIONS["check_compat"](ok, "120")
+    assert "OK" in capsys.readouterr().out
+
+
+def test_check_hyperv_host(upgrade, tmp_path, capsys):
+    """Test the Windows 2025 upgrade stops on a 2012 R2 host, goes on on 2022."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.session = FakeSession({"ok": True, "windows": "2012 R2"})
+    with pytest.raises(SystemExit, match="2012 R2"):
+        upgrade.ACTIONS["check_hyperv_host"](ctx, "2022")
+    assert ctx.session.actions[0][:2] == ("hyperv", "host_version")
+
+    ctx.session = FakeSession({"ok": True, "windows": "2025"})
+    upgrade.ACTIONS["check_hyperv_host"](ctx, "2022")
+    assert "OK" in capsys.readouterr().out
+
+
+def test_check_hyperv_host_without_node(upgrade, tmp_path):
+    """Test with no Hyper-V node the operator confirms, Enter meaning no."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.session = FakeSession({"ok": False, "error": "no hyperv node is connected"})
+    ctx.ask = lambda prompt, choices, default=None: default
+    with pytest.raises(SystemExit):
+        upgrade.ACTIONS["check_hyperv_host"](ctx, "2022")
+
+    ctx.ask = lambda prompt, choices, default=None: "yes"
+    upgrade.ACTIONS["check_hyperv_host"](ctx, "2022")
+
+
+def test_hyperv_node_reports_host_version(upgrade):
+    """Test the Hyper-V node answers with its Windows Server version."""
+    result = upgrade.run_node_action(
+        hyperv_host(upgrade), ["hyperv"], "host_version", {}
+    )
+
+    assert result == {"ok": True, "windows": "2019"}
+
+
+def test_diag_compat(upgrade):
+    """Test `diag <node> compat` shows the databases' levels."""
+    host = local_host(
+        upgrade,
+        sql_handler=lambda server, query: [
+            ["BFEnterprise", "100"],
+            ["BESReporting", "100"],
+        ],
+    )
+
+    result = upgrade.run_node_diagnostics(host, "compat", sql_server="localhost")
+
+    assert result == {"compat": {"BFEnterprise": 100, "BESReporting": 100}}
+
+
+def test_db_compat_level_argument(upgrade):
+    """Test --db-compat-level parses as a number."""
+    assert (
+        upgrade.build_parser().parse_args(["--db-compat-level", "140"]).db_compat_level
+        == 140
+    )
+
+
+# ---------------------------------------------------------------- dry run checkpoints
+
+
+def test_dry_run_checkpoint_asks_hyperv_without_running(upgrade, tmp_path, capsys):
+    """Test a dry run still asks the Hyper-V node, which only says what it would
+    run, so the whole path is tested without touching the VM.
+    """
+    host = local_host(upgrade)
+    host.powershell[upgrade.PS_HOST_IPS] = [
+        {"IPAddress": "192.168.5.40", "PrefixLength": 24}
+    ]
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.args.dry_run = True
+    ctx.session = FakeSession(
+        {"ok": True, "dry_run": True, "would_run": "Checkpoint-VM -Name 'BigFixRoot'"}
+    )
+
+    upgrade.ACTIONS["checkpoint"](ctx, "snapshot_1")
+
+    ((role, action, params),) = ctx.session.actions
+    assert params["dry_run"] is True
+    assert "DRY RUN, the Hyper-V node would run: Checkpoint-VM -Name 'BigFixRoot'" in (
+        capsys.readouterr().out
+    )
+    assert "checkpoints" not in ctx.state
+
+
+def test_hyperv_dry_run_checkpoint_runs_nothing(upgrade):
+    """Test the Hyper-V node finds the VM and builds the command, but runs none."""
+    host = hyperv_host(upgrade)
+
+    result = upgrade.run_node_action(
+        host,
+        ["hyperv"],
+        "checkpoint",
+        {"name": "snapshot_1", "ips": ["192.168.5.40"], "dry_run": True},
+    )
+
+    assert result["ok"] is True and result["dry_run"] is True
+    assert result["would_run"] == (
+        "Checkpoint-VM -Name 'bigfix-root' -SnapshotName 'bigfix-upgrade snapshot_1'"
+    )
+    assert host.ran == []
+
+
+# ---------------------------------------------------------------- Hyper-V walkthrough
+
+
+def hv_ctx(upgrade, tmp_path, host=None, answer=None):
+    host = host or hyperv_host(upgrade)
+    args = types.SimpleNamespace(
+        backup_dir=str(tmp_path / "hv_backup"),
+        backup_share_user=None,
+        staging_dir=None,
+        dry_run=False,
+        sql_instance=None,
+        vm_name=None,
+        heartbeat_wait=0,
+    )
+    os.makedirs(args.backup_dir)
+    info = upgrade.collect_hyperv_info(host, "192.168.5.40")
+    state = {
+        "done": [],
+        "reports": {},
+        "hyperv": info,
+        "hyperv_plan": {"host_upgrades": ["2025"]},
+    }
+    return upgrade.WalkthroughContext(
+        args,
+        host,
+        state,
+        str(tmp_path / "hv_state.json"),
+        ask=answer or (lambda prompt, choices, default=None: default or choices[0]),
+        input_fn=lambda prompt: "",
+        getpass_fn=lambda prompt: "",
+    )
+
+
+def test_hyperv_steps_with_host_upgrade(upgrade):
+    """Test a host that must be upgraded gets backup, shutdown, upgrade and
+    validation steps.
+    """
+    ids = [s.id for s in upgrade.build_hyperv_steps({"host_upgrades": ["2025"]})]
+
+    assert ids == [
+        "hv_preflight",
+        "hv_config_backup",
+        "hv_export",
+        "hv_shutdown",
+        "hv_upgrade_1_windows_2025",
+        "hv_validate",
+        "hv_cleanup",
+    ]
+
+
+def test_hyperv_steps_without_host_upgrade(upgrade):
+    """Test a host that's new enough only gets its backups."""
+    ids = [s.id for s in upgrade.build_hyperv_steps({"host_upgrades": []})]
+
+    assert ids == ["hv_preflight", "hv_config_backup", "hv_export", "hv_cleanup"]
+
+
+def test_hyperv_config_backup(upgrade, tmp_path):
+    """Test the VMs, switches and adapters are saved as JSON."""
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.host.powershell[upgrade.PS_HYPERV_ADAPTERS] = [
+        {"VMName": "bigfix-root", "SwitchName": "LAN", "MacAddress": "00155D000001"}
+    ]
+
+    upgrade.ACTIONS["hv_config_backup"](ctx)
+
+    (saved,) = list((tmp_path / "hv_backup").rglob("hyperv_config.json"))
+    config = json.loads(saved.read_text(encoding="utf-8"))
+    assert config["switches"][0]["Name"] == "LAN"
+    assert [vm["Name"] for vm in config["vms"]] == ["bigfix-root", "other"]
+    assert config["adapters"][0]["MacAddress"] == "00155D000001"
+
+
+def test_hyperv_export_shuts_down_and_exports(upgrade, tmp_path, monkeypatch):
+    """Test the BigFix VM is shut down for a consistent export, then exported,
+    and started again when no host upgrade is next.
+    """
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.state["hyperv_plan"] = {"host_upgrades": []}
+    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    scripts = [cmd[-1] for cmd in ctx.host.ran]
+    assert scripts[0] == "Stop-VM -Name 'bigfix-root'"
+    assert scripts[1].startswith("Export-VM -Name 'bigfix-root' -Path '")
+    assert scripts[2] == "Start-VM -Name 'bigfix-root'"
+    assert ctx.state["hyperv_exports"][0]["vm"] == "bigfix-root"
+
+
+def test_hyperv_export_space_check(upgrade, tmp_path, monkeypatch):
+    """Test an export that won't fit is refused unless the operator insists."""
+    ctx = hv_ctx(upgrade, tmp_path, answer=lambda prompt, choices, default=None: "no")
+    usage = types.SimpleNamespace(total=10, used=0, free=10)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    with pytest.raises(upgrade.BackupError, match="free"):
+        upgrade.ACTIONS["hv_export"](ctx)
+    assert ctx.host.ran == []
+
+
+def test_hyperv_export_dry_run(upgrade, tmp_path, capsys):
+    """Test a dry run says what it would export, how big, and where."""
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.args.dry_run = True
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    out = capsys.readouterr().out
+    assert "DRY RUN, would run: powershell.exe" in out
+    assert "Export-VM -Name 'bigfix-root'" in out
+    assert "300.0 GB" in out
+    assert ctx.host.ran == []
+
+
+def test_hyperv_export_unsafe_path(upgrade, tmp_path, monkeypatch):
+    """Test a backup path that could break out of the quotes is refused."""
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.args.backup_dir = str(tmp_path / "it's")
+    os.makedirs(ctx.args.backup_dir)
+    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    with pytest.raises(ValueError):
+        upgrade.ACTIONS["hv_export"](ctx)
+    assert not any("Export-VM" in cmd[-1] for cmd in ctx.host.ran)
+
+
+def test_hyperv_shutdown_choices(upgrade, tmp_path):
+    """Test each running VM is shut down or saved as the operator picks, and
+    remembered for starting again.
+    """
+    answers = {"bigfix-root": "save"}
+    ctx = hv_ctx(
+        upgrade,
+        tmp_path,
+        answer=lambda prompt, choices, default=None: next(
+            (a for vm, a in answers.items() if vm in prompt), default
+        ),
+    )
+
+    upgrade.ACTIONS["hv_shutdown"](ctx)
+
+    assert [cmd[-1] for cmd in ctx.host.ran] == ["Save-VM -Name 'bigfix-root'"]
+    assert ctx.state["hyperv_was_running"] == ["bigfix-root"]
+
+
+def test_hyperv_validate(upgrade, tmp_path, monkeypatch, capsys):
+    """Test after the host upgrade: the role, the switches, the VMs start again
+    with a heartbeat, and the root server answers on 52311.
+    """
+    host = hyperv_host(upgrade, product="Windows Server 2025 Datacenter")
+    ctx = hv_ctx(upgrade, tmp_path, host=host)
+    ctx.state["hyperv_was_running"] = ["bigfix-root"]
+    monkeypatch.setattr(upgrade, "tcp_reachable", lambda ip, port, timeout=5: True)
+
+    upgrade.ACTIONS["hv_validate"](ctx)
+
+    out = capsys.readouterr().out
+    assert [cmd[-1] for cmd in host.ran] == ["Start-VM -Name 'bigfix-root'"]
+    assert "OK, the host is Windows Server 2025" in out
+    assert "OK, switch LAN is back" in out
+    assert "OK, bigfix-root heartbeat OkApplicationsHealthy" in out
+    assert "OK, the root server 192.168.5.40 answers on 52311" in out
+    assert "Update-VMVersion" in out  # only mentioned, never run
+
+
+def test_hyperv_validate_missing_switch(upgrade, tmp_path, monkeypatch, capsys):
+    """Test a switch that didn't come back is reported."""
+    host = hyperv_host(upgrade, product="Windows Server 2025 Datacenter")
+    ctx = hv_ctx(upgrade, tmp_path, host=host)
+    ctx.state["hyperv"]["switches"] = [{"Name": "LAN"}, {"Name": "Backup"}]
+    ctx.state["hyperv_was_running"] = []
+    monkeypatch.setattr(upgrade, "tcp_reachable", lambda ip, port, timeout=5: False)
+
+    upgrade.ACTIONS["hv_validate"](ctx)
+
+    out = capsys.readouterr().out
+    assert "WARNING: switch Backup is missing" in out
+    assert "WARNING: the root server 192.168.5.40 doesn't answer on 52311" in out
+
+
+def test_hyperv_walkthrough_never_updates_vm_version(upgrade, tmp_path, monkeypatch):
+    """Test no Hyper-V action ever runs Update-VMVersion, which is one-way."""
+    host = hyperv_host(upgrade, product="Windows Server 2025 Datacenter")
+    ctx = hv_ctx(upgrade, tmp_path, host=host)
+    ctx.state["hyperv_was_running"] = ["bigfix-root"]
+    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+    monkeypatch.setattr(upgrade, "tcp_reachable", lambda ip, port, timeout=5: True)
+
+    for action in (
+        "hv_collect",
+        "hv_config_backup",
+        "hv_export",
+        "hv_shutdown",
+        "hv_validate",
+    ):
+        upgrade.ACTIONS[action](ctx)
+
+    assert not any("Update-VMVersion" in " ".join(cmd) for cmd in host.ran)
+
+
+def test_hyperv_walkthrough_dry_run(upgrade, tmp_path, monkeypatch):
+    """Test a dry run on the Hyper-V host walks every step, asks nothing, runs
+    nothing, and saves what it printed.
+    """
+    host = hyperv_host(upgrade, product="Windows Server 2012 R2 Datacenter")
+    args = types.SimpleNamespace(
+        state_file=str(tmp_path / "hv_state.json"),
+        step=None,
+        dry_run=True,
+        backup_dir=str(tmp_path / "hv_backup"),
+        backup_share_user=None,
+        staging_dir=None,
+        sql_instance=None,
+        vm_name=None,
+        heartbeat_wait=0,
+        target_os=None,
+        target_sql=None,
+        target_bigfix=None,
+        compat_file=None,
+        dry_run_file=str(tmp_path / "hv_dryrun.txt"),
+    )
+
+    def no_prompts(*args, **kwargs):
+        raise AssertionError("a dry run must not prompt")
+
+    monkeypatch.setattr(upgrade, "_ask", no_prompts)
+    monkeypatch.setattr("builtins.input", no_prompts)
+    monkeypatch.setattr(upgrade, "discover_root_ip", lambda paths: "192.168.5.40")
+    monkeypatch.setattr(upgrade, "tcp_reachable", lambda ip, port, timeout=5: True)
+    compat = upgrade.load_compat(COMPAT_PATH)
+
+    assert upgrade.run_walkthrough(args, None, host, compat) == 0
+
+    assert host.ran == []
+    saved = (tmp_path / "hv_dryrun.txt").read_text(encoding="utf-8")
+    for step_id in (
+        "hv_preflight",
+        "hv_export",
+        "hv_upgrade_1_windows_2025",
+        "hv_validate",
+    ):
+        assert f"===== {step_id}:" in saved
+    assert "All steps are complete." in saved
+    assert not (tmp_path / "hv_state.json").exists()
+
+
+def test_hyperv_export_leaves_vm_off_before_host_upgrade(
+    upgrade, tmp_path, monkeypatch
+):
+    """Test with a host upgrade next, the VM isn't started again by default."""
+    ctx = hv_ctx(upgrade, tmp_path)
+    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    assert not any("Start-VM" in cmd[-1] for cmd in ctx.host.ran)
+
+
+def test_hyperv_default_backup_dir(upgrade):
+    """Test the export goes to a local folder on the volume with most free space,
+    not the host's own share over the network.
+    """
+    info = {
+        "disks": [
+            {"DeviceID": "C:", "FreeSpace": 400 * 1024**3},
+            {"DeviceID": "D:", "FreeSpace": 1000 * 1024**3},
+        ]
+    }
+
+    assert upgrade.hyperv_backup_dir(info) == r"D:\bigfix_hyperv_backup"
+
+
+def test_hyperv_collect_volume_line(upgrade, tmp_path, capsys):
+    """Test each volume is shown once with its free space."""
+    ctx = hv_ctx(upgrade, tmp_path)
+
+    upgrade.ACTIONS["hv_collect"](ctx)
+
+    assert "volume D: 900 GB free" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- remote dry runs
+
+
+def test_dryrun_command_starts_node_dry_run(upgrade):
+    """Test `dryrun BIGFIX` from a console starts that node's dry run, and a
+    second one while it runs is refused.
+    """
+    runs = []
+    release = threading.Event()
+
+    def dry_run(bridge):
+        runs.append("started")
+        bridge.set_state({"step": "preflight", "dry_run": True})
+        release.wait(5)
+
+    async def scenario():
+        rig = WalkRig(upgrade, None)
+        rig.server = await rig.coordinator.start("127.0.0.1", 0)
+        rig.port = rig.server.sockets[0].getsockname()[1]
+        rig.add("BIGFIX", ["root"], client_host(upgrade), dry_run_fn=dry_run)
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.console("mac", ["dryrun bigfix"])
+        await rig.until(lambda: runs)
+        await rig.nodes["mac"].command_queue.put("dryrun BIGFIX")
+        await rig.until(lambda: "already running" in rig.text("mac"))
+        release.set()
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert runs == ["started"]
+    assert "dry run started on BIGFIX" in rig.text("mac")
+
+
+def test_dryrun_command_on_node_without_walkthrough(upgrade):
+    """Test a node that has no walkthrough, like a peer, says so."""
+
+    async def scenario():
+        rig = WalkRig(upgrade, None)
+        rig.server = await rig.coordinator.start("127.0.0.1", 0)
+        rig.port = rig.server.sockets[0].getsockname()[1]
+        rig.add("peer1", ["peer"], client_host(upgrade))
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.console("mac", ["dryrun peer1"])
+        await rig.until(lambda: "no walkthrough" in rig.text("mac"))
+        await rig.finish()
+
+    asyncio.run(scenario())
+
+
+def test_oneshot_with_console_token_leaves_console_alone(upgrade):
+    """Test a one-shot command using the live console's token joins under its
+    own name, needs no code, and the console stays connected.
+    """
+
+    async def scenario():
+        rig = ResumeRig(upgrade)
+        await rig.start()
+        console, saved = rig.node(code_password(upgrade), name="mac")
+        task = asyncio.create_task(console.run("127.0.0.1", rig.port))
+        for _ in range(500):
+            if saved["token"]:
+                break
+            await asyncio.sleep(0.01)
+        console_channel = rig.coordinator.nodes["mac"]["channel"]
+        result = await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            rig.port,
+            "status",
+            wait=5,
+            name="mac",
+            resume=saved["token"],
+            **session_options(upgrade, password=None),
+        )
+        still_there = (
+            rig.coordinator.nodes.get("mac", {}).get("channel") is console_channel
+        )
+        token_after = saved["token"]
+        await rig.finish(task)
+        return result, still_there, token_after
+
+    result, still_there, token_after = asyncio.run(scenario())
+    assert still_there
+    status = [r for r in result["replies"] if r["type"] == "status"][0]["lines"]
+    assert any("mac-oneshot" in line for line in status)
+    # the console's own token wasn't touched by the one-shot:
+    assert token_after is not None
+
+
+def test_oneshot_token_saved_apart(upgrade):
+    """Test a one-shot keeps its own token apart from the console's."""
+    state = {"session_resume_console": {"id": "aa"}}
+
+    token = upgrade.oneshot_resume(state)
+    upgrade.save_oneshot_token(state, {"id": "bb"})
+    upgrade.save_oneshot_token(state, None)
+
+    assert token == {"id": "aa"}
+    assert state["session_resume_console"] == {"id": "aa"}
+    assert "session_resume_oneshot" not in state
+
+
+# ---------------------------------------------------------------- local commands
+
+
+def test_localcmd_runs_here_and_shares_output(upgrade, tmp_path):
+    """Test `localcmd` typed at a node runs there, and its output and exit code
+    reach the coordinator and consoles as a file.
+    """
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        console, _ = rig.console()
+        peer, _ = rig.peer()
+        tasks = [
+            asyncio.create_task(n.run("127.0.0.1", rig.port)) for n in (console, peer)
+        ]
+        await rig.coordinator.wait_for_nodes(2, timeout=5)
+        await rig.until(lambda: peer._channel is not None)
+        peer.on_typed("localcmd Get-Service BESClient")
+        await rig.until(
+            lambda: list((tmp_path / "console_logs").glob("root_localcmd_*.txt"))
+        )
+        await rig.finish(*tasks)
+        return peer
+
+    peer = asyncio.run(scenario())
+    assert peer.host.captured == [upgrade._powershell("Get-Service BESClient")]
+    (saved,) = list((tmp_path / "coordinator_logs").glob("root_localcmd_*.txt"))
+    text = saved.read_text(encoding="utf-8")
+    assert "command: Get-Service BESClient" in text
+    assert "exit code: 0" in text
+    assert "Running BESClient" in text
+    assert "localcmd exit 0: Get-Service BESClient" in " ".join(
+        rig_messages(upgrade, tmp_path / "coordinator_logs", "root")
+    )
+
+
+def rig_messages(upgrade, folder, node):
+    return [e["message"] for e in upgrade.NodeLogStore(str(folder)).since(node, 0)]
+
+
+def test_localcmd_never_runs_from_the_session(upgrade, tmp_path):
+    """Test `localcmd` sent over the session, like from a one-shot, runs nothing
+    on any node.
+    """
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        peer, _ = rig.peer()
+        task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.coordinator.handle_command(
+            "localcmd root whoami", source="coordinator"
+        )
+        result = await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            rig.port,
+            "localcmd whoami",
+            wait=1,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        await rig.finish(task)
+        return peer, result, rig
+
+    peer, result, rig = asyncio.run(scenario())
+    assert peer.host.captured == []
+    assert any(
+        "only works typed at the node" in m
+        for m in rig_messages(upgrade, tmp_path / "coordinator_logs", "coordinator")
+    )
+
+
+def test_send_file_from_node(upgrade, tmp_path):
+    """Test `send <file>` typed at a node shares that file."""
+    source = tmp_path / "setup log.txt"
+    source.write_text("SQL setup finished\n", encoding="utf-8")
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        peer, _ = rig.peer()
+        task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.until(lambda: peer._channel is not None)
+        peer.on_typed(f'send "{source}"')
+        await rig.until(
+            lambda: list((tmp_path / "coordinator_logs").glob("root_sent_*.txt"))
+        )
+        await rig.finish(task)
+
+    asyncio.run(scenario())
+    (saved,) = list((tmp_path / "coordinator_logs").glob("root_sent_*.txt"))
+    assert saved.read_text(encoding="utf-8") == "SQL setup finished\n"
+
+
+def test_send_missing_file(upgrade, capsys):
+    """Test sending a file that isn't there says so, and sends nothing."""
+    printed = []
+    node = upgrade.ShareSessionNode(
+        "root", ["root"], None, output=printed.append, **session_options(upgrade)
+    )
+    node._print = printed.append
+
+    node.on_typed("send C:/nope.txt")
+
+    assert any("can't read" in line for line in printed)
+    assert not node._outbox
+
+
+def test_run_capture_exit_code_and_timeout(upgrade):
+    """Test a local command's output and exit code are captured, and one that
+    runs too long is stopped.
+    """
+    host = upgrade.LocalHost()
+
+    code, output = host.run_capture(
+        [sys.executable, "-c", "print('hi'); raise SystemExit(3)"]
+    )
+    assert (code, output.strip()) == (3, "hi")
+
+    code, output = host.run_capture(
+        [sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.5
+    )
+    assert code is None and "timed out" in output
+
+
+# ---------------------------------------------------------------- suggestions
+
+
+def test_suggest_shows_command_on_node_and_runs_nothing(upgrade):
+    """Test a one-shot's suggestion appears on the node as text to type, exactly
+    as sent, and nothing runs until someone there types localcmd.
+    """
+    shown = []
+
+    def walkthrough(bridge):
+        bridge.ask("ready?", ["yes"])
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        rig.nodes["root"]._print = shown.append
+        await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            rig.port,
+            "suggest ROOT Get-WinEvent -LogName Application -MaxEvents 50",
+            wait=1,
+            name="claude",
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        await rig.until(lambda: any("SUGGESTED" in line for line in shown))
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    text = "\n".join(shown)
+    assert (
+        "SUGGESTED by claude: Get-WinEvent -LogName Application -MaxEvents 50" in text
+    )
+    assert (
+        "to run it, type: localcmd Get-WinEvent -LogName Application -MaxEvents 50"
+        in text
+    )
+    assert rig.nodes["root"].host.captured == []
+    assert rig.nodes["root"].host.ran == [] or all(
+        "Get-WinEvent" not in " ".join(cmd) for cmd in rig.nodes["root"].host.ran
+    )
+    assert "claude suggested for root" in rig.text("coordinator")
+
+
+def test_suggestion_cleaned_and_capped(upgrade):
+    """Test a suggestion can be long, but has no control characters to hide
+    anything in the terminal, and is cut at the limit.
+    """
+    long_command = "Get-Item C:\\\\ ; " * 1500
+    assert len(long_command) < upgrade.SUGGEST_MAX
+    assert upgrade.clean_suggestion(long_command) == long_command.strip()
+
+    hidden = "Get-Date\x1b[8m; Remove-Item C:\\\\x\x1b[0m\nGet-Date"
+    cleaned = upgrade.clean_suggestion(hidden)
+    assert "\x1b" not in cleaned and "\n" not in cleaned
+    assert "Remove-Item" in cleaned  # shown, not hidden
+
+    assert len(upgrade.clean_suggestion("x" * (upgrade.SUGGEST_MAX + 10))) == (
+        upgrade.SUGGEST_MAX
+    )
+    assert upgrade.SUGGEST_MAX >= 30000
+
+
+def test_suggest_unknown_node(upgrade):
+    """Test a suggestion for a node that isn't connected says so."""
+    output = []
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=output.append,
+            **coordinator_options(upgrade),
+        )
+        await coordinator.handle_command("suggest nope whoami", source="coordinator")
+
+    asyncio.run(scenario())
+    assert any("nope isn't connected" in line for line in output)

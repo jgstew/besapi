@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.3"
+__version__ = "0.2.11"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -261,6 +261,12 @@ SQL_SERVER_PROPERTIES = (
 SQL_PRODUCT_LEVEL = (
     "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(128))"
 )
+SQL_COMPAT_LEVELS = (
+    "SET NOCOUNT ON; SELECT name, compatibility_level FROM sys.databases"
+    " WHERE name IN ('BFEnterprise', 'BESReporting')"
+)
+# the levels SQL Server has had, anything else never reaches ALTER DATABASE:
+VALID_COMPAT_LEVELS = {100, 110, 120, 130, 140, 150, 160, 170}
 SQL_DATABASES = (
     "SET NOCOUNT ON; SELECT d.name, d.state_desc, d.recovery_model_desc,"
     " d.compatibility_level,"
@@ -603,6 +609,9 @@ def _step_details(compat: dict, current: dict, path: List[tuple]) -> List[dict]:
                 f" supports up to {max_compat.get(after['mssql'])})"
             )
             db_compat = min_compat
+            compat_needed: Optional[int] = min_compat
+        else:
+            compat_needed = None
 
         steps.append(
             {
@@ -615,7 +624,40 @@ def _step_details(compat: dict, current: dict, path: List[tuple]) -> List[dict]:
         )
         if service_pack:
             steps[-1]["service_pack"] = service_pack
+        if compat_needed:
+            steps[-1]["compat_needed"] = compat_needed
+        if component == "bigfix" and compat_needed:
+            steps[-1]["check_compat"] = compat_needed
+        min_host = (compat.get("hyperv_guests") or {}).get("versions", {}).get(target)
+        if component == "windows" and min_host:
+            steps[-1]["hyperv_min_host"] = min_host
+        steps[-1]["mssql_after"] = after["mssql"]
+    _plan_compat_raises(steps, max_compat)
+    for step in steps:
+        step.pop("mssql_after", None)
+        step.pop("compat_needed", None)
     return steps
+
+
+def _plan_compat_raises(steps: List[dict], max_compat: dict) -> None:
+    """Raise the database compatibility level once, after the latest SQL Server
+    upgrade before it's needed, to the highest level needed from there on.
+
+    An in-place SQL Server upgrade keeps the old level, BigFix needs a minimum.
+    """
+    for index, step in enumerate(steps):
+        needed = step.get("compat_needed")
+        if not needed:
+            continue
+        last = index if step["component"] == "mssql" else index - 1
+        for earlier in range(last, -1, -1):
+            candidate = steps[earlier]
+            supported = max_compat.get(candidate["mssql_after"]) or 0
+            if candidate["component"] == "mssql" and supported >= needed:
+                candidate["raise_compat"] = max(
+                    candidate.get("raise_compat", 0), needed
+                )
+                break
 
 
 def windows_upgrade_route(compat: dict, current: str, minimum: str) -> Optional[list]:
@@ -1054,6 +1096,29 @@ class LocalHost:
     def run(self, cmd: List[str]) -> str:
         """Run a command, raising if it fails."""
         return besapi.plugin_utilities.run_logged(cmd).stdout
+
+    def run_capture(self, cmd: List[str], timeout: float = 300) -> tuple:
+        """Run a command a person typed here, returning (exit code, output).
+
+        The exit code is None when it ran longer than `timeout` seconds.
+        """
+        try:
+            result = subprocess.run(  # nosec B603
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as err:
+            partial = err.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode(errors="replace")
+            return None, f"timed out after {timeout}s, stopped\n{partial}"
+        except OSError as err:
+            return None, f"could not run it: {err}\n"
+        return result.returncode, (result.stdout or "") + (result.stderr or "")
 
     def run_secret(self, cmd: List[str]) -> None:
         """Run a command with a secret in its arguments, logging none of it."""
@@ -1809,6 +1874,18 @@ def _upgrade_instructions(step: dict, local_sql: bool) -> str:
     return "\n".join(lines)
 
 
+def _upgrade_checks(step: dict, service_pack: Optional[dict]) -> List[str]:
+    """Checks run as an upgrade step starts, before the operator upgrades."""
+    checks = []
+    if service_pack:
+        checks.append(f"check_service_pack:{service_pack['level']}")
+    if step.get("check_compat"):
+        checks.append(f"check_compat:{step['check_compat']}")
+    if step.get("hyperv_min_host"):
+        checks.append(f"check_hyperv_host:{step['hyperv_min_host']}")
+    return checks
+
+
 def _service_pack_instructions(service_pack: dict) -> str:
     version, level = service_pack["mssql"], service_pack["level"]
     return (
@@ -1900,17 +1977,24 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     upgrade_id,
                     f"Upgrade {step['component']} to {step['to']}",
                     _upgrade_instructions(step, local_sql),
-                    (
-                        [f"check_service_pack:{service_pack['level']}"]
-                        if service_pack
-                        else []
-                    ),
+                    _upgrade_checks(step, service_pack),
                 ),
                 Step(
                     f"start_services_{number}",
                     "Start BigFix services",
-                    "BigFix services are started again.",
-                    ["start_services"],
+                    "BigFix services are started again."
+                    + (
+                        " First the databases' compatibility level is raised to"
+                        f" {step['raise_compat']}, which BigFix needs."
+                        if step.get("raise_compat")
+                        else ""
+                    ),
+                    (
+                        [f"raise_compat:{step['raise_compat']}"]
+                        if step.get("raise_compat")
+                        else []
+                    )
+                    + ["start_services"],
                 ),
                 Step(
                     f"validate_{number}",
@@ -2878,15 +2962,107 @@ def _action_check_service_pack(ctx: WalkthroughContext, required: str) -> None:
     raise SystemExit(f"{message}, then rerun to continue with this step")
 
 
+def compat_levels(host, server: str) -> Dict[str, int]:
+    """The BigFix databases' compatibility levels, read-only."""
+    levels = {}
+    for row in host.sqlcmd(server, SQL_COMPAT_LEVELS):
+        if len(row) >= 2 and row[0] in BIGFIX_DATABASES and str(row[1]).isdigit():
+            levels[row[0]] = int(row[1])
+    return levels
+
+
+def _compat_level(value: Any) -> int:
+    level = int(str(value).strip())
+    if level not in VALID_COMPAT_LEVELS:
+        raise ValueError(f"{value} isn't a SQL Server compatibility level")
+    return level
+
+
+def _action_raise_compat(ctx: WalkthroughContext, level: str) -> None:
+    """Raise BFEnterprise and BESReporting to the level BigFix needs, after the
+    operator agrees.
+
+    --db-compat-level picks another level.
+    """
+    target = _compat_level(getattr(ctx.args, "db_compat_level", None) or level)
+    levels = compat_levels(ctx.host, ctx.sql_server())
+    print(
+        "database compatibility levels: "
+        + ", ".join(f"{name} {value}" for name, value in levels.items())
+    )
+    low = [name for name, value in levels.items() if value < target]
+    if not low:
+        print(f"OK, already at {target} or later")
+        return
+    if not ctx.confirm(
+        f"Raise the compatibility level of {' and '.join(low)} to {target}? BigFix"
+        " needs it, and it's changed back with the same command"
+    ):
+        print(
+            "not changed: raise it before the BigFix upgrade, whose first check"
+            f" stops below {level}"
+        )
+        return
+    for name in low:
+        # the name is one of BIGFIX_DATABASES, the level a checked number:
+        ctx.sql(f"ALTER DATABASE [{name}] SET COMPATIBILITY_LEVEL = {target}")
+
+
+def _action_check_compat(ctx: WalkthroughContext, level: str) -> None:
+    """Stop before the BigFix upgrade while a database is below its level."""
+    needed = _compat_level(level)
+    levels = compat_levels(ctx.host, ctx.sql_server())
+    low = [f"{name} ({value})" for name, value in levels.items() if value < needed]
+    if not low:
+        print(f"OK, the databases are at compatibility level {needed} or later")
+        return
+    message = (
+        f"{' and '.join(low)} below compatibility level {needed}, which this"
+        " BigFix version needs"
+    )
+    if ctx.dry_run:
+        print(f"WARNING: {message}")
+        return
+    raise SystemExit(
+        f"{message}: raise it with ALTER DATABASE ... SET COMPATIBILITY_LEVEL ="
+        f" {needed}, then rerun to continue with this step"
+    )
+
+
+def _action_check_hyperv_host(ctx: WalkthroughContext, minimum: str) -> None:
+    """Stop before a Windows upgrade the Hyper-V host can't run as a guest."""
+    result: dict = {"ok": False, "error": "not in a session with the Hyper-V host"}
+    if ctx.session:
+        result = ctx.session.remote_action("hyperv", "host_version", {})
+    if result.get("ok"):
+        version = str(result.get("windows"))
+        if product_sort_key(version) >= product_sort_key(minimum):
+            print(f"OK, the Hyper-V host is Windows Server {version}")
+            return
+        message = (
+            f"the Hyper-V host is Windows Server {version}, this guest needs"
+            f" {minimum} or later: upgrade the host first"
+        )
+        if ctx.dry_run:
+            print(f"WARNING: {message}")
+            return
+        raise SystemExit(message)
+    print(f"NOTE: {result.get('error')}, so the Hyper-V host wasn't checked")
+    if ctx.dry_run:
+        print(f"WARNING: check the Hyper-V host is Windows Server {minimum} or later")
+        return
+    if not ctx.confirm(
+        f"Is the Hyper-V host Windows Server {minimum} or later?", default="no"
+    ):
+        raise SystemExit(f"upgrade the Hyper-V host to {minimum} or later first")
+
+
 def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
     """Ask the session's Hyper-V node for a checkpoint of this VM, else the
     operator.
 
     The script never deletes a checkpoint.
     """
-    if ctx.dry_run:
-        print(f"DRY RUN, would ask the Hyper-V node for a checkpoint {name}")
-        return
     result: dict = {"ok": False, "error": "not in a session with the Hyper-V host"}
     if ctx.session:
         ips = [
@@ -2894,9 +3070,21 @@ def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
             for entry in _dicts(_probe(ctx.host.powershell_json, PS_HOST_IPS))
             if entry.get("IPAddress")
         ]
+        # a dry run asks too, so the Hyper-V node checks it would find the VM:
         result = ctx.session.remote_action(
-            "hyperv", "checkpoint", {"name": name, "ips": ips}
+            "hyperv",
+            "checkpoint",
+            {"name": name, "ips": ips, **({"dry_run": True} if ctx.dry_run else {})},
         )
+    if ctx.dry_run:
+        if result.get("ok"):
+            print(f"DRY RUN, the Hyper-V node would run: {result.get('would_run')}")
+        else:
+            print(
+                f"DRY RUN, would ask the Hyper-V node for a checkpoint {name}, but:"
+                f" {result.get('error')}"
+            )
+        return
     if not result.get("ok"):
         print(f"NOTE: {result.get('error')}, take the VM snapshot yourself")
         return
@@ -2947,6 +3135,9 @@ ACTIONS: Dict[str, Callable[..., None]] = {
     "validate": _action_validate,
     "check_service_pack": _action_check_service_pack,
     "checkpoint": _action_checkpoint,
+    "raise_compat": _action_raise_compat,
+    "check_compat": _action_check_compat,
+    "check_hyperv_host": _action_check_hyperv_host,
 }
 
 
@@ -3022,6 +3213,13 @@ def run_walkthrough(args, bes_conn, host, compat: dict, session=None) -> int:
 
 def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> int:
     # pylint: disable=too-many-arguments
+    if (
+        host.is_windows()
+        and not is_local_root_server(host)
+        and _probe(host.powershell_json, PS_HYPERV_HOST) is True
+    ):
+        # on the Hyper-V host: its own backup and upgrade, phase 0
+        return _run_hyperv_walkthrough(args, bes_conn, host, compat, ask, session)
     require_walkthrough_host(host)
     state = load_state(args.state_file)
 
@@ -3064,6 +3262,15 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> i
         getpass_fn=(lambda prompt: "") if args.dry_run else None,
         session=session,
     )
+
+    return _walk_steps(args, steps, state, ctx, ask, session, persist)
+
+
+def _walk_steps(
+    args, steps: List[Step], state: dict, ctx, ask, session, persist
+) -> int:
+    """Run the steps not done yet, one at a time, confirming each."""
+    # pylint: disable=too-many-arguments
 
     def publish(step: Optional[Step], finished: bool = False) -> None:
         if session:
@@ -3108,6 +3315,378 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> i
         if answer == "skip":
             state.setdefault("skipped", []).append(step.id)
         persist()
+
+
+# ---------------------------------------------------------------- Hyper-V walkthrough
+
+PS_HYPERV_ADAPTERS = (
+    "@(Get-VMNetworkAdapter -VMName * | Select-Object VMName, Name, SwitchName,"
+    " MacAddress, DynamicMacAddressEnabled, IPAddresses) | ConvertTo-Json -Compress"
+)
+DEFAULT_HEARTBEAT_WAIT = 600
+EXPORT_SPACE_FACTOR = 1.05
+
+
+def tcp_reachable(ip: str, port: int, timeout: float = 5) -> bool:
+    """Whether a TCP port answers on another computer."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def hyperv_backup_dir(info: dict) -> str:
+    """A local folder for the exports, on the volume with the most free space.
+
+    Local, since Hyper-V writes the export, not this user.
+    """
+    disks = [d for d in info.get("disks") or [] if isinstance(d, dict)]
+    drive = (
+        max(disks, key=lambda d: d.get("FreeSpace") or 0).get("DeviceID")
+        if disks
+        else "C:"
+    )
+    return f"{drive}\\bigfix_hyperv_backup"
+
+
+def build_hyperv_steps(plan: dict) -> List[Step]:
+    """Phase 0, on the Hyper-V host: back it up, and upgrade it if the root
+    server's target Windows needs a newer host.
+    """
+    steps = [
+        Step(
+            "hv_preflight",
+            "Hyper-V host checks",
+            "The host, its VMs and the guest check. Fix a pending reboot before any"
+            " upgrade.",
+            ["hv_collect"],
+        ),
+        Step(
+            "hv_config_backup",
+            "Save the Hyper-V settings",
+            "The VMs, virtual switches and network adapters are saved as JSON.",
+            ["hv_config_backup"],
+        ),
+        Step(
+            "hv_export",
+            "Export the BigFix VMs",
+            "Each BigFix VM is exported with its whole disk chain, shut down first"
+            " for a consistent copy if you agree.",
+            ["hv_export"],
+        ),
+    ]
+    upgrades = plan.get("host_upgrades") or []
+    if upgrades:
+        steps.append(
+            Step(
+                "hv_shutdown",
+                "Shut down the VMs",
+                "Each running VM is shut down or saved before the host upgrade.",
+                ["hv_shutdown"],
+            )
+        )
+        for number, version in enumerate(upgrades, start=1):
+            steps.append(
+                Step(
+                    f"hv_upgrade_{number}_windows_{_id_part(version)}",
+                    f"Upgrade the Hyper-V host to Windows Server {version}",
+                    f"Upgrade this host to Windows Server {version} in place: mount"
+                    " the media, run setup.exe, keep files and apps, and keep the"
+                    " same edition and Desktop Experience. The Hyper-V role and VMs"
+                    " stay. Rerun this script after the reboots. Never run"
+                    " Update-VMVersion as part of this, it's one-way.",
+                )
+            )
+        steps.append(
+            Step(
+                "hv_validate",
+                "Validate the Hyper-V host",
+                "The Hyper-V role and switches are checked, the VMs that were"
+                " running are started, and the root server is checked on 52311.",
+                ["hv_validate"],
+            )
+        )
+    steps.append(
+        Step(
+            "hv_cleanup",
+            "Clean up",
+            "Keep the VM exports until the upgrade has soaked. Update-VMVersion is"
+            " optional and one-way: without it the VMs can still move back to an"
+            " older host. To give back disk space later, merge old checkpoints,"
+            " clean up inside the guest, and compact its disks with Optimize-VHD,"
+            " checking Microsoft's Optimize-VHD page first.",
+        )
+    )
+    return steps
+
+
+def _hyperv_vms(ctx) -> List[dict]:
+    return _dicts(_probe(ctx.host.powershell_json, PS_HYPERV_VMS))
+
+
+def _bigfix_vm_names(ctx) -> List[str]:
+    return list((ctx.state.get("hyperv") or {}).get("bigfix_vms") or [])
+
+
+def _action_hv_collect(ctx: WalkthroughContext) -> None:
+    info = ctx.state.get("hyperv") or {}
+    windows = info.get("windows") or {}
+    print(f"host: Windows Server {info.get('windows_version')}")
+    reboot = windows.get("pending_reboot") or {}
+    if isinstance(reboot, dict) and any(v is True for v in reboot.values()):
+        pending = ", ".join(k for k, v in reboot.items() if v is True)
+        print(f"WARNING: a reboot is pending ({pending}), it blocks the upgrade")
+    for vm in info.get("vms") or []:
+        print(
+            f"VM {vm.get('Name')}: {vm.get('State')}, heartbeat"
+            f" {vm.get('Heartbeat') or '-'}, {vm_disk_bytes(vm) / 1024**3:.1f} GB of"
+            f" disks, checkpoints {vm.get('Checkpoints') or 'none'}"
+        )
+    for disk in info.get("disks") or []:
+        print(
+            f"volume {disk.get('DeviceID')}"
+            f" {(disk.get('FreeSpace') or 0) / 1024**3:.0f} GB free"
+        )
+    print(f"BigFix VMs: {', '.join(_bigfix_vm_names(ctx)) or 'none found'}")
+    for error in info.get("errors") or []:
+        print(f"WARNING: {error}")
+    plan = ctx.state.get("hyperv_plan") or {}
+    for problem in plan.get("problems") or []:
+        print(f"WARNING: {problem}")
+    upgrades = plan.get("host_upgrades") or []
+    print(
+        f"host upgrades: {' then '.join(upgrades)}"
+        if upgrades
+        else "no host upgrade needed"
+    )
+
+
+def _action_hv_config_backup(ctx: WalkthroughContext) -> None:
+    info = ctx.state.get("hyperv") or {}
+    config = {
+        "vms": info.get("vms") or [],
+        "switches": info.get("switches") or [],
+        "adapters": _dicts(_probe(ctx.host.powershell_json, PS_HYPERV_ADAPTERS)),
+        "saved": utc_now().isoformat(),
+    }
+    path = os.path.join(ctx.backup_dir(), "hyperv_config.json")
+    if ctx.dry_run:
+        print(
+            f"DRY RUN, would save {len(config['vms'])} VMs,"
+            f" {len(config['switches'])} switches and {len(config['adapters'])}"
+            f" adapters to {path}"
+        )
+        return
+    with open(path, "w", encoding="utf-8") as saved:
+        json.dump(config, saved, indent=2, default=str)
+    print(f"saved the Hyper-V settings to {path}")
+
+
+def _action_hv_export(ctx: WalkthroughContext) -> None:
+    run_dir = ctx.backup_dir()
+    vms = {
+        str(vm.get("Name")): vm
+        for vm in (ctx.state.get("hyperv") or {}).get("vms") or []
+    }
+    for name in _bigfix_vm_names(ctx):
+        vm = vms.get(name) or {}
+        size = vm_disk_bytes(vm)
+        # quoted first, so nothing runs if the path or name can't be:
+        export = f"Export-VM -Name {_ps_quote(name)} -Path {_ps_quote(run_dir)}"
+        free = None
+        with contextlib.suppress(OSError):
+            free = shutil.disk_usage(run_dir).free
+        space = (
+            f", {free / 1024**3:.0f} GB free"
+            if free is not None
+            else ", free space unknown"
+        )
+        print(f"{name}: {size / 1024**3:.1f} GB of disks to export to {run_dir}{space}")
+        if (
+            not ctx.dry_run
+            and free is not None
+            and free < size * EXPORT_SPACE_FACTOR
+            and not ctx.confirm(
+                f"only {free / 1024**3:.0f} GB free for {size / 1024**3:.0f} GB,"
+                " export anyway?",
+                default="no",
+            )
+        ):
+            raise BackupError(f"not enough free space in {run_dir} to export {name}")
+        running = vm.get("State") == "Running"
+        stopped = running and ctx.confirm(
+            f"Shut down {name} first, for a consistent export?"
+        )
+        if stopped:
+            ctx.execute(_powershell(f"Stop-VM -Name {_ps_quote(name)}"))
+        ctx.execute(_powershell(export))
+        if not ctx.dry_run:
+            ctx.state.setdefault("hyperv_exports", []).append(
+                {
+                    "vm": name,
+                    "path": run_dir,
+                    "bytes": size,
+                    "time": utc_now().isoformat(),
+                }
+            )
+            save_state(ctx.state_path, ctx.state)
+        # left off when the host upgrade is next, it's shut down for that anyway:
+        upgrade_next = bool((ctx.state.get("hyperv_plan") or {}).get("host_upgrades"))
+        if stopped and ctx.confirm(
+            f"Start {name} again?"
+            + (" The host upgrade is next, so no is fine" if upgrade_next else ""),
+            default="no" if upgrade_next else "yes",
+        ):
+            ctx.execute(_powershell(f"Start-VM -Name {_ps_quote(name)}"))
+
+
+def _action_hv_shutdown(ctx: WalkthroughContext) -> None:
+    was_running = []
+    for vm in _hyperv_vms(ctx):
+        name = str(vm.get("Name"))
+        if vm.get("State") != "Running":
+            continue
+        choice = (ctx.ask or _ask)(
+            f"{name} is running: shut it down, save its state, or skip it?",
+            ["shutdown", "save", "skip"],
+            "shutdown",
+        )
+        if choice == "skip":
+            print(f"NOTE: {name} is left running, the host upgrade will stop it")
+            continue
+        verb = "Stop-VM" if choice == "shutdown" else "Save-VM"
+        ctx.execute(_powershell(f"{verb} -Name {_ps_quote(name)}"))
+        was_running.append(name)
+    ctx.state["hyperv_was_running"] = was_running
+
+
+def _action_hv_validate(ctx: WalkthroughContext) -> None:
+    host = ctx.host
+    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
+        print("OK, the Hyper-V role is running")
+    else:
+        print("WARNING: the Hyper-V role isn't running")
+    windows = windows_server_version(_get(_windows_info(host), "ProductName"))
+    expected = ((ctx.state.get("hyperv_plan") or {}).get("host_upgrades") or [None])[-1]
+    if expected and windows == expected:
+        print(f"OK, the host is Windows Server {windows}")
+    else:
+        print(f"WARNING: the host is Windows Server {windows}, expected {expected}")
+    now = {
+        str(sw.get("Name"))
+        for sw in _dicts(_probe(host.powershell_json, PS_HYPERV_SWITCHES))
+    }
+    for switch in (ctx.state.get("hyperv") or {}).get("switches") or []:
+        name = str(switch.get("Name"))
+        print(
+            f"OK, switch {name} is back"
+            if name in now
+            else f"WARNING: switch {name} is missing"
+        )
+    started = []
+    for name in ctx.state.get("hyperv_was_running") or []:
+        if ctx.confirm(f"Start {name} again?"):
+            ctx.execute(_powershell(f"Start-VM -Name {_ps_quote(name)}"))
+            started.append(name)
+    if ctx.dry_run:
+        print("DRY RUN, would wait for each started VM's heartbeat")
+    else:
+        deadline = time.monotonic() + float(
+            getattr(ctx.args, "heartbeat_wait", DEFAULT_HEARTBEAT_WAIT) or 0
+        )
+        waiting = set(started)
+        while True:
+            for vm in _hyperv_vms(ctx):
+                name = str(vm.get("Name"))
+                if name in waiting and str(vm.get("Heartbeat") or "").startswith("Ok"):
+                    print(f"OK, {name} heartbeat {vm.get('Heartbeat')}")
+                    waiting.discard(name)
+            if not waiting or time.monotonic() >= deadline:
+                break
+            time.sleep(10)
+        for name in sorted(waiting):
+            print(f"WARNING: no heartbeat from {name} yet, check it in Hyper-V Manager")
+    vms = {
+        str(vm.get("Name")): vm
+        for vm in (ctx.state.get("hyperv") or {}).get("vms") or []
+    }
+    addresses = [
+        ip
+        for name in _bigfix_vm_names(ctx)
+        for ip in vms.get(name, {}).get("IPAddresses") or []
+        if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", str(ip))
+    ] or [ip for ip in [(ctx.state.get("hyperv") or {}).get("root_ip")] if ip]
+    for ip in addresses[:1]:
+        if tcp_reachable(ip, 52311):
+            print(f"OK, the root server {ip} answers on 52311")
+        else:
+            print(f"WARNING: the root server {ip} doesn't answer on 52311 yet")
+    print(
+        "NOTE: Update-VMVersion isn't run: the VMs keep their configuration"
+        " version, so they can still move back to an older host. Update them later"
+        " only if you want to, it's one-way."
+    )
+
+
+ACTIONS.update(
+    {
+        "hv_collect": _action_hv_collect,
+        "hv_config_backup": _action_hv_config_backup,
+        "hv_export": _action_hv_export,
+        "hv_shutdown": _action_hv_shutdown,
+        "hv_validate": _action_hv_validate,
+    }
+)
+
+
+def _run_hyperv_walkthrough(
+    args, bes_conn, host, compat: dict, ask, session=None
+) -> int:
+    """Phase 0 on the Hyper-V host, resuming from its state file."""
+    # pylint: disable=too-many-arguments
+    if not host.is_admin():
+        raise SystemExit("The walkthrough requires an elevated administrator prompt.")
+    state = load_state(args.state_file)
+    persist = (
+        (lambda: None) if args.dry_run else (lambda: save_state(args.state_file, state))
+    )
+    if "hyperv_plan" not in state:
+        root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(
+            CLIENT_MASTHEAD_PATHS
+        )
+        info = collect_hyperv_info(host, root_ip, getattr(args, "vm_name", None))
+        target = dict(
+            default_target(compat),
+            **{k: v for k, v in _target_from_args(args).items() if v},
+        )
+        guests = [target["windows"]] if target.get("windows") else []
+        plan = hyperv_guest_check(compat, info.get("windows_version"), guests)
+        print(
+            json.dumps(
+                {"hyperv_check": plan, "bigfix_vms": info.get("bigfix_vms")}, indent=2
+            )
+        )
+        if ask("Use this Hyper-V host plan?", ["yes", "no"], "yes") != "yes":
+            return 1
+        state["hyperv"] = info
+        state["hyperv_plan"] = plan
+        persist()
+    steps = build_hyperv_steps(state["hyperv_plan"])
+    if not args.backup_dir:
+        args.backup_dir = hyperv_backup_dir(state.get("hyperv") or {})
+        print(f"backups and exports go to {args.backup_dir}, or give --backup-dir")
+    ctx = WalkthroughContext(
+        args,
+        host,
+        state,
+        args.state_file,
+        ask=ask,
+        input_fn=(lambda prompt: "") if args.dry_run else None,
+        getpass_fn=(lambda prompt: "") if args.dry_run else None,
+        session=session,
+    )
+    return _walk_steps(args, steps, state, ctx, ask, session, persist)
 
 
 # ---------------------------------------------------------------- shares
@@ -4561,6 +5140,8 @@ MAX_WRONG_CODES = 5
 RESUME_TOKEN_SECONDS = 24 * 60 * 60
 SESSION_COMMANDS = (
     "status, retry, state <node>, diag <node> [check], report <node>,"
+    " dryrun <node>, suggest <node> <command>, and typed at a node:"
+    " localcmd <command>, send <file>,"
     " log <node> [lines],"
     " halt [reason], continue, answer <choice>, revoke <node>, end"
 )
@@ -4780,6 +5361,17 @@ def clean_log_text(text: Any, limit: int = LOG_MESSAGE_MAX) -> str:
     return _CONTROL_CHARACTERS.sub("", text).strip()[:limit]
 
 
+# a suggested command can be long, just under Windows' command line limit:
+SUGGEST_MAX = 32000
+
+
+def clean_suggestion(command: Any) -> str:
+    """A suggested command as it will be shown: nothing hidden by control
+    characters or new lines, and cut at SUGGEST_MAX.
+    """
+    return clean_log_text(command, SUGGEST_MAX)
+
+
 def safe_node_filename(name: str) -> str:
     """A file name for a node's log, which can't leave the log folder."""
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name).strip(".")[:64] or "node"
@@ -4937,7 +5529,7 @@ class NodeLogHandler(logging.Handler):
 
 # ---------------------------------------------------------------- session checks
 
-NODE_DIAGNOSTICS = ["disk", "reboot", "services", "ports", "sql", "vms"]
+NODE_DIAGNOSTICS = ["disk", "reboot", "services", "ports", "sql", "compat", "vms"]
 SQL_PING = "SET NOCOUNT ON; SELECT 1"
 
 
@@ -4976,6 +5568,7 @@ def run_node_diagnostics(
     }
     if sql_server:
         checks["sql"] = lambda: bool(host.sqlcmd(sql_server, SQL_PING))
+        checks["compat"] = lambda: compat_levels(host, sql_server)
     if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
         checks["vms"] = vms
     if check != "all":
@@ -5002,13 +5595,22 @@ def run_node_action(host, roles: List[str], action: str, params: dict) -> dict:
                     break
             if not vm:
                 raise ValueError("no VM has the asking node's address, give --vm-name")
-            host.run(
-                _powershell(
-                    f"Checkpoint-VM -Name {_ps_quote(vm)}"
-                    f" -SnapshotName {_ps_quote(name)}"
-                )
+            script = (
+                f"Checkpoint-VM -Name {_ps_quote(vm)} -SnapshotName {_ps_quote(name)}"
             )
+            if params.get("dry_run"):
+                return {
+                    "ok": True,
+                    "vm": vm,
+                    "checkpoint": name,
+                    "dry_run": True,
+                    "would_run": script,
+                }
+            host.run(_powershell(script))
             return {"ok": True, "vm": vm, "checkpoint": name}
+        if action == "host_version" and "hyperv" in roles:
+            windows = windows_server_version(_get(_windows_info(host), "ProductName"))
+            return {"ok": bool(windows), "windows": windows}
         return {"ok": False, "error": f"{action} isn't an action this node does"}
     except Exception as err:  # pylint: disable=broad-exception-caught
         return {"ok": False, "error": f"{type(err).__name__}: {err}"}
@@ -5440,20 +6042,24 @@ class ShareSessionCoordinator:
             self.output(f"refused {peer_ip}: {err}")
             return
         token = self._token(peer.get("resume_id"))
-        if token:
+        roles = [str(role) for role in peer.get("roles") or []]
+        if token and "oneshot" not in roles:
             # the same name as before its reboot, replacing a stale connection:
             name = token["node"]
             stale = self.nodes.pop(name, None)
             if stale:
                 stale["channel"].close()
         else:
-            # names must be unique, a peer and a console can run on one computer:
-            base_name = name = str(peer.get("node_id"))
+            # names must be unique, a peer and a console can run on one computer.
+            # A one-shot with another node's token gets its own name, and never
+            # replaces that node:
+            base_name = name = (
+                f"{token['node']}-oneshot" if token else str(peer.get("node_id"))
+            )
             suffix = 2
             while name in self.nodes:
                 name = f"{base_name}-{suffix}"
                 suffix += 1
-        roles = [str(role) for role in peer.get("roles") or []]
         script = peer_script(peer)
         self.nodes[name] = {
             "channel": channel,
@@ -5546,7 +6152,12 @@ class ShareSessionCoordinator:
                     " coordinator was away"
                 )
                 self.question = None
-        elif message.get("type") in ("state_reply", "diag_reply", "report_reply"):
+        elif message.get("type") in (
+            "state_reply",
+            "diag_reply",
+            "report_reply",
+            "dryrun_reply",
+        ):
             await self._relay_reply(name, message)
         elif message.get("type") == "action_request":
             await self._on_action_request(name, message)
@@ -5607,6 +6218,13 @@ class ShareSessionCoordinator:
         }
         if reply["kind"] == "report":
             reply["data"] = await self._save_report(name, reply["data"])
+        if reply["kind"] == "dryrun":
+            data = reply["data"] if isinstance(reply["data"], dict) else {}
+            self.output(
+                f"dry run started on {name}, its file comes here when it's done"
+                if data.get("started")
+                else f"no dry run on {name}: {data.get('error')}"
+            )
         if requester == "coordinator":
             self.output(f"{reply['kind']} {name}: {json.dumps(reply['data'])}")
         elif requester:
@@ -5703,6 +6321,23 @@ class ShareSessionCoordinator:
             question["node"],
             {"type": "answer", "id": question["id"], "choice": choice, "by": source},
         )
+
+    async def _suggest(self, text: str, source: str) -> None:
+        """`suggest <node> <command>`: show a command on that node for the person
+        there to run with localcmd, if they choose.
+
+        Nothing runs from this.
+        """
+        parts = text.split(None, 2)
+        if len(parts) < 3:
+            self.output("use: suggest <node> <command>")
+            return
+        node, command = self._node_name(parts[1]), clean_suggestion(parts[2])
+        if node not in self.nodes or "console" in self.nodes[node]["roles"]:
+            self.output(f"{parts[1]} isn't connected, see status")
+            return
+        self.output(f"{source} suggested for {node}: {command}")
+        await self._send(node, {"type": "suggestion", "by": source, "command": command})
 
     def _node_name(self, typed: str) -> str:
         """The node named, whatever case was typed: BIGFIX or bigfix."""
@@ -5831,7 +6466,14 @@ class ShareSessionCoordinator:
                     f"halted by {self.halted['by']}: only {self.halted['by']} or a"
                     " person at a terminal can continue"
                 )
-        elif words[0] in ("state", "diag", "report"):
+        elif words[0] == "suggest":
+            await self._suggest(text, source)
+        elif words[0] in ("localcmd", "send"):
+            self.output(
+                f"{words[0]} only works typed at the node it's for: it never runs"
+                " over the session"
+            )
+        elif words[0] in ("state", "diag", "report", "dryrun"):
             await self._request(words[0], words[1:], source)
         elif command == "status":
             lines = self.status_lines()
@@ -5911,6 +6553,8 @@ class ShareSessionNode:
         oneshot_wait=None,
         share_offer=None,
         report_fn=None,
+        dry_run_fn=None,
+        localcmd_timeout=300,
     ):
         # pylint: disable=too-many-arguments,too-many-locals
         self.name = name
@@ -5933,7 +6577,13 @@ class ShareSessionNode:
         self._outbox: collections.deque = collections.deque(maxlen=20)
         # a walkthrough run in its own thread, through the session:
         self.walkthrough = walkthrough
-        self.bridge = WalkthroughBridge(self) if walkthrough else None
+        # a dry run of this node's walkthrough, started by `dryrun <node>`:
+        self.dry_run_fn = dry_run_fn
+        self.bridge = WalkthroughBridge(self) if walkthrough or dry_run_fn else None
+        self._walk_running = threading.Event()
+        # `localcmd` typed here: how long it may run, and a count for its files
+        self.localcmd_timeout = localcmd_timeout
+        self._localcmd_count = 0
         self._walkthrough_started = False
         # the coordinator ended the session, so don't reconnect:
         self.finished = False
@@ -5980,12 +6630,74 @@ class ShareSessionNode:
             return True
         return False
 
+    def _local_command(self, command: str) -> None:
+        """`localcmd <command>` typed here: run it on this computer only, as the
+        person who typed it, and share its output and exit code.
+
+        Never started by a message from the session, only from this terminal.
+        """
+        if not command:
+            self._print("use: localcmd <command>")
+            return
+        if not self.host:
+            self._print(
+                "localcmd needs a node that checks this computer, not a console"
+            )
+            return
+        self._localcmd_count += 1
+        kind = f"localcmd_{utc_now():%H%M%S}_{self._localcmd_count}"
+        cmd = (
+            _powershell(command)
+            if self.host.is_windows()
+            else ["/bin/sh", "-c", command]
+        )
+        self._print(f"running here: {command}")
+
+        def run():
+            code, output = self.host.run_capture(cmd, self.localcmd_timeout)
+            self.log("INFO", f"localcmd exit {code}: {command}")
+            self._print(f"localcmd exit code {code}, its output is sent as {kind}")
+            self.send_threadsafe(
+                {
+                    "type": "artifact",
+                    "kind": kind,
+                    "text": f"command: {command}\nran: {utc_now().isoformat()}\n"
+                    f"exit code: {code}\n\n{output}",
+                },
+                keep=True,
+            )
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _send_file(self, path: str) -> None:
+        """`send <file>` typed here: share a file from this computer."""
+        try:
+            with open(path, encoding="utf-8", errors="replace") as source:
+                text = source.read(ARTIFACT_MAX)
+        except OSError as err:
+            self._print(f"can't read {path}: {err}")
+            return
+        name = re.sub(r"[^a-z0-9_]", "_", os.path.basename(path).lower())[:26]
+        self.send_threadsafe(
+            {"type": "artifact", "kind": f"sent_{name}", "text": text}, keep=True
+        )
+        self.log("INFO", f"sent {path}")
+        self._print(f"sent {path}")
+
     def on_typed(self, line: str) -> None:
         """A line typed on this node.
 
         While connected it's a session command. While the coordinator is away
         it answers the waiting question, so the walkthrough isn't stuck.
         """
+        text = line.strip()
+        word = text.split(None, 1)[0].lower() if text else ""
+        if word == "localcmd":
+            self._local_command(text[len(word) :].strip())
+            return
+        if word == "send":
+            self._send_file(text[len(word) :].strip().strip('"'))
+            return
         self.on_typed_local(line)
         if self._channel is not None:
             self.command_queue.put_nowait(line)
@@ -6030,16 +6742,23 @@ class ShareSessionNode:
         with contextlib.suppress(ConnectionError, OSError):
             await channel.send(message)
 
-    def _start_walkthrough(self) -> None:
+    def _start_walkthrough(self, walk=None) -> None:
+        """Run the walkthrough, or `walk` like a dry run, in its own thread."""
+        walk = walk or self.walkthrough
+
         def run():
             try:
-                self.walkthrough(self.bridge)
+                walk(self.bridge)
             except Exception as err:  # pylint: disable=broad-exception-caught
                 logging.exception("walkthrough failed")
                 self.output(f"walkthrough failed: {err}")
+            finally:
+                self._walk_running.clear()
             self.send_threadsafe({"type": "walkthrough_finished"})
 
-        self._walkthrough_started = True
+        if walk is self.walkthrough:
+            self._walkthrough_started = True
+        self._walk_running.set()
         threading.Thread(target=run, daemon=True).start()
 
     async def _handle_session_message(self, channel, message: dict) -> None:
@@ -6071,6 +6790,24 @@ class ShareSessionNode:
             }
             await channel.send(
                 {"type": "state_reply", "id": message.get("id"), "data": redact(state)}
+            )
+        elif kind == "suggestion":
+            # only shown: it runs if the person here types it with localcmd
+            command = clean_suggestion(message.get("command", ""))
+            by = clean_log_text(message.get("by", ""), 80)
+            self._print(f"SUGGESTED by {by}: {command}")
+            self._print(f"to run it, type: localcmd {command}")
+            self.log("INFO", f"{by} suggested: {command}")
+        elif kind == "dryrun_request":
+            if not self.dry_run_fn:
+                data: dict = {"error": f"{self.name} has no walkthrough to dry run"}
+            elif self._walk_running.is_set():
+                data = {"error": f"a walkthrough is already running on {self.name}"}
+            else:
+                self._start_walkthrough(self.dry_run_fn)
+                data = {"started": True}
+            await channel.send(
+                {"type": "dryrun_reply", "id": message.get("id"), "data": data}
             )
         elif kind == "report_request":
             data = await loop.run_in_executor(None, self.build_node_report)
@@ -6359,6 +7096,8 @@ class ShareSessionNode:
                     "state_request",
                     "diag_request",
                     "report_request",
+                    "dryrun_request",
+                    "suggestion",
                     "action",
                     "action_result",
                     "reply",
@@ -6513,6 +7252,23 @@ def macos_firewall_enabled(run) -> Optional[bool]:
     if "disabled" in output:
         return False
     return None
+
+
+def oneshot_resume(state: dict) -> Optional[dict]:
+    """The token a one-shot command connects with: this computer's console's, if
+    it has one, else its own.
+
+    The coordinator gives it its own name either way.
+    """
+    return state.get("session_resume_console") or state.get("session_resume_oneshot")
+
+
+def save_oneshot_token(state: dict, token: Optional[dict]) -> None:
+    """Keep a token issued to a one-shot apart, never changing the console's."""
+    if token:
+        state["session_resume_oneshot"] = token
+    else:
+        state.pop("session_resume_oneshot", None)
 
 
 def session_state_path(state_file: str) -> str:
@@ -6767,7 +7523,7 @@ def _run_node(
         )
 
     walkthrough = None
-    if args.walkthrough and "root" in roles:
+    if args.walkthrough and ("root" in roles or "hyperv" in roles):
         compat = load_compat(args.compat_file)
 
         def session_walkthrough(bridge) -> None:
@@ -6776,11 +7532,29 @@ def _run_node(
 
         walkthrough = session_walkthrough
 
+    dry_run_fn = None
+    if "root" in roles or "hyperv" in roles:
+
+        def session_dry_run(bridge) -> None:
+            # `dryrun <node>` from any terminal, changing nothing here:
+            tee.claim()
+            dry_args = types.SimpleNamespace(**dict(vars(args), dry_run=True))
+            run_walkthrough(
+                dry_args, bes_conn, host, load_compat(args.compat_file), session=bridge
+            )
+
+        dry_run_fn = session_dry_run
+
     def prompt_code() -> bytes:
         code = input("Pairing code shown on the coordinator: ").strip()
         return derive_password(psk, serial, code)
 
     password = derive_password(psk, serial, given_code) if psk or given_code else None
+
+    def save_oneshot(token: Optional[dict]) -> None:
+        # its own token, the console's is never changed by a one-shot:
+        save_oneshot_token(state, token)
+        save_state(session_path, state)
 
     async def oneshot() -> dict:
         coord_host, coord_port = await find_coordinator(
@@ -6793,8 +7567,8 @@ def _run_node(
             name=args.oneshot_name or f"{default_node_id()}-oneshot",
             password=password,
             serial=serial,
-            resume=state.get(resume_key),
-            on_resume=on_resume,
+            resume=oneshot_resume(state),
+            on_resume=save_oneshot,
             prompt_code=prompt_code,
         )
 
@@ -6822,6 +7596,8 @@ def _run_node(
             walkthrough=walkthrough,
             share_offer=share_offer,
             report_fn=None if node == "console" else node_report,
+            dry_run_fn=dry_run_fn,
+            localcmd_timeout=args.localcmd_timeout,
         )
         if node == "console":
             print(f"node logs: {os.path.abspath(args.log_dir)}, a file per node")
@@ -6914,6 +7690,26 @@ def build_parser():
         "--json",
         action="store_true",
         help="with --command, print the result as JSON only, for a script or AI",
+    )
+    parser.add_argument(
+        "--localcmd-timeout",
+        type=float,
+        default=300,
+        help="in a session, seconds a command typed as `localcmd <command>` on a"
+        " node may run, default 300",
+    )
+    parser.add_argument(
+        "--heartbeat-wait",
+        type=int,
+        default=DEFAULT_HEARTBEAT_WAIT,
+        help="on the Hyper-V host, seconds to wait for started VMs' heartbeats,"
+        f" default {DEFAULT_HEARTBEAT_WAIT}",
+    )
+    parser.add_argument(
+        "--db-compat-level",
+        type=int,
+        help="the compatibility level to raise BFEnterprise and BESReporting to,"
+        " default the one BigFix needs",
     )
     parser.add_argument(
         "--log-dir",
