@@ -495,6 +495,7 @@ def rest_answers(upgrade):
             ["RAM", "17984 MB"],
             ["Computer Type", "Server"],
             ["Computer Type", "Virtual"],
+            ["IP Address", "192.168.5.40"],
         ],
     }
     for query in upgrade.REST_QUERIES:
@@ -968,14 +969,16 @@ def test_build_steps_from_path(upgrade, compat):
     ids = [step.id for step in steps]
 
     # BigFix is stopped before the backup, and stays stopped for the first snapshot:
-    assert ids[:5] == [
+    # with the service pack level unknown, it gets a step and a check too:
+    assert ids[:6] == [
         "preflight",
         "stop_services_0",
         "backup",
         "snapshot_1",
+        "service_pack_1",
         "upgrade_1_mssql_2017",
     ]
-    assert ids[5:7] == ["start_services_1", "validate_1"]
+    assert ids[6:8] == ["start_services_1", "validate_1"]
     second = ids.index("upgrade_2_windows_2019")
     assert ids[second - 2 : second] == ["stop_services_2", "snapshot_2"]
     assert ids[-2:] == ["final_validation", "cleanup"]
@@ -2860,3 +2863,294 @@ def test_server_keys_found_pvk_is_default(upgrade, tmp_path):
 
     (command,) = ctx.host.secret_runs
     assert r"/sitePvkLocation:C:\license.pvk" in command
+
+
+def test_client_data_computer_id_binary(upgrade, tmp_path):
+    """Test a REG_BINARY ComputerId, as the client writes it, is saved as a number."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    ctx.host.registry[upgrade.CLIENT_GLOBAL_OPTIONS_KEY] = {
+        "ComputerId": b"\x0e\xf1\xac\x00\x00\x00\x00\x00"
+    }
+
+    upgrade.ACTIONS["client_data"](ctx)
+
+    assert ctx.state["client_data"]["computer_id"] == 11333902
+
+
+def test_build_steps_service_pack_step(upgrade, compat):
+    """Test a needed service pack gets its own step, after the snapshot, and the
+    upgrade checks it's applied first.
+    """
+    path = upgrade.find_upgrade_path(
+        compat,
+        {
+            "bigfix": "10.0.7.52",
+            "windows": "2012 R2",
+            "mssql": "2008 R2",
+            "mssql_level": "SP1",
+        },
+        {"windows": "2025", "mssql": "2025"},
+    )
+    steps = upgrade.build_steps(path, local_sql=True)
+    ids = [step.id for step in steps]
+
+    assert ids[3:6] == ["snapshot_1", "service_pack_1", "upgrade_1_mssql_2017"]
+    service_pack = steps[4]
+    assert "SP3" in service_pack.title and "2008 R2" in service_pack.title
+    assert steps[5].actions == ["check_service_pack:SP3"]
+    # the later SQL upgrade needs no service pack:
+    assert not any(i.startswith("service_pack_") for i in ids[6:])
+
+
+def test_build_steps_no_service_pack_step_when_applied(upgrade, compat):
+    """Test no service pack step when the level is already enough."""
+    path = upgrade.find_upgrade_path(
+        compat,
+        {
+            "bigfix": "10.0.7.52",
+            "windows": "2012 R2",
+            "mssql": "2008 R2",
+            "mssql_level": "SP3",
+        },
+        {"windows": "2025", "mssql": "2025"},
+    )
+    ids = [step.id for step in upgrade.build_steps(path, local_sql=True)]
+
+    assert not any(i.startswith("service_pack_") for i in ids)
+
+
+def _level_ctx(upgrade, tmp_path, level):
+    host = local_host(
+        upgrade,
+        sql_handler=lambda server, query: (
+            [[level]] if query == upgrade.SQL_PRODUCT_LEVEL else []
+        ),
+    )
+    return walkthrough_ctx(upgrade, tmp_path, host)
+
+
+def test_check_service_pack_stops_when_missing(upgrade, tmp_path):
+    """Test the upgrade stops if the service pack isn't applied yet."""
+    ctx = _level_ctx(upgrade, tmp_path, "SP1")
+
+    with pytest.raises(SystemExit, match="SP3"):
+        upgrade.ACTIONS["check_service_pack"](ctx, "SP3")
+
+
+def test_check_service_pack_passes(upgrade, tmp_path, capsys):
+    """Test the upgrade continues once the service pack is applied."""
+    ctx = _level_ctx(upgrade, tmp_path, "SP3")
+
+    upgrade.ACTIONS["check_service_pack"](ctx, "SP3")
+
+    assert "OK" in capsys.readouterr().out
+
+
+def test_check_service_pack_dry_run_warns(upgrade, tmp_path, capsys):
+    """Test a dry run reports a missing service pack without stopping."""
+    ctx = _level_ctx(upgrade, tmp_path, "SP1")
+    ctx.args.dry_run = True
+
+    upgrade.ACTIONS["check_service_pack"](ctx, "SP3")
+
+    assert "WARNING" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- Hyper-V host
+
+HYPERV_VMS = [
+    {
+        "Name": "bigfix-root",
+        "Id": "0b6a7f1e-0000-4000-8000-000000000001",
+        "State": "Running",
+        "Generation": 2,
+        "Version": "9.0",
+        "CheckpointType": "Production",
+        "Checkpoints": ["before sql"],
+        "Heartbeat": "OkApplicationsHealthy",
+        "Path": r"D:\VMs\bigfix-root",
+        "IPAddresses": ["192.168.5.40", "fe80::1"],
+        "SwitchNames": ["LAN"],
+        "Disks": [{"Path": r"D:\VMs\bigfix-root\root.vhdx", "Bytes": 300 * 1024**3}],
+    },
+    {
+        "Name": "other",
+        "Id": "0b6a7f1e-0000-4000-8000-000000000002",
+        "State": "Off",
+        "Generation": 1,
+        "Version": "5.0",
+        "CheckpointType": "Standard",
+        "Checkpoints": [],
+        "Heartbeat": None,
+        "Path": r"D:\VMs\other",
+        "IPAddresses": [],
+        "SwitchNames": ["LAN"],
+        "Disks": [],
+    },
+]
+
+
+def hyperv_host(upgrade, product="Windows Server 2019 Datacenter", **overrides):
+    """A fake Hyper-V host with the root server's VM and one other."""
+    options = {
+        "registry": {
+            upgrade.WINDOWS_CURRENT_VERSION_KEY: {
+                "ProductName": product,
+                "CurrentBuild": "17763",
+            }
+        },
+        "powershell": {
+            upgrade.PS_HYPERV_HOST: True,
+            upgrade.PS_HYPERV_VMS: HYPERV_VMS,
+            # a single switch comes back from ConvertTo-Json as an object:
+            upgrade.PS_HYPERV_SWITCHES: {"Name": "LAN", "SwitchType": "External"},
+            upgrade.PS_DISKS: [
+                {"DeviceID": "D:", "Size": 2000 * 1024**3, "FreeSpace": 900 * 1024**3}
+            ],
+            upgrade.PS_FEATURES: ["Hyper-V"],
+        },
+    }
+    options.update(overrides)
+    return FakeHost(**options)
+
+
+def test_collect_hyperv_info(upgrade):
+    """Test the host, its VMs and switches are collected, and the BigFix VM is
+    found by the root server's address.
+    """
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade), "192.168.5.40")
+
+    assert info["windows_version"] == "2019"
+    assert [vm["Name"] for vm in info["vms"]] == ["bigfix-root", "other"]
+    assert info["switches"] == [{"Name": "LAN", "SwitchType": "External"}]
+    assert info["bigfix_vms"] == ["bigfix-root"]
+    assert info["disks"][0]["DeviceID"] == "D:"
+
+
+def test_collect_hyperv_info_vm_name_override(upgrade):
+    """Test --vm-name picks the BigFix VMs, even with no address match."""
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade), None, ["other"])
+
+    assert info["bigfix_vms"] == ["other"]
+
+
+def test_collect_hyperv_info_unknown_vm_name(upgrade):
+    """Test a --vm-name that isn't a VM here is reported, not used."""
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade), None, ["nope"])
+
+    assert info["bigfix_vms"] == []
+    assert "nope" in info["errors"][0]
+
+
+@pytest.mark.parametrize(
+    "changes, reason",
+    [
+        ({"windows": False}, "Windows"),
+        ({"admin": False}, "administrator"),
+    ],
+)
+def test_collect_hyperv_info_skipped(upgrade, changes, reason):
+    """Test collection is skipped off Windows, or without admin rights."""
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade, **changes), None)
+
+    assert reason in info["skipped"]
+
+
+def test_collect_hyperv_info_not_hyperv(upgrade):
+    """Test a computer that isn't a Hyper-V host is skipped."""
+    host = local_host(upgrade)
+
+    assert "Hyper-V" in upgrade.collect_hyperv_info(host, None)["skipped"]
+
+
+def test_compat_has_hyperv_guests(compat):
+    """Test the guest to minimum host data is present, with its source."""
+    section = compat["hyperv_guests"]
+    assert section["versions"]["2025"] == "2022"
+    assert section["versions"]["2022"] == "2019"
+    assert any("learn.microsoft.com" in url for url in section["sources"])
+
+
+def test_hyperv_check_host_new_enough(upgrade, compat):
+    """Test no host upgrade is needed when the host supports every guest."""
+    check = upgrade.hyperv_guest_check(compat, "2022", ["2012 R2", "2019", "2025"])
+
+    assert check["supported"] is True
+    assert check["host_upgrades"] == []
+
+
+def test_hyperv_check_host_too_old(upgrade, compat):
+    """Test a 2025 guest on a 2019 host plans a host upgrade to 2022 first."""
+    check = upgrade.hyperv_guest_check(compat, "2019", ["2012 R2", "2019", "2025"])
+
+    assert check["supported"] is False
+    assert check["needed_host"] == "2022"
+    assert check["host_upgrades"] == ["2022"]
+    assert any("2025" in problem and "2022" in problem for problem in check["problems"])
+
+
+def test_hyperv_check_host_path_multi_hop(upgrade, compat):
+    """Test the host path follows Microsoft's in-place upgrade paths."""
+    check = upgrade.hyperv_guest_check(compat, "2012", ["2025"])
+
+    # 2012 can only go to 2012 R2 or 2016, then on to 2022 or later:
+    assert check["host_upgrades"][-1] == "2022"
+    assert check["host_upgrades"][0] in ("2012 R2", "2016")
+
+
+def test_hyperv_check_unknown_host(upgrade, compat):
+    """Test an unknown host version is reported, not guessed."""
+    check = upgrade.hyperv_guest_check(compat, None, ["2025"])
+
+    assert check["supported"] is None
+    assert "host" in check["problems"][0]
+
+
+def test_build_report_on_hyperv_host(upgrade, compat):
+    """Test the report on the Hyper-V host checks the root server's planned
+    Windows versions against the host, and finds its VM by the REST address.
+    """
+    conn = FakeConnection(rest_answers(upgrade), {"serverinfo": SERVERINFO})
+
+    report = upgrade.build_report(conn, hyperv_host(upgrade), compat)
+
+    assert report["hyperv"]["bigfix_vms"] == ["bigfix-root"]
+    check = report["upgrade_assessment"]["hyperv"]
+    # the root server's 2012 R2 goes to 2025 in the plan, so the 2019 host
+    # must go to 2022 first:
+    assert check["host"] == "2019"
+    assert check["host_upgrades"] == ["2022"]
+    assert "2025" in check["guests"]
+
+
+def test_build_report_root_has_no_hyperv_check(upgrade, compat):
+    """Test the root server's report has no Hyper-V assessment."""
+    conn = FakeConnection(rest_answers(upgrade), {"serverinfo": SERVERINFO})
+
+    report = upgrade.build_report(conn, local_host(upgrade), compat)
+
+    assert "skipped" in report["hyperv"]
+    assert "hyperv" not in report["upgrade_assessment"]
+
+
+def test_vm_name_argument(upgrade):
+    """Test --vm-name can be given more than once."""
+    args = upgrade.build_parser().parse_args(["--vm-name", "a", "--vm-name", "b"])
+    assert args.vm_name == ["a", "b"]
+
+
+def test_build_report_hyperv_root_from_masthead(upgrade, compat, monkeypatch):
+    """Test with no REST connection, the root's address comes from the local
+    client's masthead.
+    """
+    seen = []
+    monkeypatch.setattr(
+        upgrade,
+        "discover_root_ip",
+        lambda paths: seen.append(paths) or "192.168.5.40",
+    )
+
+    report = upgrade.build_report(None, hyperv_host(upgrade), compat)
+
+    assert seen == [upgrade.CLIENT_MASTHEAD_PATHS]
+    assert report["hyperv"]["bigfix_vms"] == ["bigfix-root"]

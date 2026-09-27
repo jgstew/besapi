@@ -112,7 +112,7 @@ import sys
 import threading
 import types
 import urllib.parse
-from typing import Any, Dict, List, Mapping, Optional, TextIO, Tuple, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, cast
 
 import besapi
 import besapi.plugin_utilities
@@ -239,6 +239,9 @@ SQL_SERVER_PROPERTIES = (
     " CAST(SERVERPROPERTY('Edition') AS nvarchar(128)),"
     " CAST(SERVERPROPERTY('Collation') AS nvarchar(128)),"
     " IS_SRVROLEMEMBER('sysadmin')"
+)
+SQL_PRODUCT_LEVEL = (
+    "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(128))"
 )
 SQL_DATABASES = (
     "SET NOCOUNT ON; SELECT d.name, d.state_desc, d.recovery_model_desc,"
@@ -534,12 +537,15 @@ def _step_details(compat: dict, current: dict, path: List[tuple]) -> List[dict]:
     for before, component, target, after in path:
         prerequisites = []
         notes = []
+        service_pack = None
         if component == "mssql":
             min_level = compat["mssql_upgrade_paths"]["versions"][target][
                 before["mssql"]
             ]
             if min_level != "RTM":
                 level_ok = servicing_level_at_least(mssql_level, min_level)
+                if not level_ok:
+                    service_pack = {"mssql": before["mssql"], "level": min_level}
                 if level_ok is None:
                     prerequisites.append(
                         f"SQL Server {before['mssql']} must be at {min_level} or later"
@@ -589,7 +595,78 @@ def _step_details(compat: dict, current: dict, path: List[tuple]) -> List[dict]:
                 "notes": notes,
             }
         )
+        if service_pack:
+            steps[-1]["service_pack"] = service_pack
     return steps
+
+
+def windows_upgrade_route(compat: dict, current: str, minimum: str) -> Optional[list]:
+    """The fewest in-place Windows Server upgrades from `current` to `minimum` or
+    later, from Microsoft's upgrade paths.
+
+    None if there is no route.
+    """
+    paths = compat["windows_upgrade_paths"]["versions"]
+    goal = product_sort_key(minimum)
+    parents: Dict[str, Optional[str]] = {current: None}
+    level = [current]
+    # level by level, so of the shortest routes the lowest version wins:
+    while level:
+        reached = [v for v in level if product_sort_key(v) >= goal]
+        if reached:
+            version: Optional[str] = min(reached, key=product_sort_key)
+            route = []
+            while version is not None and parents[version] is not None:
+                route.append(version)
+                version = parents[version]
+            return route[::-1]
+        next_level = []
+        for version in level:
+            for upgrade in paths.get(version, []):
+                if upgrade not in parents:
+                    parents[upgrade] = version
+                    next_level.append(upgrade)
+        level = next_level
+    return None
+
+
+def hyperv_guest_check(compat: dict, host: Optional[str], guests: List[str]) -> dict:
+    """Check a Hyper-V host runs every planned Windows Server version of its
+    guests, and plan the host's own upgrades if it doesn't.
+    """
+    section = compat.get("hyperv_guests") or {}
+    minimums = section.get("versions", {})
+    if not host:
+        return {
+            "supported": None,
+            "problems": ["the host's Windows Server version is unknown"],
+            "host_upgrades": [],
+        }
+    needed = host
+    problems = []
+    for guest in dict.fromkeys(guests):
+        minimum = minimums.get(guest)
+        if minimum and product_sort_key(host) < product_sort_key(minimum):
+            problems.append(
+                f"a Windows Server {guest} guest needs a Hyper-V host of Windows"
+                f" Server {minimum} or later, this host is {host}"
+            )
+            needed = max(needed, minimum, key=product_sort_key)
+    result: Dict[str, Any] = {
+        "supported": not problems,
+        "host": host,
+        "needed_host": needed,
+        "problems": problems,
+        "host_upgrades": [],
+        "sources": section.get("sources", []),
+    }
+    if problems:
+        route = windows_upgrade_route(compat, host, needed)
+        if route is None:
+            problems.append(f"no in-place upgrade route from {host} to {needed}")
+        else:
+            result["host_upgrades"] = route
+    return result
 
 
 def find_upgrade_path(compat: dict, current: dict, target: dict) -> dict:
@@ -1269,6 +1346,54 @@ def collect_local_info(host, sql_server: Optional[str] = None) -> dict:
     }
 
 
+def _dicts(value: Any) -> List[dict]:
+    """A PowerShell JSON result as a list of objects, a single one or an error."""
+    if isinstance(value, dict):
+        return [] if "error" in value else [value]
+    return [item for item in _as_list(value) if isinstance(item, dict)]
+
+
+def collect_hyperv_info(
+    host, root_ip: Optional[str], vm_names: Optional[List[str]] = None
+) -> dict:
+    """Collect the Hyper-V host's details, and find the BigFix VMs.
+
+    The BigFix VMs are the ones named by --vm-name, else the ones with the root
+    server's address.
+    """
+    if not host.is_windows():
+        return {"skipped": "not Windows"}
+    if _probe(host.powershell_json, PS_HYPERV_HOST) is not True:
+        return {"skipped": "not a Hyper-V host"}
+    if not host.is_admin():
+        return {"skipped": "a Hyper-V host, but requires administrator rights"}
+    windows = _probe(_windows_info, host)
+    vms = _dicts(_probe(host.powershell_json, PS_HYPERV_VMS))
+    info: Dict[str, Any] = {
+        "windows": windows,
+        "windows_version": windows_server_version(_get(windows, "ProductName")),
+        "vms": vms,
+        "switches": _dicts(_probe(host.powershell_json, PS_HYPERV_SWITCHES)),
+        "disks": _dicts(_probe(host.powershell_json, PS_DISKS)),
+        "errors": [],
+    }
+    names = {str(vm.get("Name")) for vm in vms}
+    if vm_names:
+        info["bigfix_vms"] = [name for name in vm_names if name in names]
+        info["errors"] += [
+            f"--vm-name {name} is not a VM on this host"
+            for name in vm_names
+            if name not in names
+        ]
+    else:
+        info["bigfix_vms"] = [
+            str(vm.get("Name"))
+            for vm in vms
+            if root_ip and root_ip in (vm.get("IPAddresses") or [])
+        ]
+    return info
+
+
 # ---------------------------------------------------------------- report
 
 REDACTED = "<redacted>"
@@ -1493,10 +1618,20 @@ def build_report(
     target: Optional[dict] = None,
     sql_server: Optional[str] = None,
     redact_hosts: bool = False,
+    vm_names: Optional[List[str]] = None,
 ) -> dict:
-    """Build the full JSON report, with the upgrade assessment, secrets removed."""
+    """Build the full JSON report, with the upgrade assessment, secrets removed.
+
+    On the Hyper-V host, it also checks the host runs the root server's planned
+    Windows versions.
+    """
+    # pylint: disable=too-many-arguments,too-many-locals
     rest = collect_rest_info(bes_conn)
     local = collect_local_info(host, sql_server)
+    root_ips = _get(rest, "root_server", "properties", "IP Address") or []
+    # without REST, from the host of this computer's client masthead:
+    root_ip = str(root_ips[0]) if root_ips else discover_root_ip(CLIENT_MASTHEAD_PATHS)
+    hyperv = collect_hyperv_info(host, root_ip, vm_names)
     target = dict(
         default_target(compat), **{k: v for k, v in (target or {}).items() if v}
     )
@@ -1504,6 +1639,7 @@ def build_report(
     assessment: Dict[str, Any] = {"target": target, "warnings": report_warnings(local)}
     state = current_state(rest, local)
     assessment["current_state"] = state
+    path: Optional[dict] = None
     if all(state.get(key) for key in ("bigfix", "windows", "mssql")):
         assessment["current_state_check"] = check_state(compat, state)
         path = find_upgrade_path(compat, state, target)
@@ -1518,6 +1654,15 @@ def build_report(
         assessment["compatibility"] = {
             "error": "could not work out the current versions, see current_state"
         }
+    if "skipped" not in hyperv:
+        guests = [state["windows"]] if state.get("windows") else []
+        guests += [
+            step["to"]
+            for step in (path or {}).get("steps", [])
+            if step["component"] == "windows"
+        ]
+        check = hyperv_guest_check(compat, hyperv.get("windows_version"), guests)
+        assessment["hyperv"] = dict(check, guests=guests)
     assessment["sources"] = sorted(
         {url for section in compat.values() for url in _sources(section)}
     )
@@ -1535,6 +1680,7 @@ def build_report(
         },
         "rest": rest,
         "local": local,
+        "hyperv": hyperv,
         "upgrade_assessment": assessment,
     }
 
@@ -1613,6 +1759,18 @@ def _upgrade_instructions(step: dict, local_sql: bool) -> str:
     return "\n".join(lines)
 
 
+def _service_pack_instructions(service_pack: dict) -> str:
+    version, level = service_pack["mssql"], service_pack["level"]
+    return (
+        f"Install SQL Server {version} {level} on the instance BigFix uses, with"
+        " BigFix still stopped: run the service pack setup as Administrator, pick"
+        " the instance, and reboot if setup asks. Only use Microsoft-signed media."
+        f" The next step checks SQL Server reports {level} before upgrading. If"
+        " setup fails, see Summary.txt in the newest folder under Setup"
+        " Bootstrap\\Log."
+    )
+
+
 def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
     """Build the walkthrough steps for an upgrade path from find_upgrade_path().
 
@@ -1672,10 +1830,29 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     " least with services stopped, so SQL Server is consistent."
                     f" Name it like `before {step['component']} {step['to']}`.",
                 ),
+            ]
+        )
+        service_pack = step.get("service_pack") if local_sql else None
+        if service_pack:
+            steps.append(
+                Step(
+                    f"service_pack_{number}",
+                    f"Apply SQL Server {service_pack['mssql']}"
+                    f" {service_pack['level']}",
+                    _service_pack_instructions(service_pack),
+                )
+            )
+        steps.extend(
+            [
                 Step(
                     upgrade_id,
                     f"Upgrade {step['component']} to {step['to']}",
                     _upgrade_instructions(step, local_sql),
+                    (
+                        [f"check_service_pack:{service_pack['level']}"]
+                        if service_pack
+                        else []
+                    ),
                 ),
                 Step(
                     f"start_services_{number}",
@@ -2344,6 +2521,9 @@ def _action_client_data(ctx: WalkthroughContext) -> None:
     computer_id = next(
         (data for name, data in values.items() if name.lower() == "computerid"), None
     )
+    # REG_BINARY, a little-endian number:
+    if isinstance(computer_id, bytes):
+        computer_id = int.from_bytes(computer_id, "little")
     key_storage = os.path.join(
         _client_folder(ctx.state.get("baseline") or {}), "KeyStorage"
     )
@@ -2582,6 +2762,20 @@ def _action_restore_start_types(ctx: WalkthroughContext) -> None:
             )
 
 
+def _action_check_service_pack(ctx: WalkthroughContext, required: str) -> None:
+    """Stop before a SQL Server upgrade until its service pack is applied."""
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_PRODUCT_LEVEL)
+    level = rows[0][0] if rows and rows[0] else None
+    if servicing_level_at_least(level, required):
+        print(f"OK, SQL Server is at {level}")
+        return
+    message = f"SQL Server is at {level}, apply {required} first"
+    if ctx.dry_run:
+        print(f"WARNING: {message}")
+        return
+    raise SystemExit(f"{message}, then rerun to continue with this step")
+
+
 def _action_validate(ctx: WalkthroughContext) -> None:
     local = redact(collect_local_info(ctx.host, ctx.args.sql_instance))
     ctx.state["reports"][datetime.datetime.now().isoformat()] = local
@@ -2596,7 +2790,7 @@ def _action_validate(ctx: WalkthroughContext) -> None:
     print("current state:", json.dumps(state))
 
 
-ACTIONS = {
+ACTIONS: Dict[str, Callable[..., None]] = {
     "collect_baseline": _action_collect_baseline,
     "registry_export": _action_registry_export,
     "key_files": _action_key_files,
@@ -2612,6 +2806,7 @@ ACTIONS = {
     "start_services": _action_start_services,
     "restore_start_types": _action_restore_start_types,
     "validate": _action_validate,
+    "check_service_pack": _action_check_service_pack,
 }
 
 
@@ -2718,7 +2913,12 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask) -> int:
         print(f"\n===== {step.id}: {step.title} =====\n{step.instructions}\n")
         for action in step.actions:
             logging.info("running action %s for step %s", action, step.id)
-            ACTIONS[action](ctx)
+            # an action can take one argument, as "name:argument":
+            name, _sep, argument = action.partition(":")
+            if argument:
+                ACTIONS[name](ctx, argument)
+            else:
+                ACTIONS[name](ctx)
         persist()
         answer = ask("Is this step complete?", ["done", "skip", "quit"])
         if answer == "quit":
@@ -4078,6 +4278,26 @@ def default_node_id() -> str:
 PS_HYPERV_HOST = (
     "[bool](Get-Service vmms -ErrorAction SilentlyContinue) | ConvertTo-Json -Compress"
 )
+PS_HYPERV_VMS = (
+    "@(Get-VM | ForEach-Object { $vm = $_; [pscustomobject]@{"
+    ' Name = $vm.Name; Id = "$($vm.Id)"; State = "$($vm.State)";'
+    " Generation = $vm.Generation; Version = $vm.Version;"
+    ' CheckpointType = "$($vm.CheckpointType)";'
+    " Checkpoints = @(Get-VMSnapshot -VM $vm | ForEach-Object { $_.Name });"
+    ' Heartbeat = "$($vm.Heartbeat)"; Path = $vm.Path;'
+    " IPAddresses = @($vm | Get-VMNetworkAdapter | ForEach-Object"
+    " { $_.IPAddresses });"
+    " SwitchNames = @($vm | Get-VMNetworkAdapter | ForEach-Object"
+    " { $_.SwitchName });"
+    " Disks = @($vm | Get-VMHardDiskDrive | ForEach-Object { [pscustomobject]@{"
+    " Path = $_.Path; Bytes = (Get-Item -LiteralPath $_.Path"
+    " -ErrorAction SilentlyContinue).Length } }) } })"
+    " | ConvertTo-Json -Compress -Depth 4"
+)
+PS_HYPERV_SWITCHES = (
+    "@(Get-VMSwitch | Select-Object Name, SwitchType,"
+    " NetAdapterInterfaceDescription) | ConvertTo-Json -Compress"
+)
 PS_LOCAL_SHARES = (
     "@(Get-SmbShare | Select-Object Name, Path, Special) | ConvertTo-Json -Compress"
 )
@@ -4899,6 +5119,12 @@ def build_parser():
         help=f"compatibility data, default {COMPAT_FILE_NAME} next to this script",
     )
     parser.add_argument(
+        "--vm-name",
+        action="append",
+        help="on the Hyper-V host, a BigFix VM, if finding it by the root"
+        " server's address doesn't work, can be given more than once",
+    )
+    parser.add_argument(
         "--sql-instance", help="SQL server BigFix uses, only if discovery gets it wrong"
     )
     parser.add_argument(
@@ -5041,6 +5267,7 @@ def main():
                 _target_from_args(args),
                 args.sql_instance,
                 args.redact_hosts,
+                args.vm_name,
             )
 
     output = json.dumps(report, indent=2, default=str)
