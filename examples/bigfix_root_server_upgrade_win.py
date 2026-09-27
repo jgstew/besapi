@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.0"
+__version__ = "0.2.3"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2133,9 +2133,17 @@ def check_backup_dir_arg(path: str) -> None:
     )
 
 
+def utc_now() -> datetime.datetime:
+    """Now, in UTC: every time this script keeps is UTC, on every node."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 def backup_run_folder(base: str, hostname: str, now: datetime.datetime) -> str:
-    """A folder per run under the backup location, so runs never overwrite."""
-    return os.path.join(base, f"{hostname}_{now:%Y%m%d_%H%M%S}")
+    """A folder per run under the backup location, so runs never overwrite.
+
+    Named by UTC time, marked Z.
+    """
+    return os.path.join(base, f"{hostname}_{now:%Y%m%d_%H%M%S}Z")
 
 
 def same_volume(path_a: str, path_b: str) -> bool:
@@ -2309,7 +2317,7 @@ class WalkthroughContext:
         run_dir = self.state.get("backup_run_dir")
         if not run_dir:
             run_dir = backup_run_folder(
-                self.args.backup_dir, socket.gethostname(), datetime.datetime.now()
+                self.args.backup_dir, socket.gethostname(), utc_now()
             )
             self.state["backup_run_dir"] = run_dir
         if not self.dry_run and not os.path.isdir(run_dir):
@@ -2370,7 +2378,7 @@ def _action_sql_backup(ctx: WalkthroughContext) -> None:
         sql_major_from_version(properties.get("ProductVersion")),
         properties.get("Edition"),
     )
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = utc_now().strftime("%Y%m%d_%H%M%SZ")
     run_dir = ctx.backup_dir()
     server = ctx.sql_server()
 
@@ -2758,7 +2766,7 @@ def _action_restore_notes(ctx: WalkthroughContext) -> None:
     run_dir = ctx.backup_dir()
     lines = [
         f"BigFix server backup in {run_dir}",
-        f"made {datetime.datetime.now().isoformat(timespec='seconds')} by"
+        f"made {utc_now().isoformat(timespec='seconds')} by"
         f" {os.path.basename(__file__)} {__version__}",
         "",
         "Contents:",
@@ -2896,7 +2904,7 @@ def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
         {
             "vm": result.get("vm"),
             "checkpoint": result.get("checkpoint"),
-            "time": datetime.datetime.now().isoformat(),
+            "time": utc_now().isoformat(),
         }
     )
     save_state(ctx.state_path, ctx.state)
@@ -2909,7 +2917,7 @@ def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
 
 def _action_validate(ctx: WalkthroughContext) -> None:
     local = redact(collect_local_info(ctx.host, ctx.args.sql_instance))
-    ctx.state["reports"][datetime.datetime.now().isoformat()] = local
+    ctx.state["reports"][utc_now().isoformat()] = local
     bes_conn = besapi.plugin_utilities.get_besapi_connection(ctx.args)
     rest = collect_rest_info(bes_conn)
     if "error" in rest.get("serverinfo", {}) or "skipped" in rest:
@@ -5103,7 +5111,16 @@ class WalkthroughBridge:
 
     def set_halted(self, halted: bool) -> None:
         """Halt or continue, from the coordinator."""
-        if halted:
+        self._session_halted = halted
+        self._update_running()
+
+    def set_hold(self, hold: bool) -> None:
+        """Hold here, whatever the coordinator says, like for other code there."""
+        self._held = hold
+        self._update_running()
+
+    def _update_running(self) -> None:
+        if getattr(self, "_session_halted", False) or getattr(self, "_held", False):
             self._running.clear()
         else:
             self._running.set()
@@ -5284,8 +5301,7 @@ class ShareSessionCoordinator:
 
     def _keep_log(self, node: str, entry: dict) -> None:
         entry = {
-            "time": entry.get("time")
-            or datetime.datetime.now().astimezone().isoformat(),
+            "time": entry.get("time") or utc_now().isoformat(),
             "level": entry.get("level") or "INFO",
             "message": clean_log_text(entry.get("message", "")),
         }
@@ -5299,18 +5315,30 @@ class ShareSessionCoordinator:
             task.add_done_callback(self._background.discard)
 
     async def _catch_up(self, name: str, since: Any) -> None:
-        """Send a console the log lines it hasn't got yet, per node."""
-        if not self.log_store:
-            return
-        since = since if isinstance(since, dict) else {}
-        nodes = set(self.log_store.nodes()) | {str(node) for node in since}
-        for node in sorted(nodes):
-            try:
-                after = int(since.get(node, 0))
-            except (TypeError, ValueError):
-                after = 0
-            for entry in self.log_store.since(node, after)[-LOG_REPLAY_MAX:]:
-                await self._send(name, {"type": "log", "node": node, **entry})
+        """Send a console the log lines it hasn't got yet, per node, then its
+        live lines.
+
+        A console with no log of its own only gets live lines.
+        """
+        if self.log_store and since is not None:
+            sent = dict(since) if isinstance(since, dict) else {}
+            while True:
+                # again until nothing new, lines can be kept while this sends:
+                more = False
+                for node in sorted(set(self.log_store.nodes()) | set(sent)):
+                    try:
+                        after = int(sent.get(node, 0))
+                    except (TypeError, ValueError):
+                        after = 0
+                    for entry in self.log_store.since(node, after)[-LOG_REPLAY_MAX:]:
+                        await self._send(name, {"type": "log", "node": node, **entry})
+                        sent[node] = entry["seq"]
+                        more = True
+                if not more:
+                    break
+        # NOTE: no await since the last pass, so no line is missed or doubled:
+        if name in self.nodes:
+            self.nodes[name]["caught_up"] = True
 
     def _token(self, resume_id: Any) -> Optional[dict]:
         token = self.tokens.get(str(resume_id)) if resume_id else None
@@ -5370,8 +5398,12 @@ class ShareSessionCoordinator:
 
     async def _broadcast_consoles(self, message: dict) -> None:
         for name, node in list(self.nodes.items()):
-            if "console" in node["roles"]:
-                await self._send(name, message)
+            if "console" not in node["roles"]:
+                continue
+            if message.get("type") == "log" and not node.get("caught_up"):
+                # after its catch up, so its lines arrive in order:
+                continue
+            await self._send(name, message)
 
     async def _diagnose(self, name: str) -> None:
         self.pending[name] = self.pending.get(name, 0) + 1
@@ -5435,6 +5467,17 @@ class ShareSessionCoordinator:
                 f" ({script['fingerprint']}), this coordinator runs {__version__}"
                 f" ({script_fingerprint()}): update it so they run the same code"
             )
+            if not self.halted:
+                # any mismatch waits for a person, who can continue anyway:
+                mismatch = {
+                    "by": "version check",
+                    "reason": f"version mismatch: {name} runs"
+                    f" {script['version']} ({script['fingerprint']}),"
+                    f" coordinator runs {__version__} ({script_fingerprint()})."
+                    " Update it, or a person types continue",
+                }
+                await self._set_halt(mismatch)
+                self.output(f"halted by version check: {mismatch['reason']}")
         self.output(
             f"{name} ({', '.join(roles)}) {'resumed' if token else 'connected'}"
             f" from {peer_ip}"
@@ -5661,9 +5704,16 @@ class ShareSessionCoordinator:
             {"type": "answer", "id": question["id"], "choice": choice, "by": source},
         )
 
+    def _node_name(self, typed: str) -> str:
+        """The node named, whatever case was typed: BIGFIX or bigfix."""
+        known = list(self.nodes) + (self.log_store.nodes() if self.log_store else [])
+        if typed in known:
+            return typed
+        return next((name for name in known if name.lower() == typed.lower()), typed)
+
     async def _request(self, kind: str, words: List[str], source: str) -> None:
         """`state <node>` or `diag <node> [check]`, relayed to that node."""
-        node = words[0] if words else ""
+        node = self._node_name(words[0]) if words else ""
         if node not in self.nodes:
             self.output(f"{node or '?'} isn't connected, see status")
             return
@@ -5699,7 +5749,7 @@ class ShareSessionCoordinator:
 
     async def _show_log(self, words: List[str], source: str) -> None:
         """`log <node> [lines]`: that node's last lines, to who asked."""
-        node = words[0] if words else ""
+        node = self._node_name(words[0]) if words else ""
         count = int(words[1]) if len(words) > 1 and words[1].isdigit() else 20
         entries = (
             self.log_store.tail(node, min(count, LOG_REPLAY_MAX))
@@ -5729,12 +5779,16 @@ class ShareSessionCoordinator:
                 "console"
                 if "console" in node["roles"]
                 else (
-                    "checking"
-                    if self.pending.get(name)
+                    "share owner"
+                    if "share_owner" in node["roles"]
                     else (
-                        "OK"
-                        if last and last["ok"]
-                        else "problems" if last else "waiting"
+                        "checking"
+                        if self.pending.get(name)
+                        else (
+                            "OK"
+                            if last and last["ok"]
+                            else "problems" if last else "waiting"
+                        )
                     )
                 )
             )
@@ -5883,6 +5937,8 @@ class ShareSessionNode:
         self._walkthrough_started = False
         # the coordinator ended the session, so don't reconnect:
         self.finished = False
+        # held for a version mismatch until a person continues:
+        self._version_hold = False
         # a one-shot console leaves after this many seconds, or soon after a reply,
         # keeping what it got for --json:
         self.oneshot_wait = oneshot_wait
@@ -5914,12 +5970,23 @@ class ShareSessionNode:
             logging.exception("report failed")
             return {"error": f"{type(err).__name__}: {err}"}
 
-    def on_typed(self, line: str) -> None:
-        """A line typed on this node: a session command while connected, else an
-        answer to the waiting question, so the walkthrough isn't stuck while the.
+    def on_typed_local(self, line: str) -> bool:
+        """`continue` typed here, by a person, releases a version mismatch hold."""
+        if line.strip().lower() == "continue" and self._version_hold and self.bridge:
+            self._version_hold = False
+            self.bridge.set_hold(False)
+            self._print("continued here despite the version mismatch")
+            self.log("INFO", "a person continued here despite the version mismatch")
+            return True
+        return False
 
-        coordinator is away.
+    def on_typed(self, line: str) -> None:
+        """A line typed on this node.
+
+        While connected it's a session command. While the coordinator is away
+        it answers the waiting question, so the walkthrough isn't stuck.
         """
+        self.on_typed_local(line)
         if self._channel is not None:
             self.command_queue.put_nowait(line)
             return
@@ -5983,6 +6050,10 @@ class ShareSessionNode:
             self.bridge.on_answer(message)
         elif kind in ("halt", "continue") and self.bridge:
             self.bridge.set_halted(kind == "halt")
+            if kind == "continue" and self._version_hold:
+                # a person continued on the coordinator:
+                self._version_hold = False
+                self.bridge.set_hold(False)
             if kind == "halt":
                 self.output(f"halted by {message.get('by')}: {message.get('reason')}")
         elif kind == "question":
@@ -6062,7 +6133,7 @@ class ShareSessionNode:
                 "type": "log",
                 "boot": self.log_boot,
                 "seq": self.log_seq,
-                "time": datetime.datetime.now().astimezone().isoformat(),
+                "time": utc_now().isoformat(),
                 "level": level,
                 "message": clean_log_text(message),
             }
@@ -6135,6 +6206,13 @@ class ShareSessionNode:
                 f" ({script['fingerprint']}), this node runs {__version__}"
                 f" ({script_fingerprint()}): update them so they run the same code"
             )
+            if self.bridge and not self._version_hold:
+                self._version_hold = True
+                self.bridge.set_hold(True)
+                self.output(
+                    "paused for the version mismatch: type continue here, or a"
+                    " person types continue on the coordinator, to go on anyway"
+                )
         return channel
 
     async def connect(self, host: str, port: int, attempts: int = 1, delay: float = 5):
@@ -6186,9 +6264,17 @@ class ShareSessionNode:
                     )
                     if log_sender is None:
                         log_sender = asyncio.create_task(self._send_logs(channel))
-                    if self.log_store is not None:
+                    if "console" in self.roles:
+                        # live lines follow once the missed ones are sent:
                         await channel.send(
-                            {"type": "catch_up", "since": self.log_store.last_seqs()}
+                            {
+                                "type": "catch_up",
+                                "since": (
+                                    self.log_store.last_seqs()
+                                    if self.log_store is not None
+                                    else None
+                                ),
+                            }
                         )
                     if self.share_offer:
                         await channel.send({"type": "share_offer", **self.share_offer})
@@ -6382,7 +6468,7 @@ def run_share_session(args, bes_conn, host) -> int:
         )
     if node == "share_owner":
         state = load_state(args.state_file)
-        state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+        state.setdefault("run_id", utc_now().strftime("%Y%m%d%H%M%SZ"))
         root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(
             CLIENT_MASTHEAD_PATHS
         )
@@ -6555,7 +6641,7 @@ def _explain_reachability(root_ip: Optional[str], listen_port: int) -> None:
 def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) -> int:
     # pylint: disable=too-many-arguments,too-many-locals
     state = load_state(args.state_file)
-    state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+    state.setdefault("run_id", utc_now().strftime("%Y%m%d%H%M%SZ"))
     listen_host, listen_port = _parse_address(
         args.listen or f"0.0.0.0:{DEFAULT_PORT}", DEFAULT_PORT
     )

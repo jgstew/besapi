@@ -1256,7 +1256,7 @@ def test_backup_run_folder(upgrade):
     folder = upgrade.backup_run_folder(
         r"\\fileserver\share\bigfix", "bigfix", datetime.datetime(2026, 9, 26, 14, 5, 9)
     )
-    assert folder == r"\\fileserver\share\bigfix" + os.sep + "bigfix_20260926_140509"
+    assert folder == r"\\fileserver\share\bigfix" + os.sep + "bigfix_20260926_140509Z"
 
 
 @pytest.mark.parametrize(
@@ -4879,7 +4879,8 @@ def test_log_times_have_time_zone(upgrade):
     node.log("INFO", "x")
 
     when = datetime.datetime.fromisoformat(node.log_buffer[0]["time"])
-    assert when.utcoffset() is not None
+    # UTC on every node, so time zones don't matter:
+    assert when.utcoffset() == datetime.timedelta(0)
 
 
 def test_dry_run_file_sent_to_coordinator_and_consoles(upgrade, tmp_path):
@@ -5102,3 +5103,252 @@ def test_ctrl_c_is_friendly(upgrade, monkeypatch, capsys, tmp_path, argv, expect
     assert expected in err
     assert "Traceback" not in err
     assert state.read_text() == before
+
+
+def test_console_catch_up_before_live_lines(upgrade, tmp_path):
+    """Test a restarted console gets every line it missed, even though the
+    coordinator logs a live line as it connects, before the catch up.
+    """
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        console, saved = rig.console()
+        task = asyncio.create_task(console.run("127.0.0.1", rig.port))
+        await rig.until(lambda: saved["token"])
+        await rig.drop("mac", task)
+        for n in range(5):
+            rig.coordinator.output(f"missed {n}")
+        # a new console process, its store is read from the files:
+        again, _ = rig.console(resume=saved["token"])
+        task = asyncio.create_task(again.run("127.0.0.1", rig.port))
+        await rig.until(
+            lambda: "mac (console) resumed"
+            in " ".join(rig.messages("console_logs", node="coordinator"))
+        )
+        await asyncio.sleep(0.3)
+        await rig.finish(task)
+        return rig
+
+    rig = asyncio.run(scenario())
+    kept = rig.messages("console_logs", node="coordinator")
+    for n in range(5):
+        assert f"missed {n}" in kept
+    store = upgrade.NodeLogStore(str(tmp_path / "console_logs"))
+    seqs = [e["seq"] for e in store.since("coordinator", 0)]
+    assert seqs == sorted(seqs) and len(seqs) == len(set(seqs))
+
+
+def test_timestamps_are_utc(upgrade, tmp_path, monkeypatch):
+    """Test the coordinator's own lines, backup folders and state times are UTC."""
+    store = upgrade.NodeLogStore(str(tmp_path))
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=lambda line: None,
+        log_store=store,
+        **coordinator_options(upgrade),
+    )
+    coordinator.output("hello")
+    (entry,) = store.since("coordinator", 0)
+    assert entry["time"].endswith("+00:00")
+
+    assert upgrade.utc_now().utcoffset() == datetime.timedelta(0)
+    folder = upgrade.backup_run_folder(
+        "D:/b",
+        "root",
+        datetime.datetime(2026, 9, 27, 17, 35, 29, tzinfo=datetime.timezone.utc),
+    )
+    assert folder.endswith("root_20260927_173529Z")
+
+
+def test_commands_match_node_names_any_case(upgrade, tmp_path):
+    """Test `report BIGFIX`, `state bigfix` and `log BIGFIX` find the node BIGFIX,
+    whatever case is typed.
+    """
+
+    def build():
+        return {"upgrade_assessment": {"warnings": []}}
+
+    async def scenario():
+        store = upgrade.NodeLogStore(str(tmp_path))
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            log_store=store,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        root = upgrade.ShareSessionNode(
+            "BIGFIX",
+            ["root"],
+            client_host(upgrade),
+            output=lambda line: None,
+            report_fn=build,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(root.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        # after its share check, so this is its last line:
+        for _ in range(500):
+            if coordinator.results.get("BIGFIX"):
+                break
+            await asyncio.sleep(0.01)
+        root.log("INFO", "hello from BIGFIX")
+        for _ in range(300):
+            if "hello from BIGFIX" in json.dumps(store.since("BIGFIX", 0)):
+                break
+            await asyncio.sleep(0.01)
+        results = {}
+        for command in ("report BIGFIX", "state bigfix", "log BIGFIX 1"):
+            results[command] = await upgrade.run_oneshot_command(
+                "127.0.0.1",
+                port,
+                command,
+                wait=5,
+                **session_options(upgrade, password=code_password(upgrade)),
+            )
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return results
+
+    results = asyncio.run(scenario())
+    for command, result in results.items():
+        assert result["replies"], command
+        assert not any("isn't connected" in line for line in result["lines"]), command
+    assert (tmp_path / "BIGFIX_report.json").exists()
+    assert "hello from BIGFIX" in json.dumps(results["log BIGFIX 1"]["replies"])
+
+
+def test_status_names_share_owner(upgrade):
+    """Test the Hyper-V share owner shows as that, not as waiting for a check."""
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=lambda line: None,
+        **coordinator_options(upgrade),
+    )
+    coordinator.nodes["HYPERV"] = {
+        "channel": None,
+        "roles": ["hyperv", "share_owner"],
+        "ip": "192.168.5.39",
+        "script": {
+            "version": upgrade.__version__,
+            "fingerprint": upgrade.script_fingerprint(),
+        },
+    }
+
+    assert "HYPERV (192.168.5.39): share owner" in "\n".join(coordinator.status_lines())
+
+
+def test_version_mismatch_halts_until_a_person_continues(upgrade, monkeypatch):
+    """Test a node with different code halts the session, and only a person, not
+    a one-shot command, can continue.
+    """
+    saved = []
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            on_halt=saved.append,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        original = upgrade.make_hello
+
+        def old_hello(node_id, roles, serial, resume_id=None):
+            hello = original(node_id, roles, serial, resume_id)
+            if node_id == "root":
+                hello["script"] = {"version": "0.0.9", "fingerprint": "0123456789ab"}
+            return hello
+
+        monkeypatch.setattr(upgrade, "make_hello", old_hello)
+        node = upgrade.ShareSessionNode(
+            "root",
+            ["console"],
+            None,
+            output=lambda line: None,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(node.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        halted = dict(coordinator.halted or {})
+        monkeypatch.setattr(upgrade, "make_hello", original)
+        await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            port,
+            "continue",
+            wait=1,
+            name="claude",
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        still_halted = coordinator.halted is not None
+        await coordinator.handle_command("continue", source="coordinator")
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return halted, still_halted, coordinator
+
+    halted, still_halted, coordinator = asyncio.run(scenario())
+    assert halted["by"] == "version check"
+    assert "root runs 0.0.9 (0123456789ab)" in halted["reason"]
+    assert saved[0] == halted
+    assert still_halted
+    assert coordinator.halted is None
+
+
+def test_node_holds_walkthrough_for_other_coordinator_code(upgrade):
+    """Test a node whose coordinator runs other code holds its walkthrough until
+    a person continues, even if the coordinator doesn't halt it.
+    """
+    progress = []
+
+    def walkthrough(bridge):
+        bridge.wait_if_halted()
+        progress.append("ran")
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        original = coordinator._hello_for
+
+        def older(peer):
+            hello = original(peer)
+            hello["script"] = {"version": "0.0.1", "fingerprint": "aaaaaaaaaaaa"}
+            return hello
+
+        coordinator._hello_for = older
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        node = upgrade.ShareSessionNode(
+            "root",
+            ["root"],
+            client_host(upgrade),
+            output=lambda line: None,
+            walkthrough=walkthrough,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(node.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        # an older coordinator doesn't halt, so this node must hold by itself:
+        coordinator.halted = None
+        await asyncio.sleep(0.3)
+        held = list(progress)
+        node.on_typed_local("continue")
+        for _ in range(300):
+            if progress:
+                break
+            await asyncio.sleep(0.01)
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return held
+
+    held = asyncio.run(scenario())
+    assert held == []
+    assert progress == ["ran"]
