@@ -12,6 +12,7 @@ import logging
 import ntpath
 import os
 import re
+import sys
 import threading
 import time
 import types
@@ -4798,3 +4799,306 @@ def test_choose_session_node_explicit_coordinator(upgrade):
     )
 
     assert (node, address) == ("share_owner", ("10.0.0.5", 52390))
+
+
+class ShareSession(FakeSession):
+    """A session whose coordinator handed out the backup share."""
+
+    def share_credentials(self):
+        return {
+            "unc": SHARE_UNC,
+            "user": r"HyperV\bfupgrade_share",
+            "password": "temp-Pw-123!",
+        }
+
+
+def test_backup_uses_session_share_credentials(upgrade, tmp_path):
+    """Test in a session the backup connects with the share account the
+    coordinator handed out, without asking for a password.
+    """
+    host = local_host(upgrade)
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.args.backup_dir = SHARE_UNC + r"\bigfix"
+    ctx.session = ShareSession()
+    ctx.getpass_fn = lambda prompt: pytest.fail("no password prompt in a session")
+
+    upgrade.connect_backup_share(ctx, getpass_fn=ctx.getpass_fn)
+
+    assert host.shares == [(SHARE_UNC, r"HyperV\bfupgrade_share", "temp-Pw-123!")]
+
+
+def test_backup_dir_defaults_to_session_share(upgrade, tmp_path):
+    """Test with no --backup-dir, a session's share is used."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.backup_dir = None
+    ctx.args.dry_run = True
+    ctx.session = ShareSession()
+
+    # joined with the local separator, a backslash on Windows:
+    assert ctx.backup_dir().startswith(SHARE_UNC)
+
+
+def test_dry_run_backup_names_session_account(upgrade, tmp_path, capsys):
+    """Test a dry run in a session says which account it would connect as."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.backup_dir = SHARE_UNC
+    ctx.args.dry_run = True
+    ctx.session = ShareSession()
+
+    ctx.backup_dir()
+
+    out = capsys.readouterr().out
+    assert r"would connect as HyperV\bfupgrade_share" in out
+    assert "temp-Pw-123!" not in out
+
+
+def test_dry_run_sql_backup_explains_staging(upgrade, tmp_path, capsys):
+    """Test a dry run says the real run tests the target first, and where and
+    with how much space it would stage instead.
+    """
+    host = local_host(upgrade)
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.args.dry_run = True
+    ctx.args.staging_dir = str(tmp_path)
+
+    upgrade.ACTIONS["sql_backup"](ctx)
+
+    out = capsys.readouterr().out
+    assert "tests whether SQL Server can write" in out
+    assert f"stages in {tmp_path}" in out
+    assert "GB free" in out
+
+
+def test_log_times_have_time_zone(upgrade):
+    """Test a node's log times carry their offset, so logs from computers in
+    different time zones line up.
+    """
+    node = upgrade.ShareSessionNode(
+        "root", ["root"], None, output=lambda line: None, **session_options(upgrade)
+    )
+    node.log("INFO", "x")
+
+    when = datetime.datetime.fromisoformat(node.log_buffer[0]["time"])
+    assert when.utcoffset() is not None
+
+
+def test_dry_run_file_sent_to_coordinator_and_consoles(upgrade, tmp_path):
+    """Test a node's file, like its dry run output, is saved by the coordinator
+    and every console next to that node's log.
+    """
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        console, _ = rig.console()
+        peer, _ = rig.peer()
+        tasks = [
+            asyncio.create_task(n.run("127.0.0.1", rig.port)) for n in (console, peer)
+        ]
+        await rig.coordinator.wait_for_nodes(2, timeout=5)
+        # kept until the peer's side of the connection is up, not dropped:
+        peer.send_threadsafe(
+            {"type": "artifact", "kind": "dryrun", "text": "===== preflight =====\n"},
+            keep=True,
+        )
+        target = tmp_path / "console_logs" / "root_dryrun.txt"
+        await rig.until(target.exists)
+        await rig.finish(*tasks)
+
+    asyncio.run(scenario())
+    for folder in ("coordinator_logs", "console_logs"):
+        saved = (tmp_path / folder / "root_dryrun.txt").read_text(encoding="utf-8")
+        assert saved == "===== preflight =====\n"
+
+
+@pytest.mark.parametrize("kind", ["../evil", "a b", "", "x" * 100])
+def test_artifact_kind_is_safe(upgrade, tmp_path, kind):
+    """Test a node can't pick where its file is written."""
+    path = upgrade.save_artifact(str(tmp_path), "root", kind, "text")
+
+    assert path is None or os.path.dirname(path) == str(tmp_path)
+    assert all(p.parent == tmp_path for p in tmp_path.iterdir())
+
+
+def test_dry_run_in_session_sends_file(upgrade, tmp_path, monkeypatch):
+    """Test a dry run in a session sends its saved output when it finishes."""
+    host = local_host(upgrade)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "done": [],
+                "reports": {},
+                "plan": {"steps": []},
+                "local_sql": True,
+                "baseline": upgrade.collect_local_info(host),
+            }
+        )
+    )
+    args = types.SimpleNamespace(
+        state_file=str(state_path),
+        step=None,
+        dry_run=True,
+        backup_dir=str(tmp_path / "share"),
+        backup_share_user=None,
+        staging_dir=None,
+        sql_instance=None,
+        dry_run_file=str(tmp_path / "dryrun.txt"),
+    )
+    monkeypatch.setattr(
+        upgrade.besapi.plugin_utilities, "get_besapi_connection", lambda args: None
+    )
+    sent = []
+    session = FakeSession()
+    session.send_artifact = lambda kind, text: sent.append((kind, text))
+
+    upgrade.run_walkthrough(args, None, host, {}, session=session)
+
+    ((kind, text),) = sent
+    assert kind == "dryrun"
+    assert text == (tmp_path / "dryrun.txt").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- script versions
+
+
+def test_script_fingerprint_ignores_line_endings(upgrade, tmp_path):
+    """Test the same code copied with Windows line endings has the same
+    fingerprint, and a changed copy doesn't.
+    """
+    source = open(upgrade.__file__, "rb").read()
+    windows = tmp_path / "windows.py"
+    windows.write_bytes(source.replace(b"\n", b"\r\n"))
+    changed = tmp_path / "changed.py"
+    changed.write_bytes(source + b"\n# changed\n")
+
+    own = upgrade.script_fingerprint()
+    assert len(own) == 12
+    assert upgrade.script_fingerprint(str(windows)) == own
+    assert upgrade.script_fingerprint(str(changed)) != own
+
+
+def test_hello_carries_script_version(upgrade):
+    """Test each hello says which script version and fingerprint it runs."""
+    hello = upgrade.make_hello("root", ["root"], "123")
+
+    assert hello["script"] == {
+        "version": upgrade.__version__,
+        "fingerprint": upgrade.script_fingerprint(),
+    }
+
+
+def test_coordinator_warns_about_other_script(upgrade, monkeypatch):
+    """Test a node running different code is flagged when it connects and in
+    status, but still accepted.
+    """
+    output = []
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=output.append,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        original = upgrade.make_hello
+
+        def old_hello(node_id, roles, serial, resume_id=None):
+            hello = original(node_id, roles, serial, resume_id)
+            if node_id == "root":
+                hello["script"] = {"version": "0.0.9", "fingerprint": "0123456789ab"}
+            return hello
+
+        monkeypatch.setattr(upgrade, "make_hello", old_hello)
+        node = upgrade.ShareSessionNode(
+            "root",
+            ["console"],
+            None,
+            output=lambda line: None,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(node.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        lines = coordinator.status_lines()
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return lines
+
+    lines = asyncio.run(scenario())
+    text = "\n".join(output)
+    assert "root runs script 0.0.9 (0123456789ab)" in text
+    assert "update it" in text
+    assert any("0.0.9 0123456789ab, differs" in line for line in lines)
+
+
+def test_node_warns_about_other_coordinator_script(upgrade, monkeypatch):
+    """Test a node is told when the coordinator runs different code."""
+    output = []
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        original = coordinator._hello_for
+
+        def newer(peer):
+            hello = original(peer)
+            hello["script"] = {"version": "9.9.9", "fingerprint": "ffffffffffff"}
+            return hello
+
+        coordinator._hello_for = newer
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        node = upgrade.ShareSessionNode(
+            "mac",
+            ["console"],
+            None,
+            output=output.append,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(node.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+
+    asyncio.run(scenario())
+    assert any(
+        "coordinator runs script 9.9.9 (ffffffffffff)" in line for line in output
+    )
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["--share-session"], "rejoin without the code"),
+        (["--walkthrough"], "progress is saved"),
+        ([], "stopped"),
+    ],
+)
+def test_ctrl_c_is_friendly(upgrade, monkeypatch, capsys, tmp_path, argv, expected):
+    """Test Ctrl+C prints a short note, not a traceback, and keeps the state."""
+    state = tmp_path / "state.json"
+    state.write_text('{"session_tokens": {"ab": {"node": "root"}}}')
+    before = state.read_text()
+
+    def interrupted(parser, args, host):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(upgrade, "_main", interrupted)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bigfix_root_server_upgrade_win.py", *argv, "--state-file", str(state)],
+    )
+
+    assert upgrade.main() == 130
+
+    err = capsys.readouterr().err
+    assert expected in err
+    assert "Traceback" not in err
+    assert state.read_text() == before

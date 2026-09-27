@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2214,10 +2214,23 @@ def connect_backup_share(ctx, getpass_fn=getpass.getpass) -> None:
     """
     root = unc_share_root(ctx.args.backup_dir or "")
     user = ctx.args.backup_share_user
+    if root and not user:
+        # in a session, the share account the coordinator handed out:
+        share = session_share(ctx)
+        if share.get("user") and unc_share_root(share.get("unc") or "") == root:
+            ctx.host.connect_share(root, share["user"], share.get("password") or "")
+            logging.info("connected to %s as %s, from the session", root, share["user"])
+        return
     if not root or not user:
         return
     ctx.host.connect_share(root, user, getpass_fn(f"Password for {user} on {root}: "))
     logging.info("connected to %s as %s", root, user)
+
+
+def session_share(ctx) -> dict:
+    """The backup share the session handed out, {} on its own."""
+    getter = getattr(ctx.session, "share_credentials", None)
+    return dict(getter() or {}) if getter else {}
 
 
 @dataclasses.dataclass
@@ -2279,13 +2292,17 @@ class WalkthroughContext:
         the folder can be written to. The folder is kept in the state file, so a
         resumed walkthrough keeps using it.
         """
+        if not self.args.backup_dir and session_share(self).get("unc"):
+            # in a session, the share the coordinator handed out:
+            self.args.backup_dir = session_share(self)["unc"]
         if not self.args.backup_dir:
             raise SystemExit("--backup-dir is required for the backup step")
         check_backup_dir_arg(self.args.backup_dir)
         if not self.share_connected:
             if self.dry_run:
-                if self.args.backup_share_user:
-                    print(f"DRY RUN, would connect as {self.args.backup_share_user}")
+                user = self.args.backup_share_user or session_share(self).get("user")
+                if user:
+                    print(f"DRY RUN, would connect as {user}")
             else:
                 connect_backup_share(self)
             self.share_connected = True
@@ -2358,6 +2375,22 @@ def _action_sql_backup(ctx: WalkthroughContext) -> None:
     server = ctx.sql_server()
 
     if ctx.dry_run:
+        staging = ctx.args.staging_dir or default_staging_dir(baseline)
+        needed = _bigfix_database_bytes(baseline) * BACKUP_SPACE_FACTOR
+        free = None
+        with contextlib.suppress(OSError, TypeError):
+            free = shutil.disk_usage(staging).free if staging else None
+        print(
+            f"DRY RUN, the real run tests whether SQL Server can write to {run_dir}"
+            f" first. If it can't, it stages in {staging or '--staging-dir'}"
+            + (
+                f" ({free / 1024**3:.0f} GB free, the databases are about"
+                f" {needed / 1024**3:.0f} GB uncompressed)"
+                if free is not None
+                else ""
+            )
+            + " and copies from there"
+        )
         for name in names:
             path = os.path.join(run_dir, f"{name}_{stamp}.bak")
             for query in sql_backup_queries(name, path, compression):
@@ -2973,6 +3006,9 @@ def run_walkthrough(args, bes_conn, host, compat: dict, session=None) -> int:
                 args, bes_conn, host, compat, _auto_answer, session
             )
     print(f"dry run saved to {os.path.abspath(path)}")
+    if session and hasattr(session, "send_artifact"):
+        with open(path, encoding="utf-8") as saved:
+            session.send_artifact("dryrun", saved.read())
     return result
 
 
@@ -4161,6 +4197,26 @@ class SecureChannel:
 # ---------------------------------------------------------------- handshake
 
 
+@functools.lru_cache(maxsize=None)
+def script_fingerprint(path: Optional[str] = None) -> str:
+    """A short SHA-256 of this script's code, the same whatever its line endings,
+    so nodes can tell they run the same code without anyone bumping a version.
+    """
+    with open(path or os.path.abspath(__file__), "rb") as source:
+        code = source.read().replace(b"\r\n", b"\n")
+    return hashlib.sha256(code).hexdigest()[:12]
+
+
+def peer_script(hello: dict) -> dict:
+    """The script version and fingerprint the other side said it runs."""
+    given = hello.get("script")
+    script: dict = given if isinstance(given, dict) else {}
+    return {
+        "version": clean_log_text(script.get("version", "?"), 20),
+        "fingerprint": clean_log_text(script.get("fingerprint", "?"), 12),
+    }
+
+
 def make_hello(
     node_id: str, roles: List[str], serial: str, resume_id: Optional[str] = None
 ) -> dict:
@@ -4176,6 +4232,7 @@ def make_hello(
         "roles": roles,
         "serial": serial,
         "nonce": secrets.token_hex(32),
+        "script": {"version": __version__, "fingerprint": script_fingerprint()},
     }
     if resume_id:
         hello["resume_id"] = resume_id
@@ -4726,6 +4783,29 @@ def safe_node_filename(name: str) -> str:
     return safe + ".log"
 
 
+# a node's file, like its dry run output, is kept up to this size:
+ARTIFACT_MAX = 8 * 1024 * 1024
+
+
+def save_artifact(folder: str, node: str, kind: str, text: str) -> Optional[str]:
+    """Keep a node's file next to its log, as `<node>_<kind>.txt` (.json for a
+    report).
+
+    None if the kind isn't a plain word, so a node can't pick the path.
+    """
+    kind = str(kind).lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", kind):
+        return None
+    extension = ".json" if kind == "report" else ".txt"
+    path = os.path.join(
+        folder, safe_node_filename(node)[: -len(".log")] + f"_{kind}{extension}"
+    )
+    os.makedirs(folder, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as saved:
+        saved.write(str(text)[:ARTIFACT_MAX])
+    return path
+
+
 class NodeLogStore:
     """Each node's log lines in their own file, `<folder>/<node>.log`, numbered.
 
@@ -5032,6 +5112,18 @@ class WalkthroughBridge:
         """Wait here while the session is halted."""
         self._running.wait()
 
+    def send_artifact(self, kind: str, text: str) -> None:
+        """Send a file, like the dry run output, for the coordinator and consoles
+        to keep.
+        """
+        self.node.send_threadsafe(
+            {"type": "artifact", "kind": kind, "text": text}, keep=True
+        )
+
+    def share_credentials(self) -> dict:
+        """The backup share and account the coordinator handed this node."""
+        return dict(self.node.share or {})
+
     def set_state(self, state: dict) -> None:
         """What `state <node>` shows, secrets removed."""
         self.state = redact(state)
@@ -5192,7 +5284,8 @@ class ShareSessionCoordinator:
 
     def _keep_log(self, node: str, entry: dict) -> None:
         entry = {
-            "time": entry.get("time") or datetime.datetime.now().isoformat(),
+            "time": entry.get("time")
+            or datetime.datetime.now().astimezone().isoformat(),
             "level": entry.get("level") or "INFO",
             "message": clean_log_text(entry.get("message", "")),
         }
@@ -5329,7 +5422,19 @@ class ShareSessionCoordinator:
                 name = f"{base_name}-{suffix}"
                 suffix += 1
         roles = [str(role) for role in peer.get("roles") or []]
-        self.nodes[name] = {"channel": channel, "roles": roles, "ip": peer_ip}
+        script = peer_script(peer)
+        self.nodes[name] = {
+            "channel": channel,
+            "roles": roles,
+            "ip": peer_ip,
+            "script": script,
+        }
+        if script["fingerprint"] != script_fingerprint():
+            self.output(
+                f"WARNING: {name} runs script {script['version']}"
+                f" ({script['fingerprint']}), this coordinator runs {__version__}"
+                f" ({script_fingerprint()}): update it so they run the same code"
+            )
         self.output(
             f"{name} ({', '.join(roles)}) {'resumed' if token else 'connected'}"
             f" from {peer_ip}"
@@ -5389,6 +5494,8 @@ class ShareSessionCoordinator:
             await self._on_question(name, message)
         elif message.get("type") == "share_offer":
             await self._on_share_offer(name, message)
+        elif message.get("type") == "artifact":
+            await self._on_artifact(name, message)
         elif message.get("type") == "question_cleared":
             if self.question and self.question["node"] == name:
                 self.output(
@@ -5456,31 +5563,41 @@ class ShareSessionCoordinator:
             "data": redact(message.get("data")),
         }
         if reply["kind"] == "report":
-            reply["data"] = self._save_report(name, reply["data"])
+            reply["data"] = await self._save_report(name, reply["data"])
         if requester == "coordinator":
             self.output(f"{reply['kind']} {name}: {json.dumps(reply['data'])}")
         elif requester:
             await self._send(requester, reply)
 
-    def _save_report(self, name: str, report: Any) -> dict:
+    async def _on_artifact(self, name: str, message: dict) -> Optional[str]:
+        """Keep a node's file, and send it to the consoles to keep too."""
+        folder = self.log_store.folder if self.log_store else "."
+        kind, text = str(message.get("kind", "")), str(message.get("text", ""))
+        path = save_artifact(folder, name, kind, text)
+        if not path:
+            self.output(f"refused a file from {name}: {kind!r} isn't a plain word")
+            return None
+        self.output(f"{name}'s {kind} saved to {os.path.abspath(path)}")
+        await self._broadcast_consoles(
+            {"type": "artifact", "node": name, "kind": kind, "text": text}
+        )
+        return path
+
+    async def _save_report(self, name: str, report: Any) -> dict:
         """Keep a node's report next to its log, and summarise it."""
         if not isinstance(report, dict) or "error" in report:
             return report if isinstance(report, dict) else {"error": "no report"}
-        folder = self.log_store.folder if self.log_store else "."
-        os.makedirs(folder, exist_ok=True)
-        path = os.path.join(
-            folder, safe_node_filename(name).replace(".log", "_report.json")
+        path = await self._on_artifact(
+            name,
+            {"kind": "report", "text": json.dumps(report, indent=2, default=str)},
         )
-        with open(path, "w", encoding="utf-8") as report_file:
-            json.dump(report, report_file, indent=2, default=str)
         assessment = report.get("upgrade_assessment") or {}
         summary = {
-            "saved": os.path.abspath(path),
+            "saved": os.path.abspath(path or ""),
             "warnings": assessment.get("warnings", []),
             "reachable": _get(assessment, "compatibility", "reachable"),
             "hyperv": assessment.get("hyperv"),
         }
-        self.output(f"{name}'s report saved to {summary['saved']}")
         return summary
 
     async def _on_action_request(self, name: str, message: dict) -> None:
@@ -5602,7 +5719,8 @@ class ShareSessionCoordinator:
         """The current state of every node."""
         lines = [
             f"share {self.share_unc or 'not set up yet, waiting for the Hyper-V host'},"
-            f" {len(self.nodes)} node(s) connected"
+            f" {len(self.nodes)} node(s) connected, coordinator script {__version__}"
+            f" {script_fingerprint()}"
         ]
         for name, node in self.nodes.items():
             history = self.results.get(name)
@@ -5620,7 +5738,12 @@ class ShareSessionCoordinator:
                     )
                 )
             )
-            lines.append(f"  {name} ({node['ip']}): {state}")
+            script = node.get("script") or {}
+            same = script.get("fingerprint") == script_fingerprint()
+            lines.append(
+                f"  {name} ({node['ip']}): {state}, script {script.get('version')}"
+                f" {script.get('fingerprint')}{'' if same else ', differs'}"
+            )
         return lines
 
     async def handle_command(self, command: str, source: str) -> None:
@@ -5752,6 +5875,8 @@ class ShareSessionNode:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stdin_started = False
         self._channel = None
+        # files to send once connected, like a dry run's output:
+        self._outbox: collections.deque = collections.deque(maxlen=20)
         # a walkthrough run in its own thread, through the session:
         self.walkthrough = walkthrough
         self.bridge = WalkthroughBridge(self) if walkthrough else None
@@ -5822,11 +5947,16 @@ class ShareSessionNode:
         task = asyncio.get_running_loop().create_task(leave())
         self._leaving = task
 
-    def send_threadsafe(self, message: dict) -> None:
-        """Send to the coordinator from another thread, dropped if disconnected."""
+    def send_threadsafe(self, message: dict, keep: bool = False) -> None:
+        """Send to the coordinator from another thread.
+
+        Dropped if disconnected, unless `keep`, then sent once connected again.
+        """
         loop, channel = self._loop, self._channel
         if loop and channel:
             asyncio.run_coroutine_threadsafe(self._send_quietly(channel, message), loop)
+        elif keep:
+            self._outbox.append(message)
 
     @staticmethod
     async def _send_quietly(channel, message: dict) -> None:
@@ -5932,7 +6062,7 @@ class ShareSessionNode:
                 "type": "log",
                 "boot": self.log_boot,
                 "seq": self.log_seq,
-                "time": datetime.datetime.now().isoformat(),
+                "time": datetime.datetime.now().astimezone().isoformat(),
                 "level": level,
                 "message": clean_log_text(message),
             }
@@ -5992,12 +6122,19 @@ class ShareSessionNode:
             self.name, self.roles, self.serial, token["id"] if token else None
         )
         try:
-            channel, _peer = await open_channel(host, port, self._password_for, hello)
+            channel, peer = await open_channel(host, port, self._password_for, hello)
         except WrongCode:
             if token:
                 # a token the coordinator refused, never retried:
                 self._set_resume(None)
             raise
+        script = peer_script(peer)
+        if script["fingerprint"] != script_fingerprint():
+            self.output(
+                f"WARNING: the coordinator runs script {script['version']}"
+                f" ({script['fingerprint']}), this node runs {__version__}"
+                f" ({script_fingerprint()}): update them so they run the same code"
+            )
         return channel
 
     async def connect(self, host: str, port: int, attempts: int = 1, delay: float = 5):
@@ -6055,6 +6192,8 @@ class ShareSessionNode:
                         )
                     if self.share_offer:
                         await channel.send({"type": "share_offer", **self.share_offer})
+                    while self._outbox:
+                        await channel.send(self._outbox.popleft())
                     if self.oneshot_wait is not None:
                         self.received.append(
                             {"type": "welcome", "halted": message.get("halted")}
@@ -6104,6 +6243,16 @@ class ShareSessionNode:
                         self._print(clean_log_text(line))
                 elif kind == "log":
                     self._show_remote_log(message)
+                elif kind == "artifact" and self.log_store is not None:
+                    node = clean_log_text(message.get("node", ""), 80)
+                    path = save_artifact(
+                        self.log_store.folder,
+                        node,
+                        str(message.get("kind", "")),
+                        str(message.get("text", "")),
+                    )
+                    if path:
+                        self._print(f"{node}'s {message.get('kind')} saved to {path}")
                 elif kind == "share":
                     self.share = message.get("share") or {}
                     self.output(f"share is now {self.share.get('unc')}")
@@ -6223,7 +6372,10 @@ def run_share_session(args, bes_conn, host) -> int:
         )
         if found and not args.coordinator:
             args.coordinator = f"{found[0]}:{found[1]}"
-    print(f"share session as {node}, masthead serial {serial}")
+    print(
+        f"share session as {node}, masthead serial {serial}, script {__version__}"
+        f" {script_fingerprint()}"
+    )
     if node == "coordinator":
         return _run_coordinator(
             args, bes_conn, host, serial, psk, psk_source, given_code
@@ -6786,12 +6938,35 @@ def build_parser():
     return parser
 
 
+def interrupt_message(args) -> str:
+    """What to say after Ctrl+C, for the mode that was running."""
+    if args.share_session:
+        return (
+            "stopped. The session is kept: run the same command again to rejoin"
+            " without the code, until the session is ended or 24 hours pass."
+            " Use end on the coordinator to finish it."
+        )
+    if args.walkthrough:
+        return (
+            "stopped. The walkthrough's progress is saved, run the same command"
+            " again to continue where it left off."
+        )
+    return "stopped."
+
+
 def main():
     """Execution starts here."""
     parser = build_parser()
     args, _unknown = parser.parse_known_args()
-    host = LocalHost()
+    try:
+        return _main(parser, args, LocalHost())
+    except KeyboardInterrupt:
+        # nothing is cleared, a session or walkthrough resumes from its state:
+        print(f"\n{interrupt_message(args)}", file=sys.stderr)
+        return 130
 
+
+def _main(parser, args, host):
     if args.walkthrough and not args.share_session:
         with besapi.plugin_utilities.init_plugin(
             __version__, parser, require_connection=False

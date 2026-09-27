@@ -138,3 +138,4 @@ dmypy.json
 
 # real creds for the example mqtt plugin, see *.config.example.yaml
 examples/bigfix_plugin_mqtt_homeassistant.config.yaml
+bigfix_root_server_upgrade_win.session.json
