@@ -6366,3 +6366,88 @@ def test_rest_unavailable_message(upgrade, capsys):
     assert "joining the session anyway" in capsys.readouterr().out
     upgrade.explain_rest(object())
     assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------- share setup after connecting
+
+
+def test_share_owner_asks_through_session_after_connecting(upgrade):
+    """Test the Hyper-V host connects first, then its share setup questions can
+    be answered from a console, then the share is offered.
+    """
+    asked = []
+
+    def setup_share(ask):
+        asked.append(
+            ask("Use the share _tmp_backup (D:\\_tmp_backup)?", ["yes", "no"], "yes")
+        )
+        return {"unc": SHARE_UNC, "user": r"HyperV\bfupgrade_share", "password": "pw"}
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"user": None, "password": None},
+            output=lambda line: None,
+            **coordinator_options(
+                upgrade, share_unc=None, password=code_password(upgrade)
+            ),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        owner = upgrade.ShareSessionNode(
+            "HYPERV",
+            ["hyperv", "share_owner"],
+            hyperv_host(upgrade),
+            output=lambda line: None,
+            share_setup_fn=setup_share,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(owner.run("127.0.0.1", port))
+        for _ in range(500):
+            if coordinator.question:
+                break
+            await asyncio.sleep(0.01)
+        connected_before_answer = "HYPERV" in coordinator.nodes and not asked
+        await coordinator.handle_command("yes", source="coordinator")
+        for _ in range(500):
+            if coordinator.share_unc:
+                break
+            await asyncio.sleep(0.01)
+        share_unc = coordinator.share_unc
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return connected_before_answer, share_unc
+
+    connected_before_answer, share_unc = asyncio.run(scenario())
+    assert connected_before_answer
+    assert asked == ["yes"]
+    assert share_unc == SHARE_UNC
+
+
+def test_prepare_share_uses_given_ask(upgrade, monkeypatch):
+    """Test the share planning asks with the function it's given."""
+    seen = []
+
+    def fake_plan_share(
+        host, share_unc, root_ip, host_ips, hostname, ask, share_folder=None
+    ):
+        seen.append(ask)
+        return {"unc": SHARE_UNC, "share_name": "_tmp_backup", "folder": None}
+
+    monkeypatch.setattr(upgrade, "plan_share", fake_plan_share)
+    args = types.SimpleNamespace(
+        share_unc=SHARE_UNC,
+        share_folder=None,
+        allow=[],
+        backup_share_user=None,
+        share_account=None,
+        dry_run=False,
+        state_file="x.json",
+    )
+
+    def marker(prompt, choices, default=None):
+        return default
+
+    upgrade._prepare_share(args, hyperv_host(upgrade), {}, None, None, ask=marker)
+
+    assert seen == [marker]

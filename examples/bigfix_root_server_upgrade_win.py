@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.15"
+__version__ = "0.2.16"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -6576,6 +6576,7 @@ class ShareSessionNode:
         report_fn=None,
         dry_run_fn=None,
         localcmd_timeout=300,
+        share_setup_fn=None,
     ):
         # pylint: disable=too-many-arguments,too-many-locals
         self.name = name
@@ -6600,7 +6601,14 @@ class ShareSessionNode:
         self.walkthrough = walkthrough
         # a dry run of this node's walkthrough, started by `dryrun <node>`:
         self.dry_run_fn = dry_run_fn
-        self.bridge = WalkthroughBridge(self) if walkthrough or dry_run_fn else None
+        # the share owner's setup, run once connected, asking through the session:
+        self.share_setup_fn = share_setup_fn
+        self._share_setup_started = False
+        self.bridge = (
+            WalkthroughBridge(self)
+            if walkthrough or dry_run_fn or share_setup_fn
+            else None
+        )
         self._walk_running = threading.Event()
         # `localcmd` typed here: how long it may run, and a count for its files
         self.localcmd_timeout = localcmd_timeout
@@ -6762,6 +6770,24 @@ class ShareSessionNode:
     async def _send_quietly(channel, message: dict) -> None:
         with contextlib.suppress(ConnectionError, OSError):
             await channel.send(message)
+
+    def _start_share_setup(self) -> None:
+        """Set up the share once connected, its questions answered anywhere, then
+        offer it to the coordinator.
+        """
+        self._share_setup_started = True
+
+        def run():
+            try:
+                offer = self.share_setup_fn(self.bridge.ask)  # type: ignore[misc,union-attr]
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logging.exception("share setup failed")
+                self.output(f"share setup failed: {err}")
+                return
+            self.share_offer = offer
+            self.send_threadsafe({"type": "share_offer", **offer}, keep=True)
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _start_walkthrough(self, walk=None) -> None:
         """Run the walkthrough, or `walk` like a dry run, in its own thread."""
@@ -7036,6 +7062,8 @@ class ShareSessionNode:
                         )
                     if self.share_offer:
                         await channel.send({"type": "share_offer", **self.share_offer})
+                    elif self.share_setup_fn and not self._share_setup_started:
+                        self._start_share_setup()
                     while self._outbox:
                         await channel.send(self._outbox.popleft())
                     if self.oneshot_wait is not None:
@@ -7229,17 +7257,32 @@ def run_share_session(args, bes_conn, host) -> int:
         return _run_coordinator(
             args, bes_conn, host, serial, psk, psk_source, given_code
         )
+    share_setup = None
     if node == "share_owner":
-        state = load_state(args.state_file)
-        state.setdefault("run_id", utc_now().strftime("%Y%m%d%H%M%SZ"))
-        root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(
-            CLIENT_MASTHEAD_PATHS
-        )
-        plan, share = _prepare_share(args, host, state, root_ip, None)
-        save_state(args.state_file, state)
-        share_offer = {"unc": plan["unc"] if plan else args.share_unc, **share}
+
+        def setup_owned_share(ask) -> dict:
+            # after connecting, so its questions can be answered anywhere:
+            state = load_state(args.state_file)
+            state.setdefault("run_id", utc_now().strftime("%Y%m%d%H%M%SZ"))
+            root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(
+                CLIENT_MASTHEAD_PATHS
+            )
+            plan, share = _prepare_share(args, host, state, root_ip, None, ask=ask)
+            save_state(args.state_file, state)
+            return {"unc": plan["unc"] if plan else args.share_unc, **share}
+
+        share_setup = setup_owned_share
+
     return _run_node(
-        args, bes_conn, host, node, serial, psk, given_code, share_offer=share_offer
+        args,
+        bes_conn,
+        host,
+        node,
+        serial,
+        psk,
+        given_code,
+        share_offer=share_offer,
+        share_setup=share_setup,
     )
 
 
@@ -7378,7 +7421,7 @@ def _root_ip_from_rest(bes_conn) -> Optional[str]:
     return str(addresses[0]) if addresses else None
 
 
-def _prepare_share(args, host, state: dict, root_ip, listen_port) -> tuple:
+def _prepare_share(args, host, state: dict, root_ip, listen_port, ask=None) -> tuple:
     """Plan the backup share, and set it up if it's on this computer.
 
     Returns the plan (None when another node will offer the share) and the
@@ -7398,7 +7441,7 @@ def _prepare_share(args, host, state: dict, root_ip, listen_port) -> tuple:
         root_ip,
         host_ips,
         socket.gethostname(),
-        _ask,
+        ask or _ask,
         args.share_folder,
     )
     print(
@@ -7430,7 +7473,7 @@ def _prepare_share(args, host, state: dict, root_ip, listen_port) -> tuple:
             spec,
             state,
             state["run_id"],
-            lambda prompt: _ask(prompt, ["yes", "no"], "yes") == "yes",
+            lambda prompt: (ask or _ask)(prompt, ["yes", "no"], "yes") == "yes",
             args.dry_run,
             socket.gethostname(),
         )
@@ -7565,7 +7608,15 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
 
 
 def _run_node(
-    args, bes_conn, host, node, serial, psk, given_code, share_offer=None
+    args,
+    bes_conn,
+    host,
+    node,
+    serial,
+    psk,
+    given_code,
+    share_offer=None,
+    share_setup=None,
 ) -> int:
     # pylint: disable=too-many-arguments,too-many-locals,too-many-statements
     if node == "peer" and not host.is_windows():
@@ -7681,6 +7732,7 @@ def _run_node(
             log_store=NodeLogStore(args.log_dir) if node == "console" else None,
             walkthrough=walkthrough,
             share_offer=share_offer,
+            share_setup_fn=share_setup,
             report_fn=None if node == "console" else node_report,
             dry_run_fn=dry_run_fn,
             localcmd_timeout=args.localcmd_timeout,
