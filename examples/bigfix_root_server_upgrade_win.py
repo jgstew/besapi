@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.11"
+__version__ = "0.2.14"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2392,8 +2392,14 @@ class WalkthroughContext:
         check_backup_dir_arg(self.args.backup_dir)
         if not self.share_connected:
             if self.dry_run:
-                user = self.args.backup_share_user or session_share(self).get("user")
-                if user:
+                share = session_share(self)
+                user = self.args.backup_share_user or (
+                    share.get("user")
+                    if unc_share_root(share.get("unc") or "")
+                    == unc_share_root(self.args.backup_dir or "")
+                    else None
+                )
+                if user and unc_share_root(self.args.backup_dir or ""):
                     print(f"DRY RUN, would connect as {user}")
             else:
                 connect_backup_share(self)
@@ -3483,6 +3489,19 @@ def _action_hv_config_backup(ctx: WalkthroughContext) -> None:
     print(f"saved the Hyper-V settings to {path}")
 
 
+def _free_bytes(folder: str) -> Optional[int]:
+    """Free space where a folder is or will be: the nearest folder that exists."""
+    path = folder
+    while path:
+        with contextlib.suppress(OSError):
+            return shutil.disk_usage(path).free
+        parent = os.path.dirname(path.rstrip("\\/"))
+        if parent == path:
+            break
+        path = parent
+    return None
+
+
 def _action_hv_export(ctx: WalkthroughContext) -> None:
     run_dir = ctx.backup_dir()
     vms = {
@@ -3494,9 +3513,7 @@ def _action_hv_export(ctx: WalkthroughContext) -> None:
         size = vm_disk_bytes(vm)
         # quoted first, so nothing runs if the path or name can't be:
         export = f"Export-VM -Name {_ps_quote(name)} -Path {_ps_quote(run_dir)}"
-        free = None
-        with contextlib.suppress(OSError):
-            free = shutil.disk_usage(run_dir).free
+        free = _free_bytes(run_dir)
         space = (
             f", {free / 1024**3:.0f} GB free"
             if free is not None
@@ -5616,11 +5633,15 @@ def run_node_action(host, roles: List[str], action: str, params: dict) -> dict:
         return {"ok": False, "error": f"{type(err).__name__}: {err}"}
 
 
+# a one-shot leaves once its reply comes, or after this long, a report takes ~12s:
+DEFAULT_ONESHOT_WAIT = 15
+
+
 async def run_oneshot_command(
     host: str,
     port: int,
     command: str,
-    wait: float = 5,
+    wait: float = DEFAULT_ONESHOT_WAIT,
     name: str = "oneshot",
     **options,
 ) -> dict:
@@ -7031,7 +7052,9 @@ class ShareSessionNode:
                         else:
                             # any question it had was answered here meanwhile:
                             await channel.send({"type": "question_cleared"})
-                        if not self._walkthrough_started:
+                        # only with --walkthrough, a node that only dry runs
+                        # waits for `dryrun <node>`:
+                        if self.walkthrough and not self._walkthrough_started:
                             self._start_walkthrough()
                     self.output(
                         f"connected as {self.name}, share {self.share.get('unc')}"
@@ -7564,6 +7587,7 @@ def _run_node(
             coord_host,
             coord_port,
             args.command,
+            wait=args.wait,
             name=args.oneshot_name or f"{default_node_id()}-oneshot",
             password=password,
             serial=serial,
@@ -7680,6 +7704,13 @@ def build_parser():
         help="with --share-session: connect as a one-shot console, run this one"
         " command, like 'state root' or 'halt <reason>', print what came back and"
         " leave",
+    )
+    parser.add_argument(
+        "--wait",
+        type=float,
+        default=15,
+        help="with --command, seconds to wait for the reply before leaving, default"
+        " 15, it leaves sooner once the reply comes",
     )
     parser.add_argument(
         "--oneshot-name",

@@ -6193,3 +6193,110 @@ def test_suggest_unknown_node(upgrade):
 
     asyncio.run(scenario())
     assert any("nope isn't connected" in line for line in output)
+
+
+def test_node_with_only_dry_run_starts_nothing_on_connect(upgrade):
+    """Test a node started without --walkthrough, which can still do a remote
+    dry run, doesn't try to start a walkthrough when it connects.
+    """
+    printed = []
+
+    async def scenario():
+        rig = WalkRig(upgrade, None)
+        rig.server = await rig.coordinator.start("127.0.0.1", 0)
+        rig.port = rig.server.sockets[0].getsockname()[1]
+        node = rig.add(
+            "BIGFIX", ["root"], client_host(upgrade), dry_run_fn=lambda bridge: None
+        )
+        node._print = printed.append
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await asyncio.sleep(0.3)
+        await rig.finish()
+
+    asyncio.run(scenario())
+    assert not any("walkthrough failed" in line for line in printed)
+
+
+def test_oneshot_wait_default_and_option(upgrade):
+    """Test a one-shot waits 15 seconds for its reply by default, --wait changes
+    it.
+    """
+    import inspect
+
+    parser = upgrade.build_parser()
+    assert parser.parse_args([]).wait == 15
+    assert parser.parse_args(["--wait", "40"]).wait == 40
+    default = inspect.signature(upgrade.run_oneshot_command).parameters["wait"].default
+    assert default == upgrade.DEFAULT_ONESHOT_WAIT == 15
+
+
+def test_oneshot_waits_for_slow_reply(upgrade, tmp_path):
+    """Test a reply that takes longer than the old 5 seconds still arrives."""
+    import time as clock
+
+    def slow_report():
+        clock.sleep(6)
+        return {"upgrade_assessment": {"warnings": ["slow"]}}
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            log_store=upgrade.NodeLogStore(str(tmp_path)),
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        root = upgrade.ShareSessionNode(
+            "BIGFIX",
+            ["root"],
+            client_host(upgrade),
+            output=lambda line: None,
+            report_fn=slow_report,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(root.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        result = await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            port,
+            "report BIGFIX",
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return result
+
+    result = asyncio.run(scenario())
+    (reply,) = (r for r in result["replies"] if r["type"] == "reply")
+    assert reply["data"]["warnings"] == ["slow"]
+
+
+def test_hyperv_export_dry_run_free_space_from_parent(upgrade, tmp_path, capsys):
+    """Test a dry run, which doesn't create the export folder, still shows free
+    space, from the nearest folder that exists.
+    """
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.args.dry_run = True
+    ctx.args.backup_dir = str(tmp_path / "not" / "made" / "yet")
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    out = capsys.readouterr().out
+    assert "free space unknown" not in out
+    assert "GB free" in out
+
+
+def test_dry_run_local_backup_doesnt_mention_share(upgrade, tmp_path, capsys):
+    """Test a local backup folder doesn't say it would connect to the session's
+    share.
+    """
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.dry_run = True
+    ctx.args.backup_dir = str(tmp_path / "local")
+    ctx.session = ShareSession()
+
+    ctx.backup_dir()
+
+    assert "would connect" not in capsys.readouterr().out
