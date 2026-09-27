@@ -6,11 +6,14 @@ The BigFix REST API, the Windows registry, PowerShell and sqlcmd are all faked.
 import asyncio
 import datetime
 import importlib.util
+import io
 import json
 import logging
 import ntpath
 import os
 import re
+import threading
+import time
 import types
 
 import pytest
@@ -2027,7 +2030,7 @@ def test_share_session_locks_after_wrong_codes(upgrade):
                 ),
             )
             try:
-                await node.run("127.0.0.1", port)
+                await asyncio.wait_for(node.run("127.0.0.1", port), timeout=10)
                 outcomes.append("connected")
             except Exception as err:  # pylint: disable=broad-exception-caught
                 outcomes.append(type(err).__name__)
@@ -2133,24 +2136,6 @@ def test_firewall_address_matching_mixed_versions(upgrade):
 
 
 # ---------------------------------------------------------------- auto discovery
-
-
-@pytest.mark.parametrize(
-    "windows,hyperv,root,expected",
-    [
-        (True, True, False, "coordinator"),
-        (True, False, True, "peer"),
-        (True, False, False, "peer"),
-        (False, False, False, "console"),
-    ],
-)
-def test_detect_node_role(upgrade, windows, hyperv, root, expected):
-    """Test the node role comes from what the computer is."""
-    host = local_host(upgrade, windows=windows)
-    host.powershell[upgrade.PS_HYPERV_HOST] = hyperv
-    if not root:
-        host.registry.pop(ES_KEY)
-    assert upgrade.detect_node_role(host) == expected
 
 
 def answer_defaults(prompt, choices, default=None):
@@ -3208,3 +3193,1608 @@ def test_vm_disk_bytes_counts_checkpoint_chain(upgrade):
     }
 
     assert upgrade.vm_disk_bytes(vm) == 1050
+
+
+def test_collect_hyperv_info_vm_by_name_when_address_misses(upgrade):
+    """Test an address no VM has, like a public DNS answer for the root server's
+    name, still falls back to the one VM named like BigFix.
+    """
+    info = upgrade.collect_hyperv_info(hyperv_host(upgrade), "64.52.192.155")
+
+    assert info["bigfix_vms"] == ["bigfix-root"]
+    assert info["bigfix_vms_matched_by"] == "name"
+    assert "64.52.192.155" in info["errors"][0]
+
+
+# ---------------------------------------------------------------- resume tokens
+
+CODE = "123456"
+
+
+def code_password(upgrade, code=CODE):
+    return upgrade.derive_password(None, "123456789", code)
+
+
+class ResumeRig:
+    """A coordinator on localhost, and helpers to connect nodes to it."""
+
+    def __init__(self, upgrade, tokens=None, now=None, output=None):
+        self.upgrade = upgrade
+        self.output = output if output is not None else []
+        self.coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=self.output.append,
+            tokens=tokens if tokens is not None else {},
+            **coordinator_options(
+                upgrade,
+                password=code_password(upgrade),
+                **({"now": now} if now else {}),
+            ),
+        )
+        self.server = None
+        self.port = None
+
+    async def start(self):
+        self.server = await self.coordinator.start("127.0.0.1", 0)
+        self.port = self.server.sockets[0].getsockname()[1]
+
+    def node(self, password, resume=None, prompt_code=None, name="bigfix"):
+        saved = {"token": resume}
+
+        def on_resume(token):
+            saved["token"] = token
+
+        node = self.upgrade.ShareSessionNode(
+            name,
+            ["console"],
+            None,
+            output=lambda line: None,
+            resume=resume,
+            on_resume=on_resume,
+            prompt_code=prompt_code,
+            **session_options(self.upgrade, password=password),
+        )
+        return node, saved
+
+    async def connect_until_token(self, node, saved):
+        """Run a node until it has a resume token, then drop it, like a reboot."""
+        task = asyncio.create_task(node.run("127.0.0.1", self.port))
+        for _ in range(500):
+            if saved["token"]:
+                break
+            await asyncio.sleep(0.01)
+        channel = self.coordinator.nodes[node.name]["channel"]
+        key = channel.send_key
+        channel.close()
+        await asyncio.wait_for(task, timeout=5)
+        for _ in range(500):
+            if node.name not in self.coordinator.nodes:
+                break
+            await asyncio.sleep(0.01)
+        return key
+
+    async def run_briefly(self, node):
+        """Run a node until it's connected, return its coordinator side key."""
+        task = asyncio.create_task(node.run("127.0.0.1", self.port))
+        await self.coordinator.wait_for_nodes(1, timeout=5)
+        key = self.coordinator.nodes[node.name]["channel"].send_key
+        return task, key
+
+    async def finish(self, *tasks):
+        await self.coordinator.handle_command("done", source="coordinator")
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+        self.server.close()
+
+
+def test_resume_reconnects_without_code(upgrade):
+    """Test a node that rebooted reconnects with its token, no code, same name,
+    and with fresh keys.
+    """
+
+    async def scenario():
+        rig = ResumeRig(upgrade)
+        await rig.start()
+        node, saved = rig.node(code_password(upgrade))
+        first_key = await rig.connect_until_token(node, saved)
+
+        again, _saved = rig.node(None, resume=saved["token"])
+        task, second_key = await rig.run_briefly(again)
+        names = list(rig.coordinator.nodes)
+        await rig.finish(task)
+        return saved["token"], first_key, second_key, names, rig
+
+    token, first_key, second_key, names, rig = asyncio.run(scenario())
+    assert set(token) >= {"id", "secret", "expires"}
+    assert len(bytes.fromhex(token["id"])) == 16
+    assert len(bytes.fromhex(token["secret"])) == 32
+    assert first_key != second_key
+    assert names == ["bigfix"]
+    # the secret is never shown:
+    assert token["secret"] not in "\n".join(rig.output)
+
+
+def test_resume_unknown_token_falls_back_to_code(upgrade):
+    """Test a token the coordinator doesn't know makes the node ask for the code,
+    and drop the old token.
+    """
+    asked = []
+
+    async def scenario():
+        rig = ResumeRig(upgrade)
+        await rig.start()
+        token = {"id": "ab" * 16, "secret": "cd" * 32, "expires": time.time() + 60}
+        node, saved = rig.node(
+            None,
+            resume=token,
+            prompt_code=lambda: asked.append(1) or code_password(upgrade),
+        )
+        task, _key = await rig.run_briefly(node)
+        await rig.finish(task)
+        return saved, rig
+
+    saved, rig = asyncio.run(scenario())
+    assert asked == [1]
+    assert rig.coordinator.failures == 0
+    # a new token was issued, then dropped when the session finished:
+    assert saved["token"] is None
+
+
+def test_resume_wrong_secret_counts_toward_lockout(upgrade):
+    """Test a known id with the wrong secret is a failed guess."""
+
+    async def scenario():
+        rig = ResumeRig(upgrade)
+        await rig.start()
+        node, saved = rig.node(code_password(upgrade))
+        await rig.connect_until_token(node, saved)
+        forged = dict(saved["token"], secret="00" * 32)
+        again, _saved = rig.node(None, resume=forged)
+        with pytest.raises(upgrade.HandshakeError):
+            await asyncio.wait_for(again.run("127.0.0.1", rig.port), timeout=10)
+        rig.server.close()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert rig.coordinator.failures == 1
+
+
+def test_resume_expired_token_falls_back(upgrade):
+    """Test a token older than its lifetime isn't accepted."""
+    clock = {"now": 1000.0}
+    asked = []
+
+    async def scenario():
+        rig = ResumeRig(upgrade, now=lambda: clock["now"])
+        await rig.start()
+        node, saved = rig.node(code_password(upgrade))
+        await rig.connect_until_token(node, saved)
+        clock["now"] += upgrade.RESUME_TOKEN_SECONDS + 1
+        again, _saved = rig.node(
+            None,
+            resume=dict(saved["token"], expires=time.time() + 60),
+            prompt_code=lambda: asked.append(1) or code_password(upgrade),
+        )
+        task, _key = await rig.run_briefly(again)
+        await rig.finish(task)
+
+    asyncio.run(scenario())
+    assert asked == [1]
+
+
+def test_resume_revoked_token_falls_back(upgrade):
+    """Test `revoke <node>` removes that node's token."""
+    asked = []
+
+    async def scenario():
+        rig = ResumeRig(upgrade)
+        await rig.start()
+        node, saved = rig.node(code_password(upgrade))
+        await rig.connect_until_token(node, saved)
+        await rig.coordinator.handle_command("revoke bigfix", source="coordinator")
+        tokens_left = dict(rig.coordinator.tokens)
+        again, _saved = rig.node(
+            None,
+            resume=saved["token"],
+            prompt_code=lambda: asked.append(1) or code_password(upgrade),
+        )
+        task, _key = await rig.run_briefly(again)
+        await rig.finish(task)
+        return tokens_left, rig
+
+    tokens_left, rig = asyncio.run(scenario())
+    assert tokens_left == {}
+    assert asked == [1]
+    # done ends the session, so no token outlives it:
+    assert rig.coordinator.tokens == {}
+
+
+def test_resume_survives_coordinator_restart(upgrade):
+    """Test a restarted coordinator with the saved tokens still accepts them."""
+    tokens = {}
+
+    async def scenario():
+        rig = ResumeRig(upgrade, tokens=tokens)
+        await rig.start()
+        node, saved = rig.node(code_password(upgrade))
+        await rig.connect_until_token(node, saved)
+        rig.server.close()
+
+        restarted = ResumeRig(upgrade, tokens=json.loads(json.dumps(tokens)))
+        await restarted.start()
+        again, _saved = restarted.node(None, resume=saved["token"])
+        task, _key = await restarted.run_briefly(again)
+        names = list(restarted.coordinator.nodes)
+        await restarted.finish(task)
+        return names
+
+    assert asyncio.run(scenario()) == ["bigfix"]
+
+
+def test_resume_no_code_no_token_asks(upgrade):
+    """Test a node with neither a code nor a token asks for the code."""
+    asked = []
+
+    async def scenario():
+        rig = ResumeRig(upgrade)
+        await rig.start()
+        node, _saved = rig.node(
+            None, prompt_code=lambda: asked.append(1) or code_password(upgrade)
+        )
+        task, _key = await rig.run_briefly(node)
+        await rig.finish(task)
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert asked == [1]
+    # asked before connecting, so no failed attempt is logged:
+    assert not any("refused" in line for line in rig.output)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_state_file_owner_only(upgrade, tmp_path):
+    """Test the state file, which can hold resume tokens, is owner-only."""
+    path = str(tmp_path / "state.json")
+
+    upgrade.save_state(path, {"done": []})
+
+    assert os.stat(path).st_mode & 0o777 == 0o600
+
+
+def test_session_pairing_code_kept_across_restart(upgrade, monkeypatch):
+    """Test a restarted coordinator shows the same code until the session ends."""
+    codes = iter(["111111", "222222"])
+    monkeypatch.setattr(upgrade, "generate_pairing_code", lambda: next(codes))
+    state = {}
+
+    first = upgrade.session_pairing_code(state, None, "none", now=1000.0)
+    again = upgrade.session_pairing_code(state, None, "none", now=2000.0)
+    later = upgrade.session_pairing_code(
+        state, None, "none", now=1000.0 + upgrade.RESUME_TOKEN_SECONDS + 1
+    )
+
+    assert first == again == "111111"
+    assert later == "222222"
+
+
+def test_session_pairing_code_given_or_psk(upgrade):
+    """Test a given code is used and not saved, and a PSK needs no code."""
+    state = {}
+
+    assert upgrade.session_pairing_code(state, "333333", "none", now=1.0) == "333333"
+    assert upgrade.session_pairing_code({}, None, "env", now=1.0) is None
+    assert "pairing_code" not in json.dumps(state)
+
+
+def test_end_session_state_clears_secrets(upgrade):
+    """Test finishing a session drops its tokens and code from the state."""
+    state = {
+        "session": {"pairing_code": "111111", "expires": 5.0},
+        "session_tokens": {"ab": {"node": "x", "secret": "cd"}},
+        "session_resume_peer": {"id": "ab", "secret": "cd"},
+    }
+
+    upgrade.end_session_state(state)
+
+    assert state == {}
+
+
+# ---------------------------------------------------------------- node logs
+
+
+def log_entry(message, level="INFO"):
+    return {"time": "2026-09-27T10:00:00", "level": level, "message": message}
+
+
+def test_log_store_file_per_node(upgrade, tmp_path):
+    """Test each node's log goes to its own file, numbered from 1."""
+    store = upgrade.NodeLogStore(str(tmp_path))
+
+    assert store.record("root", log_entry("stopping services")) == 1
+    assert store.record("root", log_entry("backup started")) == 2
+    assert store.record("sql", log_entry("sql ok")) == 1
+
+    root_log = (tmp_path / "root.log").read_text(encoding="utf-8")
+    assert root_log.splitlines() == [
+        "000001 2026-09-27T10:00:00 INFO stopping services",
+        "000002 2026-09-27T10:00:00 INFO backup started",
+    ]
+    assert (tmp_path / "sql.log").exists()
+
+
+def test_log_store_continues_after_restart(upgrade, tmp_path):
+    """Test a restarted store keeps numbering from its files."""
+    upgrade.NodeLogStore(str(tmp_path)).record("root", log_entry("one"))
+
+    store = upgrade.NodeLogStore(str(tmp_path))
+
+    assert store.record("root", log_entry("two")) == 2
+    assert [e["message"] for e in store.since("root", 0)] == ["one", "two"]
+    assert [e["seq"] for e in store.since("root", 1)] == [2]
+    assert [e["message"] for e in store.tail("root", 1)] == ["two"]
+
+
+def test_log_store_keeps_given_numbers(upgrade, tmp_path):
+    """Test a console keeps the coordinator's numbers, skipping ones it has."""
+    store = upgrade.NodeLogStore(str(tmp_path))
+
+    assert store.record("root", log_entry("a"), seq=5) == 5
+    assert store.record("root", log_entry("a again"), seq=5) is None
+    assert store.record("root", log_entry("b"), seq=6) == 6
+    assert store.last_seq("root") == 6
+    assert store.last_seqs() == {"root": 6}
+
+
+@pytest.mark.parametrize(
+    "name", ["../evil", r"..\evil", "a/b", "C:x", "con", "", "x" * 200]
+)
+def test_log_store_safe_file_names(upgrade, tmp_path, name):
+    """Test a node name can't write outside the log folder."""
+    store = upgrade.NodeLogStore(str(tmp_path))
+
+    store.record(name, log_entry("x"))
+
+    files = list(tmp_path.iterdir())
+    assert len(files) == 1
+    assert files[0].parent == tmp_path
+    assert len(files[0].name) <= 80
+
+
+def test_log_text_cleaned(upgrade, tmp_path):
+    """Test control characters, like terminal escapes and new lines, are removed,
+    and long messages cut.
+    """
+    store = upgrade.NodeLogStore(str(tmp_path))
+
+    store.record("root", log_entry("red \x1b[31mtext\nforged 000009 line\x07"))
+    store.record("root", log_entry("y" * 10000, level="WARNING\x1b"))
+
+    lines = (tmp_path / "root.log").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert "\x1b" not in lines[0] and "\x07" not in lines[0]
+    assert lines[0].endswith("red [31mtext forged 000009 line")
+    assert len(lines[1]) < upgrade.LOG_MESSAGE_MAX + 50
+    assert " WARNING " in lines[1]
+
+
+class LogRig:
+    """A coordinator with a log store, a peer that logs, and a console."""
+
+    def __init__(self, upgrade, tmp_path):
+        self.upgrade = upgrade
+        self.tmp_path = tmp_path
+        self.store = upgrade.NodeLogStore(str(tmp_path / "coordinator_logs"))
+        self.coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            log_store=self.store,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        self.console_output = []
+
+    async def start(self):
+        self.server = await self.coordinator.start("127.0.0.1", 0)
+        self.port = self.server.sockets[0].getsockname()[1]
+
+    def peer(self, resume=None):
+        saved = {"token": resume}
+        node = self.upgrade.ShareSessionNode(
+            "root",
+            ["root"],
+            client_host(self.upgrade),
+            output=lambda line: None,
+            resume=resume,
+            on_resume=lambda token: saved.update(token=token),
+            **session_options(self.upgrade, password=code_password(self.upgrade)),
+        )
+        return node, saved
+
+    def console(self, commands=(), resume=None):
+        saved = {"token": resume}
+        node = self.upgrade.ShareSessionNode(
+            "mac",
+            ["console"],
+            None,
+            output=self.console_output.append,
+            commands=list(commands),
+            resume=resume,
+            on_resume=lambda token: saved.update(token=token),
+            log_store=self.upgrade.NodeLogStore(str(self.tmp_path / "console_logs")),
+            **session_options(self.upgrade, password=code_password(self.upgrade)),
+        )
+        return node, saved
+
+    async def until(self, condition, timeout=5):
+        for _ in range(int(timeout * 100)):
+            if condition():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("timed out waiting")
+
+    def messages(self, folder, node="root"):
+        store = self.upgrade.NodeLogStore(str(self.tmp_path / folder))
+        return [entry["message"] for entry in store.since(node, 0)]
+
+    async def drop(self, name, task):
+        self.coordinator.nodes[name]["channel"].close()
+        await asyncio.wait_for(task, timeout=5)
+        await self.until(lambda: name not in self.coordinator.nodes)
+
+    async def finish(self, *tasks):
+        await self.coordinator.handle_command("done", source="coordinator")
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+        self.server.close()
+
+
+def test_node_logs_reach_coordinator_and_console(upgrade, tmp_path):
+    """Test a node's log lines are written per node by the coordinator and the
+    console.
+    """
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        console, _ = rig.console()
+        peer, _ = rig.peer()
+        tasks = [
+            asyncio.create_task(n.run("127.0.0.1", rig.port)) for n in (console, peer)
+        ]
+        await rig.coordinator.wait_for_nodes(2, timeout=5)
+        peer.log("INFO", "stopping BES services")
+        await rig.until(lambda: "stopping BES services" in rig.messages("console_logs"))
+        await rig.finish(*tasks)
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert "stopping BES services" in rig.messages("coordinator_logs")
+    assert "stopping BES services" in rig.messages("console_logs")
+    assert (tmp_path / "coordinator_logs" / "root.log").exists()
+    assert (tmp_path / "console_logs" / "root.log").exists()
+    assert any("stopping BES services" in line for line in rig.console_output)
+
+
+def test_node_logs_buffered_while_disconnected(upgrade, tmp_path):
+    """Test lines logged while a node is disconnected arrive once it reconnects,
+    each only once.
+    """
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        peer, saved = rig.peer()
+        peer.log("INFO", "before connecting")
+        task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        await rig.until(lambda: saved["token"])
+        await rig.until(lambda: "before connecting" in rig.messages("coordinator_logs"))
+        await rig.drop("root", task)
+        peer.log("INFO", "while rebooting")
+        task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        await rig.until(lambda: "while rebooting" in rig.messages("coordinator_logs"))
+        await rig.finish(task)
+        return rig
+
+    rig = asyncio.run(scenario())
+    messages = rig.messages("coordinator_logs")
+    assert messages.count("before connecting") == 1
+    assert messages.count("while rebooting") == 1
+
+
+def test_console_catches_up_on_missed_lines(upgrade, tmp_path):
+    """Test a console that was away gets the lines it missed, only once."""
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        peer, _ = rig.peer()
+        console, console_saved = rig.console()
+        peer_task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        console_task = asyncio.create_task(console.run("127.0.0.1", rig.port))
+        await rig.coordinator.wait_for_nodes(2, timeout=5)
+        peer.log("INFO", "seen live")
+        await rig.until(lambda: "seen live" in rig.messages("console_logs"))
+        await rig.until(lambda: console_saved["token"])
+        await rig.drop("mac", console_task)
+
+        peer.log("INFO", "missed one")
+        peer.log("INFO", "missed two")
+        await rig.until(lambda: "missed two" in rig.messages("coordinator_logs"))
+        again, _ = rig.console(resume=console_saved["token"])
+        console_task = asyncio.create_task(again.run("127.0.0.1", rig.port))
+        await rig.until(lambda: "missed two" in rig.messages("console_logs"))
+        await rig.finish(peer_task, console_task)
+        return rig
+
+    rig = asyncio.run(scenario())
+    messages = rig.messages("console_logs")
+    assert [m for m in messages if m in ("seen live", "missed one", "missed two")] == [
+        "seen live",
+        "missed one",
+        "missed two",
+    ]
+
+
+def test_log_command_shows_recent_lines(upgrade, tmp_path):
+    """Test `log <node> <lines>` shows that node's last lines to who asked."""
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        peer, _ = rig.peer()
+        peer_task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        # after the peer's share check, so its lines are the last ones:
+        await rig.until(lambda: rig.coordinator.results.get("root"))
+        for n in range(3):
+            peer.log("INFO", f"line {n}")
+        await rig.until(lambda: "line 2" in rig.messages("coordinator_logs"))
+        console, _ = rig.console(commands=["log root 2"])
+        console_task = asyncio.create_task(console.run("127.0.0.1", rig.port))
+        await rig.until(
+            lambda: any(
+                re.match(r"root \d{6} .* line 2$", line) for line in rig.console_output
+            )
+        )
+        await rig.finish(peer_task, console_task)
+        return rig
+
+    rig = asyncio.run(scenario())
+    # the reply to `log root 2`, not the catch up's `[root] ...` lines:
+    reply = [line for line in rig.console_output if re.match(r"root \d{6} ", line)]
+    assert [line.rsplit(" ", 2)[-2:] for line in reply] == [
+        ["line", "1"],
+        ["line", "2"],
+    ]
+
+
+def test_coordinator_output_logged(upgrade, tmp_path):
+    """Test the coordinator's own messages are kept in coordinator.log."""
+
+    async def scenario():
+        rig = LogRig(upgrade, tmp_path)
+        await rig.start()
+        peer, _ = rig.peer()
+        task = asyncio.create_task(peer.run("127.0.0.1", rig.port))
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.finish(task)
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert any(
+        "root" in m and "connected" in m
+        for m in rig.messages("coordinator_logs", node="coordinator")
+    )
+
+
+def test_log_dir_argument(upgrade):
+    """Test node logs go to a folder by default, --log-dir changes it."""
+    parser = upgrade.build_parser()
+    assert parser.parse_args([]).log_dir == upgrade.DEFAULT_LOG_DIR
+    assert parser.parse_args(["--log-dir", "x"]).log_dir == "x"
+
+
+def test_node_log_handler_forwards_records(upgrade):
+    """Test a peer's logging records are sent on as its log lines."""
+    node = upgrade.ShareSessionNode(
+        "root", ["root"], None, output=lambda line: None, **session_options(upgrade)
+    )
+    handler = upgrade.NodeLogHandler(node)
+    logger = logging.getLogger("test_node_log_handler")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        logger.warning("disk is %s full", "90%")
+    finally:
+        logger.removeHandler(handler)
+
+    (entry,) = list(node.log_buffer)
+    assert entry["level"] == "WARNING"
+    assert entry["message"] == "disk is 90% full"
+
+
+# ---------------------------------------------------------------- coordinated walkthrough
+
+
+class WalkRig:
+    """A coordinator, a root node running a scripted walkthrough, and consoles."""
+
+    def __init__(self, upgrade, walkthrough, hyperv_host_=None):
+        self.upgrade = upgrade
+        self.walkthrough = walkthrough
+        self.hyperv_host = hyperv_host_
+        self.output = {"coordinator": []}
+        self.coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=self.output["coordinator"].append,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        self.tasks = []
+        self.nodes = {}
+
+    async def start(self):
+        self.server = await self.coordinator.start("127.0.0.1", 0)
+        self.port = self.server.sockets[0].getsockname()[1]
+        self.add(
+            "root", ["root"], client_host(self.upgrade), walkthrough=self.walkthrough
+        )
+        if self.hyperv_host:
+            self.add("hyperv", ["hyperv"], self.hyperv_host)
+        await self.coordinator.wait_for_nodes(len(self.tasks), timeout=5)
+
+    def add(self, name, roles, host, commands=(), **options):
+        self.output[name] = []
+        node = self.upgrade.ShareSessionNode(
+            name,
+            roles,
+            host,
+            output=self.output[name].append,
+            commands=list(commands),
+            **session_options(self.upgrade, password=code_password(self.upgrade)),
+            **options,
+        )
+        self.nodes[name] = node
+        self.tasks.append(asyncio.create_task(node.run("127.0.0.1", self.port)))
+        return node
+
+    async def console(self, name, commands, oneshot=False):
+        roles = ["console", "oneshot"] if oneshot else ["console"]
+        count = len(self.coordinator.nodes)
+        self.add(name, roles, None, commands=commands)
+        await self.coordinator.wait_for_nodes(count + 1, timeout=5)
+
+    async def until(self, condition, timeout=5):
+        for _ in range(int(timeout * 100)):
+            if condition():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(
+            f"timed out, coordinator said: {self.output['coordinator']}"
+        )
+
+    def text(self, name):
+        return "\n".join(self.output[name])
+
+    async def finish(self):
+        await self.coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(asyncio.gather(*self.tasks), timeout=5)
+        self.server.close()
+
+
+def test_walkthrough_question_answered_from_console(upgrade):
+    """Test the root's question reaches the coordinator and consoles, and a
+    console's answer goes back to the walkthrough.
+    """
+    answers = []
+
+    def walkthrough(bridge):
+        answers.append(bridge.ask("Is this step complete?", ["done", "skip", "quit"]))
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        await rig.console("mac", ["done"])
+        await rig.until(lambda: answers)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert answers == ["done"]
+    assert "Is this step complete?" in rig.text("coordinator")
+    assert "Is this step complete?" in rig.text("mac")
+    assert "answered done" in rig.text("coordinator")
+    # shown on the root's own terminal too, where it can be answered:
+    assert "QUESTION: Is this step complete? [done/skip/quit]" in rig.text("root")
+
+
+def test_walkthrough_first_answer_wins(upgrade):
+    """Test a second answer to the same question is ignored, not given to the
+    next question.
+    """
+    answers = []
+
+    def walkthrough(bridge):
+        answers.append(bridge.ask("first?", ["yes", "no"]))
+        answers.append(bridge.ask("second?", ["yes", "no"]))
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        first_id = rig.coordinator.question["id"]
+        await rig.coordinator.handle_command("answer no", source="coordinator")
+        await rig.until(
+            lambda: rig.coordinator.question
+            and rig.coordinator.question["id"] != first_id
+        )
+        # a late answer to the first question, by id, is stale:
+        await rig.coordinator.handle_command(
+            f"answer {first_id} yes", source="coordinator"
+        )
+        await asyncio.sleep(0.2)
+        assert len(answers) == 1
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.until(lambda: len(answers) == 2)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert answers == ["no", "yes"]
+    assert "stale" in rig.text("coordinator")
+
+
+def test_walkthrough_invalid_answer_refused(upgrade):
+    """Test an answer that isn't one of the choices is refused."""
+    answers = []
+
+    def walkthrough(bridge):
+        answers.append(bridge.ask("continue?", ["yes", "no"]))
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        await rig.coordinator.handle_command("answer maybe", source="coordinator")
+        await asyncio.sleep(0.2)
+        assert answers == []
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.until(lambda: answers)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert "not one of" in rig.text("coordinator")
+
+
+def test_halt_pauses_walkthrough_until_continue(upgrade):
+    """Test halt stops the walkthrough at its next check, and continue from
+    whoever halted resumes it.
+    """
+    progress = []
+
+    def walkthrough(bridge):
+        progress.append("started")
+        bridge.ask("ready?", ["yes"])
+        bridge.wait_if_halted()
+        progress.append("after halt")
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        await rig.console("ai", ["halt disk filling up"], oneshot=True)
+        await rig.until(lambda: rig.coordinator.halted)
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await asyncio.sleep(0.3)
+        assert progress == ["started"]
+        # another one-shot console can't continue someone else's halt:
+        await rig.console("ai2", ["continue"], oneshot=True)
+        await asyncio.sleep(0.3)
+        assert progress == ["started"]
+        await rig.nodes["ai"].command_queue.put("continue")
+        await rig.until(lambda: progress == ["started", "after halt"])
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    text = rig.text("coordinator")
+    assert "halted by ai: disk filling up" in text
+    assert "only ai or a person" in text
+
+
+def test_halt_continue_by_person(upgrade):
+    """Test a person at the coordinator can continue any halt."""
+    progress = []
+
+    def walkthrough(bridge):
+        bridge.ask("ready?", ["yes"])
+        bridge.wait_if_halted()
+        progress.append("continued")
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        await rig.console("ai", ["halt"], oneshot=True)
+        await rig.until(lambda: rig.coordinator.halted)
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.coordinator.handle_command("continue", source="coordinator")
+        await rig.until(lambda: progress)
+        await rig.finish()
+
+    asyncio.run(scenario())
+
+
+def test_state_command_pulls_node_state(upgrade):
+    """Test `state root` returns the root's walkthrough state to who asked,
+    without secrets.
+    """
+
+    def walkthrough(bridge):
+        bridge.set_state(
+            {"step": "backup", "done": ["preflight"], "share_password": "hunter2"}
+        )
+        bridge.ask("ready?", ["yes"])
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        await rig.console("mac", ["state root"])
+        await rig.until(lambda: '"step": "backup"' in rig.text("mac"))
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert "preflight" in rig.text("mac")
+    assert "hunter2" not in rig.text("mac") + rig.text("coordinator")
+
+
+def test_diag_command_runs_checks_alongside(upgrade):
+    """Test `diag root disk` runs a read-only check while a question waits."""
+
+    def walkthrough(bridge):
+        bridge.ask("ready?", ["yes"])
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        # after the share check that runs when the root connects:
+        await rig.until(lambda: rig.coordinator.results.get("root"))
+        ran_before = list(rig.nodes["root"].host.ran)
+        await rig.console("mac", ["diag root disk"])
+        await rig.until(lambda: "FreeSpace" in rig.text("mac"))
+        rig.ran_during_diag = rig.nodes["root"].host.ran[len(ran_before) :]
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    # read-only, so nothing ran on the root:
+    assert rig.ran_during_diag == []
+
+
+def test_node_diagnostics_checks(upgrade):
+    """Test each diagnostic check, and an unknown one."""
+    host = client_host(upgrade)
+    host.ports.add(52311)
+
+    result = upgrade.run_node_diagnostics(host, "all", sql_server="localhost")
+
+    assert set(result) >= {"disk", "reboot", "services", "ports"}
+    assert result["ports"] == {"52311": True}
+    assert "unknown" in upgrade.run_node_diagnostics(host, "nope")["error"]
+
+
+def test_checkpoint_requested_from_hyperv_node(upgrade):
+    """Test the root asks the Hyper-V node for a checkpoint, and gets the result."""
+    results = []
+
+    def walkthrough(bridge):
+        results.append(
+            bridge.remote_action(
+                "hyperv", "checkpoint", {"vm": "bigfix-root", "name": "before sql"}
+            )
+        )
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough, hyperv_host_=hyperv_host(upgrade))
+        await rig.start()
+        await rig.until(lambda: results)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert results[0]["ok"] is True
+    (command,) = rig.nodes["hyperv"].host.ran
+    assert command[-1] == (
+        "Checkpoint-VM -Name 'bigfix-root' -SnapshotName 'bigfix-upgrade before sql'"
+    )
+    assert not any(
+        "Remove-VMSnapshot" in " ".join(c) for c in rig.nodes["hyperv"].host.ran
+    )
+
+
+def test_checkpoint_unsafe_name_refused(upgrade):
+    """Test a VM or checkpoint name that could break out of the quotes is refused."""
+    results = []
+
+    def walkthrough(bridge):
+        results.append(
+            bridge.remote_action(
+                "hyperv", "checkpoint", {"vm": "x'; Remove-VM y", "name": "a"}
+            )
+        )
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough, hyperv_host_=hyperv_host(upgrade))
+        await rig.start()
+        await rig.until(lambda: results)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert results[0]["ok"] is False
+    assert rig.nodes["hyperv"].host.ran == []
+
+
+def test_remote_action_without_node(upgrade):
+    """Test asking for a node role that isn't connected fails at once, so the
+    walkthrough can fall back to asking the operator.
+    """
+    results = []
+
+    def walkthrough(bridge):
+        results.append(bridge.remote_action("hyperv", "checkpoint", {"vm": "a"}))
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: results)
+        await rig.finish()
+
+    asyncio.run(scenario())
+    assert results[0]["ok"] is False
+    assert "no hyperv node" in results[0]["error"]
+
+
+class FakeSession:
+    """Stands in for the WalkthroughBridge, without a network."""
+
+    def __init__(self, action_result=None):
+        self.prompts = []
+        self.states = []
+        self.halt_checks = 0
+        self.actions = []
+        self.action_result = action_result or {"ok": True}
+
+    def ask(self, prompt, choices, default=None):
+        self.prompts.append(prompt)
+        return "done" if "done" in choices else default or choices[0]
+
+    def wait_if_halted(self):
+        self.halt_checks += 1
+
+    def set_state(self, state):
+        self.states.append(json.loads(json.dumps(state)))
+
+    def remote_action(self, role, action, params, timeout=600):
+        self.actions.append((role, action, params))
+        return self.action_result
+
+
+def test_walkthrough_runs_through_session(upgrade, tmp_path, monkeypatch):
+    """Test the walkthrough asks through the session, checks for a halt before
+    each step, and publishes its state.
+    """
+    host = local_host(upgrade)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "done": [],
+                "reports": {},
+                "plan": {"steps": []},
+                "local_sql": True,
+                "baseline": upgrade.collect_local_info(host),
+            }
+        )
+    )
+    args = types.SimpleNamespace(
+        state_file=str(state_path),
+        step=None,
+        dry_run=True,
+        backup_dir=str(tmp_path / "share"),
+        backup_share_user=None,
+        staging_dir=None,
+        sql_instance=None,
+        dry_run_file=str(tmp_path / "dryrun.txt"),
+    )
+    monkeypatch.setattr(
+        upgrade.besapi.plugin_utilities, "get_besapi_connection", lambda args: None
+    )
+    session = FakeSession()
+
+    assert upgrade.run_walkthrough(args, None, host, {}, session=session) == 0
+
+    steps = [s["step"] for s in session.states if s.get("step")]
+    assert steps[0] == "preflight" and "cleanup" in steps
+    assert session.states[-1]["finished"] is True
+    assert session.halt_checks >= len(set(steps))
+    # a dry run answers itself, even in a session, and says what it answered:
+    assert session.prompts == []
+    saved = (tmp_path / "dryrun.txt").read_text(encoding="utf-8")
+    assert "Is this step complete? [done/skip/quit]: done (dry run)" in saved
+
+
+def test_checkpoint_action_through_session(upgrade, tmp_path, capsys):
+    """Test a snapshot step asks the Hyper-V node for a checkpoint of this VM,
+    found by this computer's addresses, and records it.
+    """
+    host = local_host(upgrade)
+    host.powershell[upgrade.PS_HOST_IPS] = [
+        {"IPAddress": "192.168.5.40", "PrefixLength": 24}
+    ]
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.session = FakeSession({"ok": True, "vm": "BigFixRoot", "checkpoint": "x"})
+
+    upgrade.ACTIONS["checkpoint"](ctx, "snapshot_1")
+
+    ((role, action, params),) = ctx.session.actions
+    assert (role, action) == ("hyperv", "checkpoint")
+    assert params == {"name": "snapshot_1", "ips": ["192.168.5.40"]}
+    assert ctx.state["checkpoints"][0]["vm"] == "BigFixRoot"
+    assert "Remove-VMSnapshot" in capsys.readouterr().out
+
+
+def test_checkpoint_action_falls_back(upgrade, tmp_path, capsys):
+    """Test with no Hyper-V node, the operator is asked to take the snapshot."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.session = FakeSession({"ok": False, "error": "no hyperv node is connected"})
+
+    upgrade.ACTIONS["checkpoint"](ctx, "snapshot_1")
+
+    assert "checkpoints" not in ctx.state
+    assert "take the VM snapshot yourself" in capsys.readouterr().out
+
+
+def test_checkpoint_action_without_session(upgrade, tmp_path, capsys):
+    """Test a walkthrough on its own keeps the manual snapshot step."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+
+    upgrade.ACTIONS["checkpoint"](ctx, "snapshot_1")
+
+    assert "take the VM snapshot yourself" in capsys.readouterr().out
+
+
+def test_hyperv_checkpoint_finds_vm_by_address(upgrade):
+    """Test the Hyper-V node picks the VM with the asking node's address."""
+    host = hyperv_host(upgrade)
+
+    result = upgrade.run_node_action(
+        host, ["hyperv"], "checkpoint", {"name": "snapshot_1", "ips": ["192.168.5.40"]}
+    )
+
+    assert result["ok"] is True and result["vm"] == "bigfix-root"
+    assert host.ran[-1][-1] == (
+        "Checkpoint-VM -Name 'bigfix-root' -SnapshotName 'bigfix-upgrade snapshot_1'"
+    )
+
+
+def test_snapshot_steps_request_checkpoints(upgrade, compat):
+    """Test each snapshot step has the checkpoint action, named by its step."""
+    path = upgrade.find_upgrade_path(
+        compat,
+        {"bigfix": "10.0.7.52", "windows": "2012 R2", "mssql": "2008 R2"},
+        {"windows": "2025", "mssql": "2025"},
+    )
+    steps = upgrade.build_steps(path, local_sql=True)
+
+    for step in steps:
+        if step.id.startswith("snapshot_"):
+            assert step.actions == [f"checkpoint:{step.id}"]
+
+
+@pytest.mark.parametrize(
+    "state_file, expected",
+    [
+        (
+            "bigfix_root_server_upgrade_win.state.json",
+            "bigfix_root_server_upgrade_win.session.json",
+        ),
+        ("other.json", "other.session.json"),
+    ],
+)
+def test_session_state_path(upgrade, state_file, expected):
+    """Test a node keeps its session token apart from the walkthrough's state, so
+    the two never overwrite each other.
+    """
+    assert upgrade.session_state_path(state_file) == expected
+
+
+def test_session_roles(upgrade):
+    """Test the node's roles: root, Hyper-V host, other peer, or console."""
+    assert upgrade.session_roles(local_host(upgrade), "peer") == ["root"]
+    assert upgrade.session_roles(hyperv_host(upgrade), "peer") == ["hyperv"]
+    assert upgrade.session_roles(hyperv_host(upgrade), "share_owner") == [
+        "hyperv",
+        "share_owner",
+    ]
+    other = FakeHost(powershell={upgrade.PS_HYPERV_HOST: False})
+    assert upgrade.session_roles(other, "peer") == ["peer"]
+    assert upgrade.session_roles(local_host(upgrade), "console") == ["console"]
+    assert upgrade.session_roles(None, "console", oneshot=True) == [
+        "console",
+        "oneshot",
+    ]
+
+
+def test_walkthrough_prints_forwarded(upgrade):
+    """Test what the walkthrough thread prints is also sent as the node's log,
+    and other threads' prints aren't.
+    """
+    node = upgrade.ShareSessionNode(
+        "root", ["root"], None, output=lambda line: None, **session_options(upgrade)
+    )
+    sink = io.StringIO()
+    tee = upgrade.ThreadLogTee(sink, node)
+
+    def walkthrough_thread():
+        tee.claim()
+        tee.write("===== backup: Back up BigFix =====\nhalf ")
+        tee.write("a line\n")
+
+    thread = threading.Thread(target=walkthrough_thread)
+    thread.start()
+    thread.join()
+    tee.write("from another thread\n")
+
+    assert [e["message"] for e in node.log_buffer] == [
+        "===== backup: Back up BigFix =====",
+        "half a line",
+    ]
+    assert "from another thread" in sink.getvalue()
+
+
+def test_oneshot_console_state_as_json(upgrade):
+    """Test a one-shot console runs one command, returns the reply as data, and
+    leaves without ending the session.
+    """
+
+    def walkthrough(bridge):
+        bridge.set_state({"step": "backup", "done": ["preflight"]})
+        bridge.ask("ready?", ["yes"])
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        result = await asyncio.wait_for(
+            upgrade.run_oneshot_command(
+                "127.0.0.1",
+                rig.port,
+                "state root",
+                wait=5,
+                **session_options(upgrade, password=code_password(upgrade)),
+            ),
+            timeout=10,
+        )
+        still_running = not rig.coordinator.done.is_set()
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.finish()
+        return result, still_running
+
+    result, still_running = asyncio.run(scenario())
+    assert still_running
+    assert result["command"] == "state root"
+    (reply,) = (r for r in result["replies"] if r["type"] == "reply")
+    assert reply["node"] == "root"
+    assert reply["data"]["walkthrough"]["step"] == "backup"
+    assert result["question"]["prompt"] == "ready?"
+    json.dumps(result)
+
+
+def test_oneshot_console_halts(upgrade):
+    """Test a one-shot halt is recorded as sent by that one-shot console."""
+
+    def walkthrough(bridge):
+        bridge.ask("ready?", ["yes"])
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        result = await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            rig.port,
+            "halt sql backup looks stuck",
+            wait=1,
+            name="claude",
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        halted = dict(rig.coordinator.halted)
+        await rig.coordinator.handle_command("continue", source="coordinator")
+        await rig.coordinator.handle_command("answer yes", source="coordinator")
+        await rig.finish()
+        return result, halted
+
+    result, halted = asyncio.run(scenario())
+    assert halted == {"by": "claude", "reason": "sql backup looks stuck"}
+    assert any("halted by claude" in line for line in result["lines"])
+
+
+def test_command_and_json_arguments(upgrade):
+    """Test --command and --json parse."""
+    args = upgrade.build_parser().parse_args(["--command", "state root", "--json"])
+    assert args.command == "state root" and args.json is True
+
+
+# ---------------------------------------------------------------- share owner
+
+
+def test_share_owner_offers_share_to_coordinator(upgrade):
+    """Test a coordinator with no share yet, like one on a Mac, takes the share
+    from the Hyper-V host and hands it to peers, never the password to consoles.
+    """
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"user": None, "password": None},
+            output=lambda line: None,
+            **coordinator_options(
+                upgrade, share_unc=None, password=code_password(upgrade)
+            ),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        outputs = {"root": [], "mac": [], "hyperv": []}
+        peer_host = client_host(upgrade)
+        nodes = {
+            "root": upgrade.ShareSessionNode(
+                "root",
+                ["root"],
+                peer_host,
+                output=outputs["root"].append,
+                **session_options(upgrade, password=code_password(upgrade)),
+            ),
+            "mac": upgrade.ShareSessionNode(
+                "mac",
+                ["console"],
+                None,
+                output=outputs["mac"].append,
+                **session_options(upgrade, password=code_password(upgrade)),
+            ),
+        }
+        tasks = [asyncio.create_task(n.run("127.0.0.1", port)) for n in nodes.values()]
+        await coordinator.wait_for_nodes(2, timeout=5)
+        owner = upgrade.ShareSessionNode(
+            "hyperv",
+            ["hyperv", "share_owner"],
+            hyperv_host(upgrade),
+            output=outputs["hyperv"].append,
+            share_offer={
+                "unc": SHARE_UNC,
+                "user": r"HYPERV\bfupgrade_share",
+                "password": "temp-Pw-123!",
+            },
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        tasks.append(asyncio.create_task(owner.run("127.0.0.1", port)))
+        for _ in range(500):
+            if len(coordinator.results.get("root", [])) >= 1 and peer_host.shares:
+                break
+            await asyncio.sleep(0.01)
+        share_unc = coordinator.share_unc
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+        server.close()
+        return share_unc, peer_host, nodes, outputs
+
+    share_unc, peer_host, nodes, outputs = asyncio.run(scenario())
+    assert share_unc == SHARE_UNC
+    assert (SHARE_UNC, r"HYPERV\bfupgrade_share", "temp-Pw-123!") in peer_host.shares
+    assert nodes["mac"].share.get("password") is None
+    assert "temp-Pw-123!" not in "\n".join(outputs["mac"])
+
+
+def test_share_offer_only_from_share_owner(upgrade):
+    """Test a node that isn't the share owner can't change the share."""
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"user": None, "password": None},
+            output=lambda line: None,
+            **coordinator_options(
+                upgrade, share_unc=None, password=code_password(upgrade)
+            ),
+        )
+        await coordinator._on_share_offer(
+            "root", {"unc": r"\\evil\share", "user": "x", "password": "y"}
+        )
+        return coordinator
+
+    coordinator = asyncio.run(scenario())
+    assert coordinator.share_unc is None
+
+
+@pytest.mark.parametrize(
+    "hyperv, windows, found, expected",
+    [
+        (True, True, ("192.168.5.20", 52390), "share_owner"),
+        (True, True, None, "coordinator"),
+        (False, True, None, "peer"),
+        (False, False, None, "console"),
+    ],
+)
+def test_choose_session_node(upgrade, hyperv, windows, found, expected):
+    """Test the Hyper-V host joins a running coordinator, like one on a Mac, as
+    the share owner, and only coordinates when none answers.
+    """
+    host = FakeHost(powershell={upgrade.PS_HYPERV_HOST: hyperv}, windows=windows)
+
+    async def discover(serial):
+        return found
+
+    node, address = asyncio.run(upgrade.choose_session_node(host, "123", discover))
+
+    assert node == expected
+    assert address == (found if expected == "share_owner" else None)
+
+
+@pytest.mark.parametrize(
+    "output, expected",
+    [
+        ("Firewall is enabled. (State = 1)", True),
+        ("Firewall is disabled. (State = 0)", False),
+        ("", None),
+    ],
+)
+def test_macos_firewall_enabled(upgrade, output, expected):
+    """Test the macOS application firewall state is read, None if unknown."""
+    assert upgrade.macos_firewall_enabled(lambda cmd: output) is expected
+
+
+# ---------------------------------------------------------------- coordinator outages
+
+
+def test_halt_saved_and_kept_across_restart(upgrade):
+    """Test a halt is saved as it changes, and a restarted coordinator keeps it,
+    so a restart never continues a halted run.
+    """
+    saved = []
+    progress = []
+
+    def walkthrough(bridge):
+        bridge.wait_if_halted()
+        progress.append("ran")
+
+    async def scenario():
+        first = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            on_halt=saved.append,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        await first.handle_command("halt checking disk", source="coordinator")
+        await first.handle_command("continue", source="coordinator")
+        await first.handle_command("halt again", source="coordinator")
+
+        restarted = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            halted=saved[-1],
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        server = await restarted.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        node = upgrade.ShareSessionNode(
+            "root",
+            ["root"],
+            client_host(upgrade),
+            output=lambda line: None,
+            walkthrough=walkthrough,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(node.run("127.0.0.1", port))
+        await restarted.wait_for_nodes(1, timeout=5)
+        await asyncio.sleep(0.3)
+        halted_while_restarted = list(progress)
+        await restarted.handle_command("continue", source="coordinator")
+        for _ in range(300):
+            if progress:
+                break
+            await asyncio.sleep(0.01)
+        await restarted.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return halted_while_restarted
+
+    halted_while_restarted = asyncio.run(scenario())
+    assert saved == [
+        {"by": "coordinator", "reason": "checking disk"},
+        None,
+        {"by": "coordinator", "reason": "again"},
+    ]
+    assert halted_while_restarted == []
+    assert progress == ["ran"]
+
+
+def test_root_answers_locally_when_coordinator_gone(upgrade):
+    """Test with the coordinator unreachable, the root's own terminal answers the
+    waiting question, and a wrong answer there is refused.
+    """
+    answers = []
+    printed = []
+
+    def walkthrough(bridge):
+        answers.append(bridge.ask("Is this step complete?", ["done", "skip", "quit"]))
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        root = rig.nodes["root"]
+        root._print = printed.append
+        rig.server.close()
+        rig.coordinator.nodes["root"]["channel"].close()
+        await asyncio.wait_for(rig.tasks[0], timeout=5)
+        root.on_typed("maybe")
+        root.on_typed("done")
+        for _ in range(300):
+            if answers:
+                break
+            await asyncio.sleep(0.01)
+        return root
+
+    asyncio.run(scenario())
+    assert answers == ["done"]
+    text = "\n".join(printed)
+    assert "not one of" in text
+    assert "answered here, the coordinator isn't connected" in text
+
+
+def test_typed_line_goes_to_coordinator_when_connected(upgrade):
+    """Test while connected, what's typed on a node is a session command."""
+
+    def walkthrough(bridge):
+        bridge.ask("ready?", ["yes"])
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        rig.nodes["root"].on_typed("yes")
+        await rig.until(lambda: rig.coordinator.question is None)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert "root answered yes" in rig.text("coordinator")
+
+
+def test_question_cleared_after_local_answer(upgrade):
+    """Test a question answered while the coordinator was away is cleared there
+    when the root reconnects, so it can't be answered twice.
+    """
+    answers = []
+
+    def walkthrough(bridge):
+        answers.append(bridge.ask("ready?", ["yes", "no"]))
+        bridge.set_state({"step": "after"})
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        await rig.until(lambda: rig.coordinator.question)
+        root = rig.nodes["root"]
+        rig.coordinator.nodes["root"]["channel"].close()
+        await asyncio.wait_for(rig.tasks[0], timeout=5)
+        await rig.until(lambda: "root" not in rig.coordinator.nodes)
+        root.on_typed("yes")
+        await rig.until(lambda: answers)
+        # the coordinator still thinks it's waiting, until the root is back:
+        assert rig.coordinator.question is not None
+        rig.tasks[0] = asyncio.create_task(root.run("127.0.0.1", rig.port))
+        await rig.until(lambda: rig.coordinator.question is None)
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert answers == ["yes"]
+    assert "answered on root while the coordinator was away" in rig.text("coordinator")
+
+
+def test_dry_run_file_keeps_only_its_thread(upgrade):
+    """Test the dry run file gets the walkthrough thread's prints, not the
+    session's, which still show on the screen.
+    """
+    screen, saved = io.StringIO(), io.StringIO()
+    tee = upgrade._Tee(screen, saved)
+
+    tee.write("step output\n")
+    thread = threading.Thread(target=lambda: tee.write("session line\n"))
+    thread.start()
+    thread.join()
+
+    assert saved.getvalue() == "step output\n"
+    assert screen.getvalue() == "step output\nsession line\n"
+
+
+def test_report_command_saves_node_report(upgrade, tmp_path):
+    """Test `report root` has the root build its report, which the coordinator
+    saves per node, secrets removed, and summarises to who asked.
+    """
+    store = upgrade.NodeLogStore(str(tmp_path))
+
+    def build():
+        return {
+            "upgrade_assessment": {
+                "warnings": ["a reboot is pending"],
+                "compatibility": {"reachable": True},
+            },
+            "local": {"api_password": "hunter2"},
+        }
+
+    async def scenario():
+        coordinator = upgrade.ShareSessionCoordinator(
+            share={"unc": SHARE_UNC, "user": None, "password": None},
+            output=lambda line: None,
+            log_store=store,
+            **coordinator_options(upgrade, password=code_password(upgrade)),
+        )
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        root = upgrade.ShareSessionNode(
+            "root",
+            ["root"],
+            client_host(upgrade),
+            output=lambda line: None,
+            report_fn=build,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        task = asyncio.create_task(root.run("127.0.0.1", port))
+        await coordinator.wait_for_nodes(1, timeout=5)
+        result = await upgrade.run_oneshot_command(
+            "127.0.0.1",
+            port,
+            "report root",
+            wait=5,
+            **session_options(upgrade, password=code_password(upgrade)),
+        )
+        await coordinator.handle_command("end", source="coordinator")
+        await asyncio.wait_for(task, timeout=5)
+        server.close()
+        return result
+
+    result = asyncio.run(scenario())
+    saved = json.loads((tmp_path / "root_report.json").read_text(encoding="utf-8"))
+    assert saved["upgrade_assessment"]["warnings"] == ["a reboot is pending"]
+    assert "hunter2" not in json.dumps(saved)
+    (reply,) = (r for r in result["replies"] if r["type"] == "reply")
+    assert reply["kind"] == "report"
+    assert reply["data"]["warnings"] == ["a reboot is pending"]
+    assert reply["data"]["saved"].endswith("root_report.json")
+
+
+def test_report_command_without_report(upgrade, tmp_path):
+    """Test a node that can't build a report, like a console, says so."""
+    node = upgrade.ShareSessionNode(
+        "mac", ["console"], None, output=lambda line: None, **session_options(upgrade)
+    )
+    assert "error" in node.build_node_report()
+
+
+def test_choose_session_node_explicit_coordinator(upgrade):
+    """Test the Hyper-V host given --coordinator joins it as the share owner,
+    without needing broadcast discovery to find it.
+    """
+    host = FakeHost(powershell={upgrade.PS_HYPERV_HOST: True})
+
+    async def discover(serial):
+        raise AssertionError("no broadcast when --coordinator is given")
+
+    node, address = asyncio.run(
+        upgrade.choose_session_node(host, "123", discover, "10.0.0.5:52390")
+    )
+
+    assert (node, address) == ("share_owner", ("10.0.0.5", 52390))

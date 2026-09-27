@@ -52,8 +52,9 @@ python bigfix_root_server_upgrade_win.py --walkthrough --backup-dir D:\\bigfix_b
 Share session mode (`--share-session`) checks the backup share from every
 node at once, over encrypted connections (see the node channel section). Everything is
 discovered where possible, and every question has a default for Enter:
-- the role: the Hyper-V host coordinates, Windows servers are peers, other
-  computers are consoles that watch and send commands (status, retry, done)
+- the role: the Hyper-V host joins a running coordinator (like one on a Mac)
+  as the share owner, or coordinates if none answers. Windows servers are
+  peers, other computers are consoles that watch and send commands
 - the masthead serial, from REST or the local BigFix client
 - the backup share: an existing one on the coordinator, or a new one on the
   drive with the most free space, reached at its address facing the root
@@ -63,9 +64,19 @@ discovered where possible, and every question has a default for Enter:
   for it once (not needed when BIGFIX_UPGRADE_PSK is set on every node). It
   only authenticates a SPAKE2 key exchange, so every connection gets its own
   fresh key, and the coordinator stops after 5 wrong codes
-The coordinator can create the folder, share, a temporary share account and
+The Hyper-V host can create the folder, share, a temporary share account and
 firewall rules (each confirmed first). Remove them afterwards with
-`--share-cleanup` on the coordinator.
+`--share-cleanup` there.
+
+In a session, nodes rejoin after a reboot without the code, using a resume
+token kept in `<state file>.session.json` (owner-only on macOS and Linux)
+until the session ends or 24 hours pass. The coordinator and consoles keep a
+log file per node in --log-dir, and a console that was away catches up. From
+any terminal: status, state <node>, diag <node> [check], log <node> [lines],
+halt [reason], continue, answer <choice>, revoke <node>, end. With
+`--walkthrough` too, the root server's walkthrough runs through the session:
+its questions can be answered anywhere, a halt pauses it between actions, and
+snapshot steps ask the Hyper-V host for a checkpoint.
 
 Example Usage, share session, the same on every node (coordinator as admin):
 python bigfix_root_server_upgrade_win.py --share-session
@@ -74,6 +85,12 @@ Example Usage, with explicit choices instead of discovery:
 python bigfix_root_server_upgrade_win.py --share-session --node coordinator
   --share-unc \\\\hyperv\\_tmp_backup --allow 192.168.5.40 --pairing-code new
 python bigfix_root_server_upgrade_win.py --share-session --coordinator hyperv:52390
+
+Example Usage, the walkthrough on the root server, in a session:
+python bigfix_root_server_upgrade_win.py --share-session --walkthrough --backup-dir \\\\hyperv\\_tmp_backup
+
+Example Usage, one command as JSON, for a script or AI, then leave:
+python bigfix_root_server_upgrade_win.py --share-session --command "state root" --json
 
 NOTE: On Windows Server 2012 R2 use Python 3.11, later versions don't support it.
 
@@ -110,6 +127,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import types
 import urllib.parse
 from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, cast
@@ -1393,11 +1411,17 @@ def collect_hyperv_info(
         for vm in vms
         if root_ip and root_ip in (vm.get("IPAddresses") or [])
     ]
-    # with no address to match, a single VM named like BigFix, to confirm:
+    # with no address match, a single VM named like BigFix, to confirm. The root
+    # server's name can resolve to another address here, like a public one:
     by_name = [name for name in sorted(names) if "bigfix" in name.lower()]
+    if root_ip and not by_address:
+        info["errors"].append(
+            f"no VM has the root server's address {root_ip}, it may be a public"
+            " or NAT address"
+        )
     if by_address:
         info["bigfix_vms"], info["bigfix_vms_matched_by"] = by_address, "address"
-    elif not root_ip and len(by_name) == 1:
+    elif len(by_name) == 1:
         info["bigfix_vms"], info["bigfix_vms_matched_by"] = by_name, "name"
     else:
         info["bigfix_vms"], info["bigfix_vms_matched_by"] = [], None
@@ -1854,7 +1878,9 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     "Snapshot the VM",
                     "Take a VM snapshot now, ideally with the VM shut down, or at"
                     " least with services stopped, so SQL Server is consistent."
-                    f" Name it like `before {step['component']} {step['to']}`.",
+                    f" Name it like `before {step['component']} {step['to']}`. In a"
+                    " session with the Hyper-V host, it's asked to take it.",
+                    [f"checkpoint:snapshot_{number}"],
                 ),
             ]
         )
@@ -1926,9 +1952,16 @@ def load_state(path: str) -> dict:
 
 
 def save_state(path: str, state: dict) -> None:
-    """Save walkthrough progress, atomically so a crash can't corrupt it."""
+    """Save walkthrough progress, atomically so a crash can't corrupt it.
+
+    Readable by its owner only on POSIX, it can hold session resume tokens. On
+    Windows it inherits its folder's permissions.
+    """
     temp_path = path + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as state_file:
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(temp_path)
+    descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as state_file:
         json.dump(state, state_file, indent=2)
     os.replace(temp_path, path)
 
@@ -2200,6 +2233,8 @@ class WalkthroughContext:
     input_fn: Any = None
     getpass_fn: Any = None
     share_connected: bool = False
+    # the multi-node session this walkthrough runs in, None on its own:
+    session: Any = None
 
     def confirm(self, prompt: str, default: str = "yes") -> bool:
         """Ask the operator to confirm, yes or no, Enter takes the default."""
@@ -2802,6 +2837,43 @@ def _action_check_service_pack(ctx: WalkthroughContext, required: str) -> None:
     raise SystemExit(f"{message}, then rerun to continue with this step")
 
 
+def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
+    """Ask the session's Hyper-V node for a checkpoint of this VM, else the
+    operator.
+
+    The script never deletes a checkpoint.
+    """
+    if ctx.dry_run:
+        print(f"DRY RUN, would ask the Hyper-V node for a checkpoint {name}")
+        return
+    result: dict = {"ok": False, "error": "not in a session with the Hyper-V host"}
+    if ctx.session:
+        ips = [
+            str(entry.get("IPAddress"))
+            for entry in _dicts(_probe(ctx.host.powershell_json, PS_HOST_IPS))
+            if entry.get("IPAddress")
+        ]
+        result = ctx.session.remote_action(
+            "hyperv", "checkpoint", {"name": name, "ips": ips}
+        )
+    if not result.get("ok"):
+        print(f"NOTE: {result.get('error')}, take the VM snapshot yourself")
+        return
+    ctx.state.setdefault("checkpoints", []).append(
+        {
+            "vm": result.get("vm"),
+            "checkpoint": result.get("checkpoint"),
+            "time": datetime.datetime.now().isoformat(),
+        }
+    )
+    save_state(ctx.state_path, ctx.state)
+    print(
+        f"checkpoint {result.get('checkpoint')} of {result.get('vm')} taken. After"
+        " the soak period remove it on the Hyper-V host with: Remove-VMSnapshot"
+        f" -VMName '{result.get('vm')}' -Name '{result.get('checkpoint')}'"
+    )
+
+
 def _action_validate(ctx: WalkthroughContext) -> None:
     local = redact(collect_local_info(ctx.host, ctx.args.sql_instance))
     ctx.state["reports"][datetime.datetime.now().isoformat()] = local
@@ -2833,6 +2905,7 @@ ACTIONS: Dict[str, Callable[..., None]] = {
     "restore_start_types": _action_restore_start_types,
     "validate": _action_validate,
     "check_service_pack": _action_check_service_pack,
+    "checkpoint": _action_checkpoint,
 }
 
 
@@ -2858,14 +2931,22 @@ def _auto_answer(prompt: str, choices: List[str], default: Optional[str] = None)
 
 
 class _Tee(io.TextIOBase):
-    """Writes to several streams, to keep a copy of what's printed."""
+    """Writes to the screen, and a copy of what's printed to other streams.
 
-    def __init__(self, *streams):
-        self.streams = streams
+    Only the thread that made it is copied, so in a session the dry run file
+    has the walkthrough's output and not the session's.
+    """
 
-    def write(self, text: str) -> int:
-        for stream in self.streams:
-            stream.write(text)
+    def __init__(self, screen, *copies):
+        super().__init__()
+        self.streams = (screen,) + copies
+        self._thread = threading.get_ident()
+
+    def write(self, text: str) -> int:  # type: ignore[override]
+        self.streams[0].write(text)
+        if threading.get_ident() == self._thread:
+            for stream in self.streams[1:]:
+                stream.write(text)
         return len(text)
 
     def flush(self) -> None:
@@ -2873,23 +2954,30 @@ class _Tee(io.TextIOBase):
             stream.flush()
 
 
-def run_walkthrough(args, bes_conn, host, compat: dict) -> int:
+def run_walkthrough(args, bes_conn, host, compat: dict, session=None) -> int:
     """Guide the upgrade one step at a time, resuming from the state file.
 
-    A dry run asks nothing, changes nothing, and saves everything it prints to
-    --dry-run-file, to hand over in one go.
+    A dry run asks and changes nothing, and saves everything it prints to
+    --dry-run-file, to hand over in one go. In a session, what it prints and
+    answers also reaches the coordinator's log, and a halt still pauses it.
     """
     if not args.dry_run:
-        return _run_walkthrough(args, bes_conn, host, compat, _ask)
+        return _run_walkthrough(
+            args, bes_conn, host, compat, session.ask if session else _ask, session
+        )
     path = getattr(args, "dry_run_file", None) or DEFAULT_DRY_RUN_FILE
     with open(path, "w", encoding="utf-8") as saved:
         with contextlib.redirect_stdout(cast(TextIO, _Tee(sys.stdout, saved))):
-            result = _run_walkthrough(args, bes_conn, host, compat, _auto_answer)
+            # answered here even in a session, the answers show in its log:
+            result = _run_walkthrough(
+                args, bes_conn, host, compat, _auto_answer, session
+            )
     print(f"dry run saved to {os.path.abspath(path)}")
     return result
 
 
-def _run_walkthrough(args, bes_conn, host, compat: dict, ask) -> int:
+def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> int:
+    # pylint: disable=too-many-arguments
     require_walkthrough_host(host)
     state = load_state(args.state_file)
 
@@ -2930,14 +3018,37 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask) -> int:
         # a dry run never asks for a license.pvk or its password:
         input_fn=(lambda prompt: "") if args.dry_run else None,
         getpass_fn=(lambda prompt: "") if args.dry_run else None,
+        session=session,
     )
+
+    def publish(step: Optional[Step], finished: bool = False) -> None:
+        if session:
+            session.set_state(
+                {
+                    "step": step.id if step else None,
+                    "title": step.title if step else None,
+                    "done": list(state["done"]),
+                    "skipped": list(state.get("skipped", [])),
+                    "total_steps": len(steps),
+                    "dry_run": bool(args.dry_run),
+                    "finished": finished,
+                }
+            )
+
     while True:
         step = next_step(steps, state)
         if step is None:
+            publish(None, finished=True)
             print("All steps are complete.")
             return 0
+        publish(step)
+        if session:
+            session.wait_if_halted()
         print(f"\n===== {step.id}: {step.title} =====\n{step.instructions}\n")
         for action in step.actions:
+            if session:
+                # a halt waits here, never in the middle of an action:
+                session.wait_if_halted()
             logging.info("running action %s for step %s", action, step.id)
             # an action can take one argument, as "name:argument":
             name, _sep, argument = action.partition(":")
@@ -4050,18 +4161,38 @@ class SecureChannel:
 # ---------------------------------------------------------------- handshake
 
 
-def make_hello(node_id: str, roles: List[str], serial: str) -> dict:
+def make_hello(
+    node_id: str, roles: List[str], serial: str, resume_id: Optional[str] = None
+) -> dict:
     """The first, unencrypted message from each side.
 
-    The whole hello is bound into the key exchange, so it can't be altered.
+    The whole hello is bound into the key exchange, so it can't be altered. A
+    node reconnecting after a reboot names its resume token by id, never the
+    token's secret.
     """
-    return {
+    hello = {
         "protocol": PROTOCOL,
         "node_id": node_id,
         "roles": roles,
         "serial": serial,
         "nonce": secrets.token_hex(32),
     }
+    if resume_id:
+        hello["resume_id"] = resume_id
+    return hello
+
+
+def derive_resume_password(secret: bytes, serial: str) -> bytes:
+    """The SPAKE2 password for a node resuming with its token, in place of the
+    pairing code.
+
+    Like the code, it only authenticates the key exchange.
+    """
+    return _hkdf(
+        b"resume:" + secret,
+        salt=f"masthead-serial:{serial}".encode(),
+        info=f"{PROTOCOL} resume password".encode(),
+    )
 
 
 def _confirmation(key: bytes, side: str, id_a: bytes, id_b: bytes) -> bytes:
@@ -4099,16 +4230,37 @@ async def _read(reader) -> bytes:
     return await asyncio.wait_for(_read_frame(reader), HANDSHAKE_TIMEOUT)
 
 
+PasswordSource = Any  # bytes, or a function of the other side's hello
+HelloSource = Any  # a hello, or on the server a function of the client's hello
+
+
 async def _handshake(
-    reader, writer, password: bytes, hello: dict, side: str
+    reader, writer, password: PasswordSource, hello: HelloSource, side: str
 ) -> SecureChannel:
-    own_bytes = json.dumps(hello).encode()
-    writer.write(_frame(own_bytes))
-    await writer.drain()
+    """Exchange hellos, then SPAKE2 and key confirmation.
+
+    The client's hello goes first, so the server can answer it, like accepting
+    a resume token. Either side can pick its password from the other's hello.
+    """
+    # pylint: disable=too-many-locals
     try:
-        peer_bytes = await _read(reader)
-        peer = json.loads(peer_bytes)
+        if side == "client":
+            own_bytes = json.dumps(hello).encode()
+            writer.write(_frame(own_bytes))
+            await writer.drain()
+            peer_bytes = await _read(reader)
+            peer = json.loads(peer_bytes)
+        else:
+            peer_bytes = await _read(reader)
+            peer = json.loads(peer_bytes)
+            if callable(hello):
+                hello = hello(peer) if isinstance(peer, dict) else hello({})
+            own_bytes = json.dumps(hello).encode()
+            writer.write(_frame(own_bytes))
+            await writer.drain()
         _check_peer_hello(peer, hello)
+        if callable(password):
+            password = password(peer)
 
         # both hellos are the SPAKE2 identities, so neither can be altered:
         client_bytes, server_bytes = (
@@ -4167,7 +4319,7 @@ async def _handshake(
 
 
 async def open_channel(
-    host: str, port: int, password: bytes, hello: dict
+    host: str, port: int, password: PasswordSource, hello: dict
 ) -> Tuple[SecureChannel, dict]:
     """Connect to the coordinator, and negotiate an authenticated key."""
     reader, writer = await asyncio.wait_for(
@@ -4182,7 +4334,7 @@ async def open_channel(
 
 
 async def accept_channel(
-    reader, writer, password: bytes, hello: dict
+    reader, writer, password: PasswordSource, hello: HelloSource
 ) -> Tuple[SecureChannel, dict]:
     """Negotiate an authenticated key with a node that connected."""
     try:
@@ -4339,19 +4491,18 @@ DEFAULT_SHARE_NAME = "bigfix_upgrade_backup"
 # wrong pairing codes before the coordinator stops accepting nodes, each is
 # one guess out of a million:
 MAX_WRONG_CODES = 5
+# a resume token lets a node that rebooted rejoin without the code, until the
+# session ends or this long after it was issued:
+RESUME_TOKEN_SECONDS = 24 * 60 * 60
+SESSION_COMMANDS = (
+    "status, retry, state <node>, diag <node> [check], report <node>,"
+    " log <node> [lines],"
+    " halt [reason], continue, answer <choice>, revoke <node>, end"
+)
 
 
-def detect_node_role(host) -> str:
-    """The share session role for this computer, from what it is.
-
-    The Hyper-V host coordinates, since it stays up while the others reboot.
-    Other Windows computers are peers, anything else can only be a console.
-    """
-    if not host.is_windows():
-        return "console"
-    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
-        return "coordinator"
-    return "peer"
+class NeedCode(HandshakeError):
+    """The node has no code, or its resume token wasn't accepted."""
 
 
 def _local_shares(host) -> List[dict]:
@@ -4505,6 +4656,30 @@ def decide_pairing_code(given: Optional[str], psk_source: str) -> Optional[str]:
     return generate_pairing_code() if code_required(psk_source) else None
 
 
+def session_pairing_code(
+    state: dict, given: Optional[str], psk_source: str, now: float
+) -> Optional[str]:
+    """The coordinator's pairing code, the same across its restarts until the
+    session ends or RESUME_TOKEN_SECONDS pass.
+
+    A given code isn't saved.
+    """
+    if given or not code_required(psk_source):
+        return decide_pairing_code(given, psk_source)
+    session = state.get("session") or {}
+    if session.get("pairing_code") and now < float(session.get("expires", 0)):
+        return str(session["pairing_code"])
+    code = generate_pairing_code()
+    state["session"] = {"pairing_code": code, "expires": now + RESUME_TOKEN_SECONDS}
+    return code
+
+
+def end_session_state(state: dict) -> None:
+    """Drop a finished session's code and resume tokens from the state."""
+    for key in [k for k in state if k == "session" or k.startswith("session_")]:
+        del state[key]
+
+
 async def find_coordinator(explicit, serial: str, discover) -> tuple:
     """The coordinator's address: --coordinator, or found by broadcast."""
     if explicit:
@@ -4516,6 +4691,381 @@ async def find_coordinator(explicit, serial: str, discover) -> tuple:
         "could not find the coordinator on this subnet, give --coordinator"
         " host:port (check it's running, and its firewall allows UDP discovery)"
     )
+
+
+# ---------------------------------------------------------------- session logs
+
+# a longer message from a node is cut, so no node can fill the disk quickly:
+LOG_MESSAGE_MAX = 4000
+# lines a node keeps to send once it's connected again, and a catch up's limit:
+LOG_BUFFER_MAX = 5000
+LOG_REPLAY_MAX = 2000
+DEFAULT_LOG_DIR = "bigfix_upgrade_logs"
+WINDOWS_RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {
+    f"{kind}{n}" for kind in ("com", "lpt") for n in range(1, 10)
+}
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def clean_log_text(text: Any, limit: int = LOG_MESSAGE_MAX) -> str:
+    """Log text from another node, safe to print and keep: no control characters,
+    like terminal escapes or new lines that could forge a log line, and cut.
+    """
+    text = re.sub(r"[\r\n\t]+", " ", str(text))
+    return _CONTROL_CHARACTERS.sub("", text).strip()[:limit]
+
+
+def safe_node_filename(name: str) -> str:
+    """A file name for a node's log, which can't leave the log folder."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name).strip(".")[:64] or "node"
+    if safe.lower().split(".")[0] in WINDOWS_RESERVED_NAMES:
+        safe = "node_" + safe
+    if safe != name:
+        # different names that clean to the same text keep different files:
+        safe += "-" + hashlib.sha256(name.encode()).hexdigest()[:8]
+    return safe + ".log"
+
+
+class NodeLogStore:
+    """Each node's log lines in their own file, `<folder>/<node>.log`, numbered.
+
+    A line is `<seq> <time> <level> <message>`. The numbers continue after a
+    restart, and a console keeps the coordinator's numbers, so it can ask for
+    what it missed.
+    """
+
+    def __init__(self, folder: str):
+        self.folder = folder
+        self._last: Dict[str, int] = {}
+
+    def _path(self, node: str) -> str:
+        return os.path.join(self.folder, safe_node_filename(node))
+
+    def _read(self, node: str) -> List[dict]:
+        try:
+            with open(self._path(node), encoding="utf-8") as log_file:
+                lines = log_file.read().splitlines()
+        except FileNotFoundError:
+            return []
+        entries = []
+        for line in lines:
+            parts = line.split(" ", 3)
+            if len(parts) == 4 and parts[0].isdigit():
+                seq, when, level, message = parts
+                entries.append(
+                    {"seq": int(seq), "time": when, "level": level, "message": message}
+                )
+        return entries
+
+    def last_seq(self, node: str) -> int:
+        """The newest line number kept for a node, 0 for none."""
+        if node not in self._last:
+            entries = self._read(node)
+            self._last[node] = entries[-1]["seq"] if entries else 0
+        return self._last[node]
+
+    def last_seqs(self) -> Dict[str, int]:
+        """The newest line number of every node written to since starting."""
+        return {node: seq for node, seq in self._last.items() if seq}
+
+    def record(
+        self, node: str, entry: dict, seq: Optional[int] = None
+    ) -> Optional[int]:
+        """Keep one line, numbered next, or as `seq` if it's newer than the last.
+
+        Returns its number, None if it was already kept.
+        """
+        last = self.last_seq(node)
+        if seq is None:
+            seq = last + 1
+        elif seq <= last:
+            return None
+        when = re.sub(r"[^0-9A-Za-z:.+-]", "", str(entry.get("time", "")))[:40] or "-"
+        level = (
+            re.sub(r"[^A-Z]", "", str(entry.get("level", "")).upper())[:10] or "INFO"
+        )
+        message = clean_log_text(entry.get("message", ""))
+        os.makedirs(self.folder, exist_ok=True)
+        with open(self._path(node), "a", encoding="utf-8") as log_file:
+            log_file.write(f"{seq:06d} {when} {level} {message}\n")
+        self._last[node] = seq
+        return seq
+
+    def since(self, node: str, seq: int) -> List[dict]:
+        """A node's lines after number `seq`."""
+        return [entry for entry in self._read(node) if entry["seq"] > seq]
+
+    def tail(self, node: str, count: int) -> List[dict]:
+        """A node's last `count` lines."""
+        return self._read(node)[-count:] if count > 0 else []
+
+    def nodes(self) -> List[str]:
+        """The nodes with a log here."""
+        return sorted(self._last)
+
+
+class ThreadLogTee(io.TextIOBase):
+    """Stdout that also sends, as this node's log, what one thread prints.
+
+    The walkthrough's thread claims it, so its step headers and notes reach the
+    coordinator, while other threads' prints only show here.
+    """
+
+    def __init__(self, stream, node):
+        super().__init__()
+        self.stream = stream
+        self.node = node
+        self._thread: Optional[int] = None
+        self._partial = ""
+
+    def claim(self) -> None:
+        """Forward what the calling thread prints from now on."""
+        self._thread = threading.get_ident()
+
+    def write(self, text: str) -> int:  # type: ignore[override]
+        self.stream.write(text)
+        if threading.get_ident() == self._thread:
+            *lines, self._partial = (self._partial + text).split("\n")
+            for line in lines:
+                if line.strip():
+                    self.node.log("INFO", line)
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+
+class NodeLogHandler(logging.Handler):
+    """Sends this node's logging records to the coordinator, as its log lines."""
+
+    def __init__(self, node, level=logging.INFO):
+        super().__init__(level)
+        self.node = node
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with contextlib.suppress(Exception):
+            self.node.log(record.levelname, record.getMessage())
+
+
+# ---------------------------------------------------------------- session checks
+
+NODE_DIAGNOSTICS = ["disk", "reboot", "services", "ports", "sql", "vms"]
+SQL_PING = "SET NOCOUNT ON; SELECT 1"
+
+
+def run_node_diagnostics(
+    host, check: str = "all", sql_server: Optional[str] = None
+) -> dict:
+    """Read-only checks of this node, run alongside the walkthrough.
+
+    Nothing here changes the computer, so it's safe at any time.
+    """
+    check = (check or "all").lower()
+    if check != "all" and check not in NODE_DIAGNOSTICS:
+        return {
+            "error": f"unknown check {check}, one of all, {', '.join(NODE_DIAGNOSTICS)}"
+        }
+
+    def services():
+        found = _probe(host.powershell_json, PS_SERVICES)
+        return [
+            {key: service.get(key) for key in ("Name", "State", "StartMode")}
+            for service in _dicts(found)
+            if _is_bigfix_service(service)
+        ]
+
+    def vms():
+        return [
+            {key: vm.get(key) for key in ("Name", "State", "Heartbeat")}
+            for vm in _dicts(host.powershell_json(PS_HYPERV_VMS))
+        ]
+
+    checks: Dict[str, Callable[[], Any]] = {
+        "disk": lambda: _dicts(host.powershell_json(PS_DISKS)),
+        "reboot": lambda: pending_reboot(host),
+        "services": services,
+        "ports": lambda: {str(port): host.port_open(port) for port in [52311]},
+    }
+    if sql_server:
+        checks["sql"] = lambda: bool(host.sqlcmd(sql_server, SQL_PING))
+    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
+        checks["vms"] = vms
+    if check != "all":
+        if check not in checks:
+            return {check: {"error": f"{check} doesn't apply on this node"}}
+        checks = {check: checks[check]}
+    return {name: _probe(func) for name, func in checks.items()}
+
+
+def run_node_action(host, roles: List[str], action: str, params: dict) -> dict:
+    """An action another node asked this one for, like a Hyper-V checkpoint.
+
+    Checkpoints are only ever made, never deleted, by this script.
+    """
+    try:
+        if action == "checkpoint" and "hyperv" in roles:
+            vm = str(params.get("vm", ""))
+            name = f"bigfix-upgrade {params.get('name', '')}".strip()
+            for ip in [] if vm else params.get("ips") or []:
+                # the VM of the node that asked, by its address:
+                info = collect_hyperv_info(host, str(ip))
+                if info.get("bigfix_vms_matched_by") == "address":
+                    vm = info["bigfix_vms"][0]
+                    break
+            if not vm:
+                raise ValueError("no VM has the asking node's address, give --vm-name")
+            host.run(
+                _powershell(
+                    f"Checkpoint-VM -Name {_ps_quote(vm)}"
+                    f" -SnapshotName {_ps_quote(name)}"
+                )
+            )
+            return {"ok": True, "vm": vm, "checkpoint": name}
+        return {"ok": False, "error": f"{action} isn't an action this node does"}
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        return {"ok": False, "error": f"{type(err).__name__}: {err}"}
+
+
+async def run_oneshot_command(
+    host: str,
+    port: int,
+    command: str,
+    wait: float = 5,
+    name: str = "oneshot",
+    **options,
+) -> dict:
+    """Connect as a one-shot console, run one command, and return what came back.
+
+    For an AI or a script to check on the session: the result is plain data.
+    The session isn't ended, and a resume token in `options` is kept.
+    """
+    lines: List[str] = []
+    node = ShareSessionNode(
+        name,
+        ["console", "oneshot"],
+        None,
+        output=lines.append,
+        commands=[command],
+        oneshot_wait=wait,
+        **options,
+    )
+    await node.run(host, port)
+    questions = [m for m in node.received if m.get("type") == "question"]
+    welcome = next((m for m in node.received if m.get("type") == "welcome"), {})
+    return {
+        "command": command,
+        "replies": [m for m in node.received if m.get("type") in ("reply", "status")],
+        "question": questions[-1] if questions else None,
+        "halted": welcome.get("halted"),
+        "lines": [clean_log_text(line) for line in lines],
+    }
+
+
+class WalkthroughBridge:
+    """Lets a walkthrough, in its own thread, work through the session.
+
+    Its questions can be answered from any terminal, it pauses while the session
+    is halted, its state can be pulled, and it can ask other nodes for actions.
+    """
+
+    def __init__(self, node):
+        self.node = node
+        self._lock = threading.Lock()
+        self._question: Optional[dict] = None
+        self._answer: Optional[str] = None
+        self._answered = threading.Event()
+        self._running = threading.Event()
+        self._running.set()
+        self.state: dict = {}
+        self._actions: Dict[str, dict] = {}
+
+    def ask(
+        self, prompt: str, choices: List[str], default: Optional[str] = None
+    ) -> str:
+        """Ask everyone in the session, the first valid answer wins."""
+        question = {
+            "id": secrets.token_hex(4),
+            "prompt": prompt,
+            "choices": list(choices),
+            "default": default,
+        }
+        with self._lock:
+            self._question = question
+            self._answer = None
+            self._answered.clear()
+        self.node._print(  # pylint: disable=protected-access
+            f"QUESTION: {prompt} [{'/'.join(choices)}], answer here or from any"
+            " terminal in the session"
+        )
+        self.node.send_threadsafe({"type": "question", **question})
+        self._answered.wait()
+        self.wait_if_halted()
+        return str(self._answer)
+
+    def pending_question(self) -> Optional[dict]:
+        """The question waiting for an answer, to ask again after a reconnect."""
+        with self._lock:
+            return dict(self._question) if self._question else None
+
+    def on_answer(self, message: dict) -> None:
+        """An answer from the coordinator, only for the question still waiting."""
+        with self._lock:
+            question = self._question
+            choice = str(message.get("choice", ""))
+            if (
+                question
+                and message.get("id") == question["id"]
+                and choice in question["choices"]
+            ):
+                self._answer = choice
+                self._question = None
+                self._answered.set()
+
+    def set_halted(self, halted: bool) -> None:
+        """Halt or continue, from the coordinator."""
+        if halted:
+            self._running.clear()
+        else:
+            self._running.set()
+
+    def wait_if_halted(self) -> None:
+        """Wait here while the session is halted."""
+        self._running.wait()
+
+    def set_state(self, state: dict) -> None:
+        """What `state <node>` shows, secrets removed."""
+        self.state = redact(state)
+
+    def remote_action(
+        self, role: str, action: str, params: dict, timeout: float = 600
+    ) -> dict:
+        """Ask the node with `role` for an action, and wait for its result."""
+        request_id = secrets.token_hex(8)
+        event = threading.Event()
+        request: Dict[str, Any] = {"event": event, "result": None}
+        self._actions[request_id] = request
+        self.node.send_threadsafe(
+            {
+                "type": "action_request",
+                "id": request_id,
+                "role": role,
+                "action": action,
+                "params": params,
+            }
+        )
+        if not event.wait(timeout):
+            self._actions.pop(request_id, None)
+            return {"ok": False, "error": f"no answer from the {role} node"}
+        return request["result"] or {"ok": False, "error": "no result"}
+
+    def on_action_result(self, message: dict) -> None:
+        """A result for one of this walkthrough's action requests."""
+        request = self._actions.pop(str(message.get("id")), None)
+        if request:
+            request["result"] = {
+                k: v for k, v in message.items() if k not in ("type", "id")
+            }
+            request["event"].set()
 
 
 # ---------------------------------------------------------------- share session: nodes
@@ -4594,9 +5144,28 @@ class ShareSessionCoordinator:
         share_unc,
         allow,
         max_failures=MAX_WRONG_CODES,
+        tokens=None,
+        on_tokens=None,
+        now=time.time,
+        log_store=None,
+        halted=None,
+        on_halt=None,
     ):
+        # pylint: disable=too-many-arguments
         self.share = share
-        self.output = output
+        self._print = output
+        # each node's log lines, and this coordinator's own as `coordinator`:
+        self.log_store = log_store
+        # per node, the newest (boot, seq) of its lines kept, so none is kept twice:
+        self.log_acks: Dict[str, dict] = {}
+        self._background: set = set()
+        # the walkthrough question waiting for an answer, and a halt, if any:
+        self.question: Optional[dict] = None
+        # a halt is saved as it changes, so a restart never continues a halt:
+        self.halted: Optional[dict] = halted
+        self.on_halt = on_halt
+        # who asked, by request id, for state, diag and action replies:
+        self.requests: Dict[str, str] = {}
         # authenticates the key exchange with each node, never used as a key:
         self.password = password
         self.serial = serial
@@ -4610,6 +5179,84 @@ class ShareSessionCoordinator:
         self.pending: Dict[str, int] = {}
         self.done = asyncio.Event()
         self._changed = asyncio.Event()
+        # resume tokens by id: {"node", "secret", "issued", "expires"}, the
+        # caller keeps the dict in its state file:
+        self.tokens: Dict[str, dict] = tokens if tokens is not None else {}
+        self.on_tokens = on_tokens
+        self.now = now
+
+    def output(self, line: str) -> None:
+        """Show a line here, keep it in coordinator.log, and send it to consoles."""
+        self._print(line)
+        self._keep_log("coordinator", {"level": "INFO", "message": line})
+
+    def _keep_log(self, node: str, entry: dict) -> None:
+        entry = {
+            "time": entry.get("time") or datetime.datetime.now().isoformat(),
+            "level": entry.get("level") or "INFO",
+            "message": clean_log_text(entry.get("message", "")),
+        }
+        seq = self.log_store.record(node, entry) if self.log_store else None
+        message = {"type": "log", "node": node, "seq": seq, **entry}
+        with contextlib.suppress(RuntimeError):
+            task = asyncio.get_running_loop().create_task(
+                self._broadcast_consoles(message)
+            )
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+
+    async def _catch_up(self, name: str, since: Any) -> None:
+        """Send a console the log lines it hasn't got yet, per node."""
+        if not self.log_store:
+            return
+        since = since if isinstance(since, dict) else {}
+        nodes = set(self.log_store.nodes()) | {str(node) for node in since}
+        for node in sorted(nodes):
+            try:
+                after = int(since.get(node, 0))
+            except (TypeError, ValueError):
+                after = 0
+            for entry in self.log_store.since(node, after)[-LOG_REPLAY_MAX:]:
+                await self._send(name, {"type": "log", "node": node, **entry})
+
+    def _token(self, resume_id: Any) -> Optional[dict]:
+        token = self.tokens.get(str(resume_id)) if resume_id else None
+        if token and self.now() < float(token.get("expires", 0)):
+            return token
+        return None
+
+    def _tokens_changed(self) -> None:
+        if self.on_tokens:
+            self.on_tokens(self.tokens)
+
+    def _issue_token(self, name: str) -> dict:
+        # one token per node, a new one replaces the old:
+        for resume_id in [i for i, t in self.tokens.items() if t["node"] == name]:
+            del self.tokens[resume_id]
+        issued = self.now()
+        resume_id = secrets.token_hex(16)
+        self.tokens[resume_id] = {
+            "node": name,
+            "secret": secrets.token_hex(32),
+            "issued": issued,
+            "expires": issued + RESUME_TOKEN_SECONDS,
+        }
+        self._tokens_changed()
+        return {"id": resume_id, **self.tokens[resume_id]}
+
+    def _password_for(self, peer: dict) -> bytes:
+        token = self._token(peer.get("resume_id"))
+        if token:
+            return derive_resume_password(bytes.fromhex(token["secret"]), self.serial)
+        return self.password
+
+    def _hello_for(self, peer: dict) -> dict:
+        hello = make_hello("coordinator", ["coordinator"], self.serial)
+        if peer.get("resume_id"):
+            hello["resume"] = (
+                "accepted" if self._token(peer["resume_id"]) else "unknown"
+            )
+        return hello
 
     async def start(self, host: str, port: int):
         """Listen for nodes, returning the asyncio server."""
@@ -4648,8 +5295,9 @@ class ShareSessionCoordinator:
                 self.output(f"refused {peer_ip}: not in --allow")
                 writer.close()
                 return
-            hello = make_hello("coordinator", ["coordinator"], self.serial)
-            channel, peer = await accept_channel(reader, writer, self.password, hello)
+            channel, peer = await accept_channel(
+                reader, writer, self._password_for, self._hello_for
+            )
         except WrongCode as err:
             # each wrong code is one online guess, so only allow a few:
             self.failures += 1
@@ -4666,20 +5314,42 @@ class ShareSessionCoordinator:
         except Exception as err:  # pylint: disable=broad-exception-caught
             self.output(f"refused {peer_ip}: {err}")
             return
-        # names must be unique, a peer and a console can run on the same computer:
-        base_name = name = str(peer.get("node_id"))
-        suffix = 2
-        while name in self.nodes:
-            name = f"{base_name}-{suffix}"
-            suffix += 1
+        token = self._token(peer.get("resume_id"))
+        if token:
+            # the same name as before its reboot, replacing a stale connection:
+            name = token["node"]
+            stale = self.nodes.pop(name, None)
+            if stale:
+                stale["channel"].close()
+        else:
+            # names must be unique, a peer and a console can run on one computer:
+            base_name = name = str(peer.get("node_id"))
+            suffix = 2
+            while name in self.nodes:
+                name = f"{base_name}-{suffix}"
+                suffix += 1
         roles = [str(role) for role in peer.get("roles") or []]
         self.nodes[name] = {"channel": channel, "roles": roles, "ip": peer_ip}
-        self.output(f"{name} ({', '.join(roles)}) connected from {peer_ip}")
-        await channel.send(
-            {"type": "welcome", "name": name, "share": self._share_for(roles)}
+        self.output(
+            f"{name} ({', '.join(roles)}) {'resumed' if token else 'connected'}"
+            f" from {peer_ip}"
         )
+        await channel.send(
+            {
+                "type": "welcome",
+                "name": name,
+                "share": self._share_for(roles),
+                "log_ack": self.log_acks.get(name) or {},
+                "halted": self.halted,
+            }
+        )
+        if not token:
+            await channel.send({"type": "resume", **self._issue_token(name)})
+        if "console" in roles and self.question:
+            # a console that joins late still sees what's waiting:
+            await channel.send({"type": "question", **self.question})
         self._changed.set()
-        if "console" not in roles:
+        if "console" not in roles and "share_owner" not in roles and self.share_unc:
             await self._diagnose(name)
         try:
             while True:
@@ -4690,8 +5360,9 @@ class ShareSessionCoordinator:
         except Exception as err:  # pylint: disable=broad-exception-caught
             self.output(f"{name}: dropped, {err}")
         finally:
-            self.nodes.pop(name, None)
-            self.pending.pop(name, None)
+            if self.nodes.get(name, {}).get("channel") is channel:
+                self.nodes.pop(name, None)
+                self.pending.pop(name, None)
             self._changed.set()
             channel.close()
             self.output(f"{name} disconnected")
@@ -4712,10 +5383,227 @@ class ShareSessionCoordinator:
             self._changed.set()
         elif message.get("type") == "command":
             await self.handle_command(str(message.get("command")), source=name)
+        elif message.get("type") == "log":
+            self._on_log(name, message)
+        elif message.get("type") == "question":
+            await self._on_question(name, message)
+        elif message.get("type") == "share_offer":
+            await self._on_share_offer(name, message)
+        elif message.get("type") == "question_cleared":
+            if self.question and self.question["node"] == name:
+                self.output(
+                    f"{self.question['prompt']} was answered on {name} while the"
+                    " coordinator was away"
+                )
+                self.question = None
+        elif message.get("type") in ("state_reply", "diag_reply", "report_reply"):
+            await self._relay_reply(name, message)
+        elif message.get("type") == "action_request":
+            await self._on_action_request(name, message)
+        elif message.get("type") == "action_result":
+            requester = self.requests.pop(str(message.get("id")), None)
+            if requester:
+                await self._send(requester, message)
+        elif message.get("type") == "catch_up":
+            await self._catch_up(name, message.get("since"))
+
+    async def _on_share_offer(self, name: str, message: dict) -> None:
+        """The Hyper-V host set up the share: use it, and hand it to the peers.
+
+        Only the node with the share_owner role can offer the share.
+        """
+        node = self.nodes.get(name)
+        if not node or "share_owner" not in node["roles"]:
+            self.output(f"refused a share offer from {name}, it isn't the share owner")
+            return
+        unc = str(message.get("unc") or "")
+        if not unc_share_root(unc):
+            self.output(f"refused a share offer from {name}: {unc!r} isn't a UNC path")
+            return
+        self.share_unc = unc
+        self.share = {"user": message.get("user"), "password": message.get("password")}
+        self.output(f"{name} set up the share {unc}")
+        for other, entry in list(self.nodes.items()):
+            if other != name and "console" not in entry["roles"]:
+                await self._send(
+                    other, {"type": "share", "share": self._share_for(entry["roles"])}
+                )
+                await self._diagnose(other)
+        await self._broadcast_consoles(
+            {"type": "share", "share": self._share_for(["console"])}
+        )
+
+    async def _on_question(self, name: str, message: dict) -> None:
+        choices = [clean_log_text(c, 40) for c in message.get("choices") or []]
+        self.question = {
+            "id": clean_log_text(message.get("id", ""), 16),
+            "node": name,
+            "prompt": clean_log_text(message.get("prompt", "")),
+            "choices": choices,
+        }
+        self.output(
+            f"QUESTION from {name}: {self.question['prompt']}"
+            f" [{'/'.join(choices)}], answer with: answer <choice>"
+        )
+        await self._broadcast_consoles({"type": "question", **self.question})
+
+    async def _relay_reply(self, name: str, message: dict) -> None:
+        requester = self.requests.pop(str(message.get("id")), None)
+        reply = {
+            "type": "reply",
+            "kind": str(message.get("type", "")).replace("_reply", ""),
+            "node": name,
+            "data": redact(message.get("data")),
+        }
+        if reply["kind"] == "report":
+            reply["data"] = self._save_report(name, reply["data"])
+        if requester == "coordinator":
+            self.output(f"{reply['kind']} {name}: {json.dumps(reply['data'])}")
+        elif requester:
+            await self._send(requester, reply)
+
+    def _save_report(self, name: str, report: Any) -> dict:
+        """Keep a node's report next to its log, and summarise it."""
+        if not isinstance(report, dict) or "error" in report:
+            return report if isinstance(report, dict) else {"error": "no report"}
+        folder = self.log_store.folder if self.log_store else "."
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(
+            folder, safe_node_filename(name).replace(".log", "_report.json")
+        )
+        with open(path, "w", encoding="utf-8") as report_file:
+            json.dump(report, report_file, indent=2, default=str)
+        assessment = report.get("upgrade_assessment") or {}
+        summary = {
+            "saved": os.path.abspath(path),
+            "warnings": assessment.get("warnings", []),
+            "reachable": _get(assessment, "compatibility", "reachable"),
+            "hyperv": assessment.get("hyperv"),
+        }
+        self.output(f"{name}'s report saved to {summary['saved']}")
+        return summary
+
+    async def _on_action_request(self, name: str, message: dict) -> None:
+        role = str(message.get("role", ""))
+        target = next(
+            (n for n, node in self.nodes.items() if role in node["roles"]), None
+        )
+        if not target:
+            await self._send(
+                name,
+                {
+                    "type": "action_result",
+                    "id": message.get("id"),
+                    "ok": False,
+                    "error": f"no {role} node is connected",
+                },
+            )
+            return
+        self.requests[str(message.get("id"))] = name
+        self.output(f"{name} asked {target} for {message.get('action')}")
+        await self._send(
+            target,
+            {
+                "type": "action",
+                "id": message.get("id"),
+                "action": message.get("action"),
+                "params": message.get("params") or {},
+                "from": name,
+            },
+        )
+
+    def _interactive(self, source: str) -> bool:
+        """A person typing: here, or a console that isn't a one-shot command."""
+        if source == "coordinator":
+            return True
+        node = self.nodes.get(source)
+        return node is not None and "oneshot" not in node["roles"]
+
+    async def _answer(self, words: List[str], source: str) -> None:
+        question = self.question
+        if not question:
+            self.output("no question is waiting for an answer")
+            return
+        if len(words) == 2:
+            asked_id, choice = words
+            if asked_id != question["id"]:
+                self.output(f"stale answer from {source}, that question was answered")
+                return
+        elif len(words) == 1:
+            choice = words[0]
+        else:
+            self.output("use: answer <choice>")
+            return
+        if choice not in question["choices"]:
+            self.output(f"{choice!r} is not one of {'/'.join(question['choices'])}")
+            return
+        self.question = None
+        self.output(f"{source} answered {choice} to {question['node']}")
+        await self._send(
+            question["node"],
+            {"type": "answer", "id": question["id"], "choice": choice, "by": source},
+        )
+
+    async def _request(self, kind: str, words: List[str], source: str) -> None:
+        """`state <node>` or `diag <node> [check]`, relayed to that node."""
+        node = words[0] if words else ""
+        if node not in self.nodes:
+            self.output(f"{node or '?'} isn't connected, see status")
+            return
+        request_id = secrets.token_hex(8)
+        self.requests[request_id] = source
+        message = {"type": f"{kind}_request", "id": request_id}
+        if kind == "diag":
+            message["check"] = words[1] if len(words) > 1 else "all"
+        await self._send(node, message)
+
+    async def _set_halt(self, halted: Optional[dict]) -> None:
+        self.halted = halted
+        if self.on_halt:
+            self.on_halt(halted)
+        for name, node in list(self.nodes.items()):
+            if "console" not in node["roles"]:
+                await self._send(
+                    name, {"type": "halt" if halted else "continue", **(halted or {})}
+                )
+
+    def _on_log(self, name: str, message: dict) -> None:
+        """Keep a node's log line once, even when it's sent again after a
+        reconnect.
+        """
+        boot, seq = str(message.get("boot", "")), message.get("seq")
+        if not isinstance(seq, int):
+            return
+        ack = self.log_acks.get(name) or {}
+        if ack.get("boot") == boot and seq <= int(ack.get("seq", 0)):
+            return
+        self.log_acks[name] = {"boot": boot, "seq": seq}
+        self._keep_log(name, message)
+
+    async def _show_log(self, words: List[str], source: str) -> None:
+        """`log <node> [lines]`: that node's last lines, to who asked."""
+        node = words[0] if words else ""
+        count = int(words[1]) if len(words) > 1 and words[1].isdigit() else 20
+        entries = (
+            self.log_store.tail(node, min(count, LOG_REPLAY_MAX))
+            if (self.log_store and node)
+            else []
+        )
+        lines = [
+            f"{node} {e['seq']:06d} {e['time']} {e['level']} {e['message']}"
+            for e in entries
+        ] or [f"no log lines for {node!r}"]
+        for line in lines:
+            self._print(line)
+        if source in self.nodes:
+            await self._send(source, {"type": "status", "lines": lines})
 
     def status_lines(self) -> List[str]:
         """The current state of every node."""
-        lines = [f"share {self.share_unc}, {len(self.nodes)} node(s) connected"]
+        lines = [
+            f"share {self.share_unc or 'not set up yet, waiting for the Hyper-V host'},"
+            f" {len(self.nodes)} node(s) connected"
+        ]
         for name, node in self.nodes.items():
             history = self.results.get(name)
             last = history[-1] if history else None
@@ -4737,9 +5625,38 @@ class ShareSessionCoordinator:
 
     async def handle_command(self, command: str, source: str) -> None:
         """Run one command, from this console or a node."""
-        command = command.strip().lower()
-        self.output(f"{source}: {command}")
-        if command == "status":
+        text = command.strip()
+        command = text.lower()
+        words = command.split()
+        self.output(f"{source}: {text}")
+        if not words:
+            return
+        if words[0] == "answer":
+            await self._answer(words[1:], source)
+        elif self.question and len(words) == 1 and words[0] in self.question["choices"]:
+            # a bare choice, like done, answers the question waiting:
+            await self._answer(words, source)
+        elif words[0] == "halt":
+            reason = text.split(None, 1)[1] if len(words) > 1 else "no reason given"
+            await self._set_halt({"by": source, "reason": clean_log_text(reason)})
+            self.output(
+                f"halted by {source}: {clean_log_text(reason)}. Nodes finish their"
+                " current action, then wait for continue"
+            )
+        elif words[0] == "continue":
+            if not self.halted:
+                self.output("nothing is halted")
+            elif source == self.halted["by"] or self._interactive(source):
+                await self._set_halt(None)
+                self.output(f"continued by {source}")
+            else:
+                self.output(
+                    f"halted by {self.halted['by']}: only {self.halted['by']} or a"
+                    " person at a terminal can continue"
+                )
+        elif words[0] in ("state", "diag", "report"):
+            await self._request(words[0], words[1:], source)
+        elif command == "status":
             lines = self.status_lines()
             for line in lines:
                 self.output(line)
@@ -4749,13 +5666,33 @@ class ShareSessionCoordinator:
             for name, node in list(self.nodes.items()):
                 if "console" not in node["roles"]:
                     await self._diagnose(name)
-        elif command == "done":
+        elif command.startswith("log "):
+            await self._show_log(command.split()[1:], source)
+        elif command.startswith("revoke "):
+            target = command.split(None, 1)[1]
+            revoked = [i for i, t in self.tokens.items() if t["node"].lower() == target]
+            for resume_id in revoked:
+                del self.tokens[resume_id]
+            self._tokens_changed()
+            self.output(
+                f"revoked {target}'s resume token, it needs the code to rejoin"
+                if revoked
+                else f"{target} has no resume token"
+            )
+        elif command in ("done", "end"):
             await self._wait(lambda: not any(self.pending.values()), timeout=120)
             for name in list(self.nodes):
                 await self._send(name, {"type": "bye"})
+            # the session is over, so no token outlives it:
+            self.tokens.clear()
+            self._tokens_changed()
             self.done.set()
         else:
-            self.output(f"unknown command {command!r}, use status, retry or done")
+            self.output(
+                f"unknown command {command!r}, use status, retry, state <node>,"
+                " diag <node> [check], log <node> [lines], halt [reason], continue,"
+                " answer <choice>, revoke <node> or end"
+            )
 
     async def _wait(self, condition, timeout: float) -> None:
         async def waiter():
@@ -4789,12 +5726,46 @@ class ShareSessionNode:
         prompt_password=None,
         sql_server=None,
         read_stdin=False,
+        resume=None,
+        on_resume=None,
+        prompt_code=None,
+        log_store=None,
+        walkthrough=None,
+        oneshot_wait=None,
+        share_offer=None,
+        report_fn=None,
     ):
+        # pylint: disable=too-many-arguments,too-many-locals
         self.name = name
         self.read_stdin = read_stdin
         self.roles = roles
         self.host = host
-        self.output = output
+        self._print = output
+        # a console keeps every node's lines, numbered as the coordinator did:
+        self.log_store = log_store
+        # this node's own lines, numbered per run, kept until they're sent:
+        self.log_boot = secrets.token_hex(8)
+        self.log_seq = 0
+        self.log_buffer: collections.deque = collections.deque(maxlen=LOG_BUFFER_MAX)
+        self._log_sent = 0
+        self._log_wakeup: Optional[asyncio.Event] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._stdin_started = False
+        self._channel = None
+        # a walkthrough run in its own thread, through the session:
+        self.walkthrough = walkthrough
+        self.bridge = WalkthroughBridge(self) if walkthrough else None
+        self._walkthrough_started = False
+        # the coordinator ended the session, so don't reconnect:
+        self.finished = False
+        # a one-shot console leaves after this many seconds, or soon after a reply,
+        # keeping what it got for --json:
+        self.oneshot_wait = oneshot_wait
+        self.received: List[dict] = []
+        # on the Hyper-V host with another coordinator: the share it set up
+        self.share_offer = share_offer
+        # builds this node's --report, for `report <node>`:
+        self.report_fn = report_fn
         self.password = password
         self.serial = serial
         self.commands = commands
@@ -4802,14 +5773,251 @@ class ShareSessionNode:
         self.sql_server = sql_server
         self.share: dict = {}
         self.command_queue: asyncio.Queue = asyncio.Queue()
+        # a token from the coordinator, to rejoin after a reboot without the code:
+        self.resume = resume
+        self.on_resume = on_resume
+        # returns the SPAKE2 password from a code the operator types:
+        self.prompt_code = prompt_code
+
+    def build_node_report(self) -> dict:
+        """This node's report, secrets removed, for `report <node>`."""
+        if not self.report_fn:
+            return {"error": f"{self.name} doesn't make a report"}
+        try:
+            return redact(self.report_fn())
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            logging.exception("report failed")
+            return {"error": f"{type(err).__name__}: {err}"}
+
+    def on_typed(self, line: str) -> None:
+        """A line typed on this node: a session command while connected, else an
+        answer to the waiting question, so the walkthrough isn't stuck while the.
+
+        coordinator is away.
+        """
+        if self._channel is not None:
+            self.command_queue.put_nowait(line)
+            return
+        question = self.bridge.pending_question() if self.bridge else None
+        if not question:
+            self._print(
+                "the coordinator isn't connected, commands work again once it's back"
+            )
+            return
+        words = line.split()
+        choice = words[1] if len(words) == 2 and words[0].lower() == "answer" else line
+        choice = choice.strip().lower()
+        if choice not in question["choices"]:
+            self._print(f"{choice!r} is not one of {'/'.join(question['choices'])}")
+            return
+        self.bridge.on_answer({"id": question["id"], "choice": choice})  # type: ignore[union-attr]
+        self._print(f"{choice} answered here, the coordinator isn't connected")
+        self.log("INFO", f"answered {choice} here while the coordinator was away")
+
+    def _leave_after(self, channel, seconds: float) -> None:
+        async def leave():
+            await asyncio.sleep(seconds)
+            channel.close()
+
+        task = asyncio.get_running_loop().create_task(leave())
+        self._leaving = task
+
+    def send_threadsafe(self, message: dict) -> None:
+        """Send to the coordinator from another thread, dropped if disconnected."""
+        loop, channel = self._loop, self._channel
+        if loop and channel:
+            asyncio.run_coroutine_threadsafe(self._send_quietly(channel, message), loop)
+
+    @staticmethod
+    async def _send_quietly(channel, message: dict) -> None:
+        with contextlib.suppress(ConnectionError, OSError):
+            await channel.send(message)
+
+    def _start_walkthrough(self) -> None:
+        def run():
+            try:
+                self.walkthrough(self.bridge)
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logging.exception("walkthrough failed")
+                self.output(f"walkthrough failed: {err}")
+            self.send_threadsafe({"type": "walkthrough_finished"})
+
+        self._walkthrough_started = True
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _handle_session_message(self, channel, message: dict) -> None:
+        """Questions, halts, state, diagnostics and actions."""
+        kind = message.get("type")
+        loop = asyncio.get_running_loop()
+        if kind == "answer" and self.bridge:
+            self.bridge.on_answer(message)
+        elif kind in ("halt", "continue") and self.bridge:
+            self.bridge.set_halted(kind == "halt")
+            if kind == "halt":
+                self.output(f"halted by {message.get('by')}: {message.get('reason')}")
+        elif kind == "question":
+            self._print(
+                f"QUESTION from {clean_log_text(message.get('node', ''), 80)}:"
+                f" {clean_log_text(message.get('prompt', ''))}"
+                f" [{'/'.join(clean_log_text(c, 40) for c in message.get('choices') or [])}]"
+            )
+        elif kind == "state_request":
+            state = {
+                "node": self.name,
+                "roles": self.roles,
+                "walkthrough": (self.bridge.state if self.bridge else None),
+                "question": (self.bridge.pending_question() if self.bridge else None),
+            }
+            await channel.send(
+                {"type": "state_reply", "id": message.get("id"), "data": redact(state)}
+            )
+        elif kind == "report_request":
+            data = await loop.run_in_executor(None, self.build_node_report)
+            await channel.send(
+                {"type": "report_reply", "id": message.get("id"), "data": data}
+            )
+        elif kind == "diag_request":
+            data = (
+                await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        run_node_diagnostics,
+                        self.host,
+                        str(message.get("check") or "all"),
+                        self.sql_server,
+                    ),
+                )
+                if self.host
+                else {"error": "this node has nothing to check"}
+            )
+            await channel.send(
+                {"type": "diag_reply", "id": message.get("id"), "data": data}
+            )
+        elif kind == "action":
+            result = await loop.run_in_executor(
+                None,
+                run_node_action,
+                self.host,
+                self.roles,
+                str(message.get("action", "")),
+                message.get("params") or {},
+            )
+            self.output(f"{message.get('action')} for {message.get('from')}: {result}")
+            await channel.send(
+                {"type": "action_result", "id": message.get("id"), **result}
+            )
+        elif kind == "action_result" and self.bridge:
+            self.bridge.on_action_result(message)
+        elif kind == "reply":
+            self._print(
+                f"{clean_log_text(message.get('kind', ''), 20)}"
+                f" {clean_log_text(message.get('node', ''), 80)}:"
+                f" {clean_log_text(json.dumps(message.get('data')))}"
+            )
+
+    def output(self, line: str) -> None:
+        """Show a line here, and on a peer also send it to the coordinator."""
+        self._print(line)
+        if "console" not in self.roles:
+            self.log("INFO", line)
+
+    def log(self, level: str, message: str) -> None:
+        """Send one log line to the coordinator, now or once connected again.
+
+        Safe to call from any thread, like a logging handler.
+        """
+        self.log_seq += 1
+        self.log_buffer.append(
+            {
+                "type": "log",
+                "boot": self.log_boot,
+                "seq": self.log_seq,
+                "time": datetime.datetime.now().isoformat(),
+                "level": level,
+                "message": clean_log_text(message),
+            }
+        )
+        if self._loop and self._log_wakeup:
+            with contextlib.suppress(RuntimeError):
+                self._loop.call_soon_threadsafe(self._log_wakeup.set)
+
+    async def _send_logs(self, channel) -> None:
+        while True:
+            for entry in list(self.log_buffer):
+                if entry["seq"] > self._log_sent:
+                    await channel.send(entry)
+                    self._log_sent = entry["seq"]
+            self._log_wakeup.clear()  # type: ignore[union-attr]
+            if not any(e["seq"] > self._log_sent for e in list(self.log_buffer)):
+                await self._log_wakeup.wait()  # type: ignore[union-attr]
+
+    def _show_remote_log(self, message: dict) -> None:
+        node = clean_log_text(message.get("node", ""), 80)
+        entry = {
+            "time": message.get("time"),
+            "level": message.get("level"),
+            "message": message.get("message", ""),
+        }
+        seq = message.get("seq")
+        if self.log_store and isinstance(seq, int):
+            if self.log_store.record(node, entry, seq=seq) is None:
+                return  # already kept, from an earlier connection
+        self._print(f"[{node}] {clean_log_text(entry['message'])}")
+
+    def _set_resume(self, token: Optional[dict]) -> None:
+        self.resume = token
+        if self.on_resume:
+            self.on_resume(token)
+
+    def _resume_token(self) -> Optional[dict]:
+        token = self.resume
+        if token and time.time() < float(token.get("expires", 0)):
+            return token
+        return None
+
+    def _password_for(self, peer: dict) -> bytes:
+        token = self._resume_token()
+        if token and peer.get("resume") == "accepted":
+            return derive_resume_password(bytes.fromhex(token["secret"]), self.serial)
+        if token:
+            # unknown to the coordinator, or expired there: the code is needed
+            self._set_resume(None)
+        if self.password is None:
+            raise NeedCode("this node needs the pairing code")
+        return self.password
+
+    async def _open(self, host: str, port: int):
+        token = self._resume_token()
+        hello = make_hello(
+            self.name, self.roles, self.serial, token["id"] if token else None
+        )
+        try:
+            channel, _peer = await open_channel(host, port, self._password_for, hello)
+        except WrongCode:
+            if token:
+                # a token the coordinator refused, never retried:
+                self._set_resume(None)
+            raise
+        return channel
 
     async def connect(self, host: str, port: int, attempts: int = 1, delay: float = 5):
-        """Connect and authenticate, retrying while the coordinator isn't up yet."""
+        """Connect and authenticate, retrying while the coordinator isn't up yet.
+
+        With a resume token no code is needed; without one, or if the
+        coordinator doesn't accept it, the code is asked for once.
+        """
+        if self.password is None and not self._resume_token() and self.prompt_code:
+            # nothing to connect with yet, so ask now, not after a failed try:
+            self.password = self.prompt_code()
         for attempt in range(1, attempts + 1):
-            hello = make_hello(self.name, self.roles, self.serial)
             try:
-                channel, _peer = await open_channel(host, port, self.password, hello)
-                return channel
+                try:
+                    return await self._open(host, port)
+                except NeedCode:
+                    if not self.prompt_code:
+                        raise
+                    self.password = self.prompt_code()
+                    return await self._open(host, port)
             except (OSError, asyncio.TimeoutError) as err:
                 if attempt == attempts:
                     raise
@@ -4821,6 +6029,10 @@ class ShareSessionNode:
         """Serve the coordinator until it says bye."""
         channel = await self.connect(host, port, attempts)
         sender = asyncio.create_task(self._send_commands(channel))
+        self._loop = asyncio.get_running_loop()
+        self._log_wakeup = asyncio.Event()
+        self._channel = channel
+        log_sender: Optional[asyncio.Task] = None
         try:
             while True:
                 message = await channel.recv()
@@ -4828,20 +6040,60 @@ class ShareSessionNode:
                 if kind == "welcome":
                     self.share = message.get("share") or {}
                     self.name = message.get("name") or self.name
+                    # resend what the coordinator didn't keep, from this run:
+                    ack = message.get("log_ack") or {}
+                    self._log_sent = (
+                        int(ack.get("seq", 0))
+                        if ack.get("boot") == self.log_boot
+                        else 0
+                    )
+                    if log_sender is None:
+                        log_sender = asyncio.create_task(self._send_logs(channel))
+                    if self.log_store is not None:
+                        await channel.send(
+                            {"type": "catch_up", "since": self.log_store.last_seqs()}
+                        )
+                    if self.share_offer:
+                        await channel.send({"type": "share_offer", **self.share_offer})
+                    if self.oneshot_wait is not None:
+                        self.received.append(
+                            {"type": "welcome", "halted": message.get("halted")}
+                        )
+                        self._leave_after(channel, self.oneshot_wait)
+                    if self.bridge:
+                        self.bridge.set_halted(bool(message.get("halted")))
+                        question = self.bridge.pending_question()
+                        if question:
+                            # asked before a reconnect, ask again:
+                            await channel.send({"type": "question", **question})
+                        else:
+                            # any question it had was answered here meanwhile:
+                            await channel.send({"type": "question_cleared"})
+                        if not self._walkthrough_started:
+                            self._start_walkthrough()
                     self.output(
                         f"connected as {self.name}, share {self.share.get('unc')}"
                     )
                     self._ask_missing_password()
-                    if self.read_stdin:
+                    if self.read_stdin and not self._stdin_started:
+                        self._stdin_started = True
                         # NOTE: only after any prompts, so they don't compete for input:
                         threading.Thread(
                             target=_read_stdin_commands,
-                            args=(self.command_queue, asyncio.get_running_loop()),
+                            args=(self.on_typed, asyncio.get_running_loop()),
                             daemon=True,
                         ).start()
-                        self.output("commands: status, retry, done")
+                        self.output(f"commands: {SESSION_COMMANDS}")
                     for command in self.commands or []:
                         await self.command_queue.put(command)
+                elif kind == "resume":
+                    self._set_resume(
+                        {
+                            "id": message.get("id"),
+                            "secret": message.get("secret"),
+                            "expires": message.get("expires"),
+                        }
+                    )
                 elif kind == "diagnose" and "console" not in self.roles:
                     await self._diagnose(channel)
                 elif kind == "result":
@@ -4849,14 +6101,46 @@ class ShareSessionNode:
                         self.output(line)
                 elif kind == "status":
                     for line in message.get("lines", []):
-                        self.output(line)
+                        self._print(clean_log_text(line))
+                elif kind == "log":
+                    self._show_remote_log(message)
+                elif kind == "share":
+                    self.share = message.get("share") or {}
+                    self.output(f"share is now {self.share.get('unc')}")
+                    self._ask_missing_password()
+                if self.oneshot_wait is not None and kind in (
+                    "reply",
+                    "status",
+                    "question",
+                ):
+                    self.received.append(redact(message))
+                    if kind in ("reply", "status"):
+                        self._leave_after(channel, 0.3)
+                if kind in (
+                    "answer",
+                    "halt",
+                    "continue",
+                    "question",
+                    "state_request",
+                    "diag_request",
+                    "report_request",
+                    "action",
+                    "action_result",
+                    "reply",
+                ):
+                    await self._handle_session_message(channel, message)
                 elif kind == "bye":
+                    self.finished = True
                     self.output("coordinator finished the session")
+                    self._set_resume(None)
                     return
         except (asyncio.IncompleteReadError, ConnectionError):
             self.output("coordinator disconnected")
         finally:
+            self._channel = None
             sender.cancel()
+            if log_sender:
+                log_sender.cancel()
             channel.close()
 
     async def _send_commands(self, channel) -> None:
@@ -4898,7 +6182,7 @@ def save_session_results(state: dict, results: dict) -> None:
     state.setdefault("share", {})["results"] = results
 
 
-def _read_stdin_commands(queue: asyncio.Queue, loop) -> None:
+def _read_stdin_commands(handle, loop) -> None:
     """Feed typed commands into the event loop, from a thread."""
     while True:
         try:
@@ -4906,7 +6190,7 @@ def _read_stdin_commands(queue: asyncio.Queue, loop) -> None:
         except EOFError:
             return
         if line.strip():
-            loop.call_soon_threadsafe(queue.put_nowait, line.strip())
+            loop.call_soon_threadsafe(handle, line.strip())
 
 
 def _parse_address(value: str, default_port: int) -> tuple:
@@ -4928,13 +6212,90 @@ def run_share_session(args, bes_conn, host) -> int:
     )
     psk, psk_source = load_psk(os.environ, args.psk_file)
     given_code = args.pairing_code
-    node = args.node or ("coordinator" if args.listen else detect_node_role(host))
+    node = args.node or (
+        "coordinator" if args.listen else "console" if args.command else None
+    )
+    share_offer = None
+    if node is None:
+        # the Hyper-V host joins a running coordinator, else coordinates:
+        node, found = asyncio.run(
+            choose_session_node(host, serial, discover_coordinator, args.coordinator)
+        )
+        if found and not args.coordinator:
+            args.coordinator = f"{found[0]}:{found[1]}"
     print(f"share session as {node}, masthead serial {serial}")
     if node == "coordinator":
         return _run_coordinator(
             args, bes_conn, host, serial, psk, psk_source, given_code
         )
-    return _run_node(args, host, node, serial, psk, given_code)
+    if node == "share_owner":
+        state = load_state(args.state_file)
+        state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+        root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(
+            CLIENT_MASTHEAD_PATHS
+        )
+        plan, share = _prepare_share(args, host, state, root_ip, None)
+        save_state(args.state_file, state)
+        share_offer = {"unc": plan["unc"] if plan else args.share_unc, **share}
+    return _run_node(
+        args, bes_conn, host, node, serial, psk, given_code, share_offer=share_offer
+    )
+
+
+async def choose_session_node(
+    host, serial: str, discover, explicit: Optional[str] = None
+) -> tuple:
+    """This computer's part in the session, and a coordinator to join if any.
+
+    The Hyper-V host joins a coordinator that's already running, given by
+    --coordinator or found by broadcast, as the share owner. It only
+    coordinates itself when none is given or answers.
+    """
+    if not host.is_windows():
+        return "console", None
+    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
+        if explicit:
+            return "share_owner", _parse_address(explicit, DEFAULT_PORT)
+        found = await discover(serial)
+        return ("share_owner", found) if found else ("coordinator", None)
+    return "peer", None
+
+
+MACOS_FIREWALL = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+
+def macos_firewall_enabled(run) -> Optional[bool]:
+    """Whether the macOS application firewall is on, None if it can't be told."""
+    try:
+        output = str(run([MACOS_FIREWALL, "--getglobalstate"])).lower()
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+    if "enabled" in output:
+        return True
+    if "disabled" in output:
+        return False
+    return None
+
+
+def session_state_path(state_file: str) -> str:
+    """Where a node keeps its session token, apart from the walkthrough's state."""
+    for suffix in (".state.json", ".json"):
+        if state_file.endswith(suffix):
+            return state_file[: -len(suffix)] + ".session.json"
+    return state_file + ".session.json"
+
+
+def session_roles(host, node: str, oneshot: bool = False) -> List[str]:
+    """This node's roles in the session: root, hyperv, peer or console."""
+    if node == "console":
+        return ["console", "oneshot"] if oneshot else ["console"]
+    if node == "share_owner":
+        return ["hyperv", "share_owner"]
+    if is_local_root_server(host):
+        return ["root"]
+    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
+        return ["hyperv"]
+    return ["peer"]
 
 
 def _root_ip_from_rest(bes_conn) -> Optional[str]:
@@ -4944,18 +6305,20 @@ def _root_ip_from_rest(bes_conn) -> Optional[str]:
     return str(addresses[0]) if addresses else None
 
 
-def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) -> int:
-    # pylint: disable=too-many-arguments,too-many-locals
-    state = load_state(args.state_file)
-    state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
-    listen_host, listen_port = _parse_address(
-        args.listen or f"0.0.0.0:{DEFAULT_PORT}", DEFAULT_PORT
-    )
+def _prepare_share(args, host, state: dict, root_ip, listen_port) -> tuple:
+    """Plan the backup share, and set it up if it's on this computer.
+
+    Returns the plan (None when another node will offer the share) and the
+    credentials to hand to the nodes.
+    """
+    # pylint: disable=too-many-arguments
     host_ips = _probe(host.powershell_json, PS_HOST_IPS) if host.is_windows() else []
-    root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(CLIENT_MASTHEAD_PATHS)
-    print(f"root server: {root_ip or 'not found, give --allow with its address'}")
     if not host.is_windows() and not args.share_unc:
-        raise SystemExit("give --share-unc, a share can only be set up on Windows")
+        print(
+            "backup share: not set up yet, the Hyper-V host sets it up and offers it"
+            " when it joins (or give --share-unc)"
+        )
+        return None, {"user": None, "password": None}
     plan = plan_share(
         host,
         args.share_unc,
@@ -4985,6 +6348,7 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             "folder": plan["folder"],
             "account": args.share_account,
             "peers": peers,
+            # None on a share owner, whose coordinator is on another computer:
             "coordinator_port": listen_port,
             "coordinator_remote": ["LocalSubnet"] + list(args.allow or []),
         }
@@ -5006,12 +6370,71 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             ),
         }
 
-    pairing_code = decide_pairing_code(given_code, psk_source)
+    return plan, share
+
+
+def _explain_reachability(root_ip: Optional[str], listen_port: int) -> None:
+    """On a Mac or Linux coordinator, how the nodes reach it, and what can stop
+    them.
+    """
+    address = None
+    with contextlib.suppress(OSError):
+        # no packet is sent, this only picks the address facing the root server:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect((root_ip or "192.0.2.1", 9))
+            address = probe.getsockname()[0]
+    print(
+        f"nodes connect to {address or socket.gethostname()}:{listen_port}, or"
+        " find it by broadcast on the same subnet"
+    )
+    if sys.platform == "darwin" and macos_firewall_enabled(
+        lambda cmd: subprocess.run(  # nosec B603
+            cmd, capture_output=True, text=True, check=False, timeout=10
+        ).stdout
+    ):
+        print(
+            "WARNING: the macOS application firewall is on: allow incoming"
+            " connections for Python when macOS asks, or in System Settings,"
+            " Network, Firewall. If nodes still can't connect, stop here and run"
+            " --share-session on the Hyper-V host, which then coordinates"
+        )
+
+
+def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) -> int:
+    # pylint: disable=too-many-arguments,too-many-locals
+    state = load_state(args.state_file)
+    state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+    listen_host, listen_port = _parse_address(
+        args.listen or f"0.0.0.0:{DEFAULT_PORT}", DEFAULT_PORT
+    )
+    root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(CLIENT_MASTHEAD_PATHS)
+    print(f"root server: {root_ip or 'not found, give --allow with its address'}")
+    plan, share = _prepare_share(args, host, state, root_ip, listen_port)
+    if not host.is_windows():
+        _explain_reachability(root_ip, listen_port)
+
+    pairing_code = session_pairing_code(state, given_code, psk_source, time.time())
+    tokens = state.setdefault("session_tokens", {})
+    save_state(args.state_file, state)
     if pairing_code and pairing_code != given_code:
         print(
-            f"\n    pairing code: {pairing_code}\n    the other nodes ask for it once\n"
+            f"\n    pairing code: {pairing_code}\n    the other nodes ask for it once,"
+            " and rejoin after a reboot without it\n"
         )
     password = derive_password(psk, serial, pairing_code)
+
+    def save_halt(halted: Optional[dict]) -> None:
+        if halted:
+            state["session_halted"] = halted
+        else:
+            state.pop("session_halted", None)
+        save_state(args.state_file, state)
+
+    if state.get("session_halted"):
+        print(
+            f"still halted by {state['session_halted'].get('by')}:"
+            f" {state['session_halted'].get('reason')}, use continue to resume"
+        )
 
     async def serve():
         coordinator = ShareSessionCoordinator(
@@ -5019,8 +6442,13 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             output=print,
             password=password,
             serial=serial,
-            share_unc=plan["unc"],
+            share_unc=plan["unc"] if plan else None,
             allow=args.allow or [],
+            tokens=tokens,
+            on_tokens=lambda _tokens: save_state(args.state_file, state),
+            log_store=NodeLogStore(args.log_dir),
+            halted=state.get("session_halted"),
+            on_halt=save_halt,
         )
         server = await coordinator.start(listen_host, listen_port)
         discovery = None
@@ -5030,15 +6458,16 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             )
         except OSError as err:
             print(f"discovery is off ({err}), nodes need --coordinator")
+        print(f"node logs: {os.path.abspath(args.log_dir)}, a file per node")
         print(
             f"listening on {listen_host}:{listen_port}. On the other computers run:"
             f" {os.path.basename(__file__)} --share-session"
         )
-        print("commands: status, retry, done")
+        print(f"commands: {SESSION_COMMANDS}")
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
         threading.Thread(
-            target=_read_stdin_commands, args=(queue, loop), daemon=True
+            target=_read_stdin_commands, args=(queue.put_nowait, loop), daemon=True
         ).start()
         while not coordinator.done.is_set():
             getter = asyncio.create_task(queue.get())
@@ -5054,6 +6483,7 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
         if discovery:
             discovery.close()
         save_session_results(state, coordinator.results)
+        end_session_state(state)
         save_state(args.state_file, state)
 
     asyncio.run(serve())
@@ -5061,25 +6491,74 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
     return 0
 
 
-def _run_node(args, host, node, serial, psk, given_code) -> int:
-    # pylint: disable=too-many-arguments
+def _run_node(
+    args, bes_conn, host, node, serial, psk, given_code, share_offer=None
+) -> int:
+    # pylint: disable=too-many-arguments,too-many-locals,too-many-statements
     if node == "peer" and not host.is_windows():
         raise SystemExit(
             "a peer checks the share with Windows SMB, on this computer use"
             " --node console to watch and send commands"
         )
-    roles = (
-        ["console"]
-        if node == "console"
-        else (["root"] if is_local_root_server(host) else ["peer"])
-    )
+    roles = session_roles(host, node, oneshot=bool(getattr(args, "command", None)))
     sql_server = None
     if "root" in roles and host.is_admin():
         dsns = _probe(_bigfix_dsns, host)
         sql_server = _bigfix_sql_server(dsns) if "error" not in dsns else None
-    if not psk and not given_code:
-        # nothing to trust the coordinator by without the code, ask for it now:
-        given_code = input("Pairing code shown on the coordinator: ").strip()
+    session_path = session_state_path(args.state_file)
+    state = load_state(session_path)
+    resume_key = f"session_resume_{node}"
+
+    def on_resume(token: Optional[dict]) -> None:
+        # kept as is, it's only good for this one short session:
+        if token:
+            state[resume_key] = token
+        else:
+            state.pop(resume_key, None)
+        save_state(session_path, state)
+
+    def node_report() -> dict:
+        return build_report(
+            bes_conn,
+            host,
+            load_compat(args.compat_file),
+            _target_from_args(args),
+            args.sql_instance,
+            args.redact_hosts,
+            args.vm_name,
+        )
+
+    walkthrough = None
+    if args.walkthrough and "root" in roles:
+        compat = load_compat(args.compat_file)
+
+        def session_walkthrough(bridge) -> None:
+            tee.claim()
+            run_walkthrough(args, bes_conn, host, compat, session=bridge)
+
+        walkthrough = session_walkthrough
+
+    def prompt_code() -> bytes:
+        code = input("Pairing code shown on the coordinator: ").strip()
+        return derive_password(psk, serial, code)
+
+    password = derive_password(psk, serial, given_code) if psk or given_code else None
+
+    async def oneshot() -> dict:
+        coord_host, coord_port = await find_coordinator(
+            args.coordinator, serial, discover_coordinator
+        )
+        return await run_oneshot_command(
+            coord_host,
+            coord_port,
+            args.command,
+            name=args.oneshot_name or f"{default_node_id()}-oneshot",
+            password=password,
+            serial=serial,
+            resume=state.get(resume_key),
+            on_resume=on_resume,
+            prompt_code=prompt_code,
+        )
 
     async def serve_node():
         coord_host, coord_port = await find_coordinator(
@@ -5096,13 +6575,47 @@ def _run_node(args, host, node, serial, psk, given_code) -> int:
             ),
             sql_server=sql_server,
             read_stdin=True,
-            password=derive_password(psk, serial, given_code),
+            password=password,
             serial=serial,
+            resume=state.get(resume_key),
+            on_resume=on_resume,
+            prompt_code=prompt_code,
+            log_store=NodeLogStore(args.log_dir) if node == "console" else None,
+            walkthrough=walkthrough,
+            share_offer=share_offer,
+            report_fn=None if node == "console" else node_report,
         )
-        await node_obj.run(coord_host, coord_port, attempts=120)
+        if node == "console":
+            print(f"node logs: {os.path.abspath(args.log_dir)}, a file per node")
+        else:
+            logging.getLogger().addHandler(NodeLogHandler(node_obj))
+            tee.node = node_obj
+        # a coordinator that restarts is rejoined, until it ends the session:
+        while True:
+            await node_obj.run(coord_host, coord_port, attempts=120)
+            if node_obj.finished:
+                return
+            await asyncio.sleep(5)
 
+    if args.command:
+        try:
+            result = asyncio.run(oneshot())
+        except HandshakeError as err:
+            raise SystemExit(f"could not join the session: {err}") from err
+        if args.json:
+            # the real stdout, main sends everything else to stderr for --json:
+            (sys.__stdout__ or sys.stdout).write(
+                json.dumps(result, indent=2, default=str) + "\n"
+            )
+        else:
+            for line in result["lines"]:
+                print(line)
+        return 0
+
+    tee = ThreadLogTee(sys.stdout, None)
     try:
-        asyncio.run(serve_node())
+        with contextlib.redirect_stdout(cast(TextIO, tee)):
+            asyncio.run(serve_node())
     except HandshakeError as err:
         raise SystemExit(f"could not join the session: {err}") from err
     except OSError as err:
@@ -5147,6 +6660,28 @@ def build_parser():
     parser.add_argument(
         "--compat-file",
         help=f"compatibility data, default {COMPAT_FILE_NAME} next to this script",
+    )
+    parser.add_argument(
+        "--command",
+        help="with --share-session: connect as a one-shot console, run this one"
+        " command, like 'state root' or 'halt <reason>', print what came back and"
+        " leave",
+    )
+    parser.add_argument(
+        "--oneshot-name",
+        help="with --command, the name this one-shot console has in the session,"
+        " like claude, it can continue its own halt",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="with --command, print the result as JSON only, for a script or AI",
+    )
+    parser.add_argument(
+        "--log-dir",
+        default=DEFAULT_LOG_DIR,
+        help="on the coordinator and consoles, the folder for a log file per node,"
+        f" default {DEFAULT_LOG_DIR}",
     )
     parser.add_argument(
         "--vm-name",
@@ -5211,8 +6746,10 @@ def build_parser():
     )
     session.add_argument(
         "--node",
-        choices=["coordinator", "peer", "console"],
-        help="default coordinator with --listen, otherwise peer",
+        choices=["coordinator", "share_owner", "peer", "console"],
+        help="default: coordinator with --listen, console with --command, else"
+        " found: the Hyper-V host joins a running coordinator as share_owner or"
+        " coordinates, other Windows computers are peers, others consoles",
     )
     session.add_argument("--listen", help="coordinator: address:port to listen on")
     session.add_argument(
@@ -5255,7 +6792,7 @@ def main():
     args, _unknown = parser.parse_known_args()
     host = LocalHost()
 
-    if args.walkthrough:
+    if args.walkthrough and not args.share_session:
         with besapi.plugin_utilities.init_plugin(
             __version__, parser, require_connection=False
         ) as (args, bes_conn):
@@ -5279,10 +6816,17 @@ def main():
             return 0
 
     if args.share_session:
-        with besapi.plugin_utilities.init_plugin(
-            __version__, parser, require_connection=False
-        ) as (args, bes_conn):
-            return run_share_session(args, bes_conn, host)
+        # with --json, stdout is only the result, besapi and progress go to stderr:
+        quiet = (
+            contextlib.redirect_stdout(sys.stderr)
+            if args.json
+            else (contextlib.nullcontext())
+        )
+        with quiet:
+            with besapi.plugin_utilities.init_plugin(
+                __version__, parser, require_connection=False
+            ) as (args, bes_conn):
+                return run_share_session(args, bes_conn, host)
 
     # keep stdout for the JSON report only, besapi prints connection messages:
     with contextlib.redirect_stdout(sys.stderr):

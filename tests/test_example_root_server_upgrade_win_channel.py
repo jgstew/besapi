@@ -537,3 +537,78 @@ except SystemExit as err:
     )
     assert "EXIT share sessions need cryptography and spake2" in result.stdout
     assert "pip install cryptography spake2" in result.stdout
+
+
+# ---------------------------------------------------------------- resume
+
+
+def test_handshake_password_chosen_from_hellos(channel):
+    """Test the server picks its password from the client's hello, answers in
+    its own hello, and the client picks its password from that answer.
+    """
+    secret = os.urandom(32)
+    resume_password = channel.derive_resume_password(secret, "123456789")
+    code_password = channel.derive_password(None, "123456789", "123456")
+    seen = {}
+
+    def server_password(peer):
+        seen["server saw"] = peer.get("resume_id")
+        return resume_password if peer.get("resume_id") == "ab" * 16 else code_password
+
+    def server_hello(peer):
+        own = hello(channel, "hyperv")
+        own["resume"] = "accepted" if peer.get("resume_id") else "none"
+        return own
+
+    def client_password(peer):
+        seen["client saw"] = peer.get("resume")
+        return resume_password if peer.get("resume") == "accepted" else code_password
+
+    async def scenario():
+        results = {}
+
+        async def on_connect(reader, writer):
+            results["server"] = await channel.accept_channel(
+                reader, writer, server_password, server_hello
+            )
+
+        server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        client_hello = channel.make_hello(
+            "root", ["root"], "123456789", resume_id="ab" * 16
+        )
+        client, peer = await channel.open_channel(
+            "127.0.0.1", port, client_password, client_hello
+        )
+        for _ in range(100):
+            if "server" in results:
+                break
+            await asyncio.sleep(0.01)
+        await client.send({"type": "ping"})
+        assert await results["server"][0].recv() == {"type": "ping"}
+        client.close()
+        results["server"][0].close()
+        server.close()
+        return peer
+
+    peer = asyncio.run(scenario())
+    assert peer["resume"] == "accepted"
+    assert seen == {"server saw": "ab" * 16, "client saw": "accepted"}
+
+
+def test_resume_password_differs_from_code_password(channel):
+    """Test the resume password is bound to the serial and isn't the secret."""
+    secret = os.urandom(32)
+
+    first = channel.derive_resume_password(secret, "123456789")
+    assert first != secret
+    assert first != channel.derive_resume_password(secret, "987654321")
+    assert first != channel.derive_resume_password(os.urandom(32), "123456789")
+
+
+def test_make_hello_resume_id_only_when_given(channel):
+    """Test the hello carries a resume id only when the node has one."""
+    assert "resume_id" not in channel.make_hello("a", ["root"], "1")
+    assert channel.make_hello("a", ["root"], "1", resume_id="cd" * 16)["resume_id"] == (
+        "cd" * 16
+    )
