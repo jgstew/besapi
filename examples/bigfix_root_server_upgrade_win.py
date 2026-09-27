@@ -2056,6 +2056,11 @@ def _bigfix_services(ctx: WalkthroughContext) -> List[dict]:
     return services if isinstance(services, list) else []
 
 
+def service_command(cmdlet: str, name: str, *options: str) -> List[str]:
+    """A PowerShell service command, like Stop-Service, for one service by name."""
+    return _powershell(" ".join([cmdlet, "-Name", _ps_quote(name), *options]))
+
+
 def _action_stop_services(ctx: WalkthroughContext) -> None:
     services = _bigfix_services(ctx)
     # remember the original start types once, to restore at the end:
@@ -2063,34 +2068,13 @@ def _action_stop_services(ctx: WalkthroughContext) -> None:
         "start_modes", {s["Name"]: s.get("StartMode") for s in services}
     )
     for name in service_stop_order(services):
-        ctx.execute(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                f"Set-Service -Name '{name}' -StartupType Manual",
-            ]
-        )
-        ctx.execute(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                f"Stop-Service -Name '{name}' -Force",
-            ]
-        )
+        ctx.execute(service_command("Set-Service", name, "-StartupType", "Manual"))
+        ctx.execute(service_command("Stop-Service", name, "-Force"))
 
 
 def _action_start_services(ctx: WalkthroughContext) -> None:
     for name in services_to_start(_bigfix_services(ctx)):
-        ctx.execute(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                f"Start-Service -Name '{name}'",
-            ]
-        )
+        ctx.execute(service_command("Start-Service", name))
 
 
 def _action_restore_start_types(ctx: WalkthroughContext) -> None:
@@ -2099,12 +2083,9 @@ def _action_restore_start_types(ctx: WalkthroughContext) -> None:
     for name, mode in (ctx.state.get("start_modes") or {}).items():
         if mode in startup_types:
             ctx.execute(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-Command",
-                    f"Set-Service -Name '{name}' -StartupType {startup_types[mode]}",
-                ]
+                service_command(
+                    "Set-Service", name, "-StartupType", startup_types[mode]
+                )
             )
 
 
@@ -2437,10 +2418,7 @@ def share_host_probe_scripts(share_name: str, folder: str) -> Dict[str, str]:
             " @{n='NetworkCategory';e={$_.NetworkCategory.ToString()}})"
             " | ConvertTo-Json -Compress"
         ),
-        "host_ips": (
-            "@(Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,"
-            " PrefixLength, InterfaceAlias) | ConvertTo-Json -Compress"
-        ),
+        "host_ips": PS_HOST_IPS,
         # enabled inbound allow rules, only those for TCP and UDP ports:
         "firewall_rules": (
             "@(Get-NetFirewallRule -Direction Inbound -Enabled True -Action Allow"
@@ -3046,851 +3024,6 @@ def format_findings(name: str, result: dict) -> List[str]:
     return lines
 
 
-# ---------------------------------------------------------------- nodes
-
-
-# ---------------------------------------------------------------- auto discovery
-
-PS_HYPERV_HOST = (
-    "[bool](Get-Service vmms -ErrorAction SilentlyContinue) | ConvertTo-Json -Compress"
-)
-PS_LOCAL_SHARES = (
-    "@(Get-SmbShare | Select-Object Name, Path, Special) | ConvertTo-Json -Compress"
-)
-PS_HOST_IPS = (
-    "@(Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,"
-    " PrefixLength, InterfaceAlias) | ConvertTo-Json -Compress"
-)
-DEFAULT_SHARE_NAME = "bigfix_upgrade_backup"
-# wrong pairing codes before the coordinator stops accepting nodes, each is
-# one guess out of a million:
-MAX_WRONG_CODES = 5
-
-
-def detect_node_role(host) -> str:
-    """The share session role for this computer, from what it is.
-
-    The Hyper-V host coordinates, since it stays up while the others reboot.
-    Other Windows computers are peers, anything else can only be a console.
-    """
-    if not host.is_windows():
-        return "console"
-    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
-        return "coordinator"
-    return "peer"
-
-
-def _local_shares(host) -> List[dict]:
-    """This computer's own shares, not the special ones like C$ or IPC$."""
-    shares = _probe(host.powershell_json, PS_LOCAL_SHARES)
-    return [
-        share
-        for share in (_as_list(shares) if not isinstance(shares, dict) else [])
-        if isinstance(share, dict)
-        and not share.get("Special")
-        and not str(share.get("Name", "")).endswith("$")
-    ]
-
-
-def _default_share_folder(host, name: str) -> str:
-    """A folder for a new share, on the fixed drive with the most free space."""
-    disks = _probe(lambda: _as_list(host.powershell_json(PS_DISKS)))
-    disks = [d for d in disks if isinstance(d, dict)] if isinstance(disks, list) else []
-    drive = (
-        max(disks, key=lambda d: d.get("FreeSpace") or 0)["DeviceID"] if disks else "C:"
-    )
-    return f"{drive}\\{name}"
-
-
-def choose_backup_share(host, ask, output=print) -> dict:
-    """Pick the backup share on this computer: an existing one, or a new one.
-
-    Enter at each question takes the default.
-    """
-    shares = _local_shares(host)
-    if len(shares) == 1:
-        share = shares[0]
-        if (
-            ask(
-                f"Use the share {share['Name']} ({share['Path']}) for the backups?",
-                ["yes", "no"],
-                "yes",
-            )
-            == "yes"
-        ):
-            return {"share_name": share["Name"], "folder": share["Path"]}
-    elif shares:
-        for number, share in enumerate(shares, start=1):
-            output(f"  {number}) {share['Name']} ({share['Path']})")
-        answer = ask(
-            "Which share for the backups? A number, or new",
-            [str(n) for n in range(1, len(shares) + 1)] + ["new"],
-            "1",
-        )
-        if answer != "new":
-            share = shares[int(answer) - 1]
-            return {"share_name": share["Name"], "folder": share["Path"]}
-    folder = _default_share_folder(host, DEFAULT_SHARE_NAME)
-    if (
-        ask(f"Create the share {DEFAULT_SHARE_NAME} at {folder}?", ["yes", "no"], "yes")
-        != "yes"
-    ):
-        raise SystemExit("no backup share: give --share-unc, or --share-folder")
-    return {"share_name": DEFAULT_SHARE_NAME, "folder": folder}
-
-
-def choose_host_ip(host_ips: Any, target: Optional[str] = None) -> Optional[str]:
-    """This computer's IPv4 address that others reach: the one facing `target`."""
-    candidates = []
-    for entry in _as_list(host_ips) if not isinstance(host_ips, dict) else []:
-        with contextlib.suppress(ValueError, KeyError, TypeError):
-            interface = ipaddress.ip_interface(
-                f"{entry['IPAddress']}/{entry['PrefixLength']}"
-            )
-            if not (interface.ip.is_loopback or interface.ip.is_link_local):
-                candidates.append(interface)
-    if target:
-        with contextlib.suppress(ValueError):
-            address = ipaddress.ip_address(target)
-            for interface in candidates:
-                if address in interface.network:
-                    return str(interface.ip)
-    return str(candidates[0].ip) if candidates else None
-
-
-def _resolve(name: str) -> Optional[str]:
-    try:
-        return socket.gethostbyname(name)
-    except OSError:
-        return None
-
-
-def discover_root_ip(masthead_paths: List[str], resolver=_resolve) -> Optional[str]:
-    """The root server's address, from the host in the local masthead gather URL."""
-    channel = load_channel()
-    for path in masthead_paths:
-        name = channel.read_masthead_gather_host(path)
-        if name:
-            with contextlib.suppress(ValueError):
-                return str(ipaddress.ip_address(name))
-            return resolver(name)
-    return None
-
-
-def plan_share(
-    host,
-    share_unc: Optional[str],
-    root_ip: Optional[str],
-    host_ips: Any,
-    hostname: str,
-    ask,
-    share_folder: Optional[str] = None,
-) -> dict:
-    """Work out the backup share: its UNC path, and its folder if it is local.
-
-    With no --share-unc, a share on this computer is picked or created, and
-    its UNC path uses this computer's address facing the root server.
-    """
-    if share_unc:
-        root = unc_share_root(share_unc)
-        if not root:
-            raise SystemExit(f"--share-unc {share_unc} is not a UNC path")
-        server, name = root[2:].split("\\", 1)
-        own = {hostname.lower(), "localhost", "."} | {
-            str(e.get("IPAddress")) for e in _as_list(host_ips) if isinstance(e, dict)
-        }
-        if server.lower() not in own and server not in own:
-            # on another server, only checked from here:
-            return {"unc": share_unc, "share_name": name, "folder": None}
-        existing = {s["Name"].lower(): s["Path"] for s in _local_shares(host)}
-        folder = (
-            share_folder
-            or existing.get(name.lower())
-            or _default_share_folder(host, name)
-        )
-        return {"unc": share_unc, "share_name": name, "folder": folder}
-
-    if share_folder:
-        choice = {"share_name": DEFAULT_SHARE_NAME, "folder": share_folder}
-    else:
-        choice = choose_backup_share(host, ask)
-    address = choose_host_ip(host_ips, root_ip) or hostname
-    return {
-        "unc": f"\\\\{address}\\{choice['share_name']}",
-        "share_name": choice["share_name"],
-        "folder": choice["folder"],
-    }
-
-
-def decide_pairing_code(given, psk_source: str, generate):
-    """The pairing code: the one given, or a new one when there's no PSK.
-
-    Without BIGFIX_UPGRADE_PSK, the code is what the nodes trust each other by.
-    `new` asks for a new code even with a PSK.
-    """
-    if given and given.lower() == "new":
-        return generate()
-    if given:
-        return given
-    return generate() if load_channel().code_required(psk_source) else None
-
-
-async def find_coordinator(explicit, serial: str, discover) -> tuple:
-    """The coordinator's address: --coordinator, or found by broadcast."""
-    if explicit:
-        return _parse_address(explicit, load_channel().DEFAULT_PORT)
-    found = await discover(serial)
-    if found:
-        return found
-    raise SystemExit(
-        "could not find the coordinator on this subnet, give --coordinator"
-        " host:port (check it's running, and its firewall allows UDP discovery)"
-    )
-
-
-@functools.lru_cache(maxsize=None)
-def load_channel():
-    """The node channel functions, after checking its optional packages.
-
-    Share sessions need `cryptography` and `spake2`, nothing else does.
-    """
-    missing = [
-        name
-        for name in ("cryptography", "spake2")
-        if importlib.util.find_spec(name) is None
-    ]
-    if missing:
-        raise SystemExit(
-            f"share sessions need {' and '.join(missing)}:"
-            f" pip install {' '.join(missing)}"
-        )
-    # the channel code is in this module, see the node channel section:
-    return types.SimpleNamespace(**globals())
-
-
-CLIENT_MASTHEAD_PATHS = [
-    r"C:\Program Files (x86)\BigFix Enterprise\BES Client\ActionSite.afxm",
-    "/Library/Application Support/BigFix/BES Agent/actionsite.afxm",
-    "/etc/opt/BESClient/actionsite.afxm",
-]
-
-
-def resolve_masthead_serial(override, bes_conn, masthead_paths: List[str]) -> str:
-    """The masthead serial of the deployment being upgraded.
-
-    From --masthead-serial, then the REST connection, then the local client's
-    masthead. REST wins over the client, since this computer's client might
-    belong to another deployment.
-    """
-    if override:
-        return str(override)
-    channel = load_channel()
-    rest_serial = None
-    if bes_conn is not None:
-        masthead = _probe(_masthead, bes_conn)
-        if "serial" in masthead:
-            rest_serial = str(masthead["serial"])
-    local_serial = next(
-        (s for s in (channel.read_masthead_serial(p) for p in masthead_paths) if s),
-        None,
-    )
-    if rest_serial and local_serial and rest_serial != local_serial:
-        logging.warning(
-            "this computer's BigFix client is for a different BigFix deployment"
-            " (masthead serial %s), using %s from the REST connection",
-            local_serial,
-            rest_serial,
-        )
-    serial = rest_serial or local_serial
-    if not serial:
-        raise SystemExit(
-            "no masthead serial found: give --masthead-serial, or a REST connection"
-        )
-    return serial
-
-
-class ShareSessionCoordinator:
-    """The share owner's side: hands out the share and collects each node's checks.
-
-    Commands (`status`, `retry`, `done`) can come from its own console or from
-    any connected node.
-    """
-
-    def __init__(
-        self,
-        share,
-        output,
-        password,
-        serial,
-        share_unc,
-        allow,
-        pairing_required=False,
-        max_failures=MAX_WRONG_CODES,
-    ):
-        self.share = share
-        self.pairing_required = pairing_required
-        self.output = output
-        # authenticates the key exchange with each node, never used as a key:
-        self.password = password
-        self.serial = serial
-        self.max_failures = max_failures
-        self.failures = 0
-        self.locked = False
-        self.share_unc = share_unc
-        self.allow = allow
-        self.nodes: Dict[str, dict] = {}
-        self.results: Dict[str, List[dict]] = {}
-        self.pending: Dict[str, int] = {}
-        self.done = asyncio.Event()
-        self._changed = asyncio.Event()
-        self.channel = load_channel()
-
-    async def start(self, host: str, port: int):
-        """Listen for nodes, returning the asyncio server."""
-        return await asyncio.start_server(self._on_connect, host, port)
-
-    def _share_for(self, roles: List[str]) -> dict:
-        share = {"unc": self.share_unc, "user": self.share.get("user")}
-        # only over the negotiated key, and never to consoles:
-        if "console" not in roles:
-            share["password"] = self.share.get("password")
-        return share
-
-    async def _send(self, name: str, message: dict) -> None:
-        node = self.nodes.get(name)
-        if node:
-            with contextlib.suppress(ConnectionError):
-                await node["channel"].send(message)
-
-    async def _broadcast_consoles(self, message: dict) -> None:
-        for name, node in list(self.nodes.items()):
-            if "console" in node["roles"]:
-                await self._send(name, message)
-
-    async def _diagnose(self, name: str) -> None:
-        self.pending[name] = self.pending.get(name, 0) + 1
-        await self._send(name, {"type": "diagnose"})
-
-    async def _on_connect(self, reader, writer) -> None:
-        peer_ip = str(writer.get_extra_info("peername")[0])
-        if self.locked:
-            self.output(f"refused {peer_ip}: locked after too many wrong codes")
-            writer.close()
-            return
-        try:
-            if not self.channel.peer_allowed(peer_ip, self.allow):
-                self.output(f"refused {peer_ip}: not in --allow")
-                writer.close()
-                return
-            hello = self.channel.make_hello(
-                "coordinator",
-                ["coordinator"],
-                self.serial,
-                pairing_required=self.pairing_required,
-                has_pairing_code=self.pairing_required,
-            )
-            channel, peer = await self.channel.accept(
-                reader, writer, self.password, hello
-            )
-        except self.channel.WrongCode as err:
-            # each wrong code is one online guess, so only allow a few:
-            self.failures += 1
-            self.output(
-                f"refused {peer_ip}: {err} ({self.failures}/{self.max_failures})"
-            )
-            if self.failures >= self.max_failures:
-                self.locked = True
-                self.output(
-                    "too many wrong pairing codes, no more nodes are accepted:"
-                    " restart the coordinator for a new code"
-                )
-            return
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            self.output(f"refused {peer_ip}: {err}")
-            return
-        # names must be unique, a peer and a console can run on the same computer:
-        base_name = name = str(peer.get("node_id"))
-        suffix = 2
-        while name in self.nodes:
-            name = f"{base_name}-{suffix}"
-            suffix += 1
-        roles = [str(role) for role in peer.get("roles") or []]
-        self.nodes[name] = {"channel": channel, "roles": roles, "ip": peer_ip}
-        self.output(f"{name} ({', '.join(roles)}) connected from {peer_ip}")
-        await channel.send(
-            {"type": "welcome", "name": name, "share": self._share_for(roles)}
-        )
-        self._changed.set()
-        if "console" not in roles:
-            await self._diagnose(name)
-        try:
-            while True:
-                message = await channel.recv()
-                await self._on_message(name, message)
-        except (asyncio.IncompleteReadError, ConnectionError):
-            pass
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            self.output(f"{name}: dropped, {err}")
-        finally:
-            self.nodes.pop(name, None)
-            self.pending.pop(name, None)
-            self._changed.set()
-            channel.close()
-            self.output(f"{name} disconnected")
-
-    async def _on_message(self, name: str, message: dict) -> None:
-        if message.get("type") == "share_result":
-            result = {
-                "ok": bool(message.get("ok")),
-                "findings": message.get("findings", []),
-            }
-            self.results.setdefault(name, []).append(result)
-            for line in format_findings(name, result):
-                self.output(line)
-            await self._broadcast_consoles(
-                {"type": "result", "node": name, "result": result}
-            )
-            self.pending[name] = max(0, self.pending.get(name, 1) - 1)
-            self._changed.set()
-        elif message.get("type") == "command":
-            await self.handle_command(str(message.get("command")), source=name)
-
-    def status_lines(self) -> List[str]:
-        """The current state of every node."""
-        lines = [f"share {self.share_unc}, {len(self.nodes)} node(s) connected"]
-        for name, node in self.nodes.items():
-            history = self.results.get(name)
-            last = history[-1] if history else None
-            state = (
-                "console"
-                if "console" in node["roles"]
-                else (
-                    "checking"
-                    if self.pending.get(name)
-                    else (
-                        "OK"
-                        if last and last["ok"]
-                        else "problems" if last else "waiting"
-                    )
-                )
-            )
-            lines.append(f"  {name} ({node['ip']}): {state}")
-        return lines
-
-    async def handle_command(self, command: str, source: str) -> None:
-        """Run one command, from this console or a node."""
-        command = command.strip().lower()
-        self.output(f"{source}: {command}")
-        if command == "status":
-            lines = self.status_lines()
-            for line in lines:
-                self.output(line)
-            if source in self.nodes:
-                await self._send(source, {"type": "status", "lines": lines})
-        elif command == "retry":
-            for name, node in list(self.nodes.items()):
-                if "console" not in node["roles"]:
-                    await self._diagnose(name)
-        elif command == "done":
-            await self._wait(lambda: not any(self.pending.values()), timeout=120)
-            for name in list(self.nodes):
-                await self._send(name, {"type": "bye"})
-            self.done.set()
-        else:
-            self.output(f"unknown command {command!r}, use status, retry or done")
-
-    async def _wait(self, condition, timeout: float) -> None:
-        async def waiter():
-            while not condition():
-                self._changed.clear()
-                await self._changed.wait()
-
-        await asyncio.wait_for(waiter(), timeout)
-
-    async def wait_for_nodes(self, count: int, timeout: float) -> None:
-        """Wait until this many nodes are connected."""
-        await self._wait(lambda: len(self.nodes) >= count, timeout)
-
-
-class ShareSessionNode:
-    """A node connecting to the coordinator: checks the share and reports back.
-
-    A `console` node only shows results and sends commands.
-    """
-
-    # pylint: disable=too-many-instance-attributes
-    def __init__(
-        self,
-        name,
-        roles,
-        host,
-        output,
-        password,
-        serial,
-        share_unc,
-        allow,
-        commands=None,
-        prompt_password=None,
-        sql_server=None,
-        read_stdin=False,
-        has_pairing_code=False,
-        prompt_pairing=None,
-        rekey=None,
-    ):
-        self.name = name
-        self.read_stdin = read_stdin
-        self.has_pairing_code = has_pairing_code
-        # asks for the pairing code, and derives the key with it, when needed:
-        self.prompt_pairing = prompt_pairing
-        self.rekey = rekey
-        self.roles = roles
-        self.host = host
-        self.output = output
-        self.password = password
-        self.serial = serial
-        self.commands = commands
-        self.prompt_password = prompt_password
-        self.sql_server = sql_server
-        self.share: dict = {}
-        self.command_queue: asyncio.Queue = asyncio.Queue()
-        self.channel = load_channel()
-        del share_unc, allow
-
-    async def connect(self, host: str, port: int, attempts: int = 1, delay: float = 5):
-        """Connect and authenticate, retrying while the coordinator isn't up yet."""
-        attempt = 0
-        while True:
-            attempt += 1
-            hello = self.channel.make_hello(
-                self.name,
-                self.roles,
-                self.serial,
-                has_pairing_code=self.has_pairing_code,
-            )
-            try:
-                channel, _peer = await self.channel.connect(
-                    host, port, self.password, hello
-                )
-                return channel
-            except self.channel.PairingRequired:
-                if self.has_pairing_code or not (self.prompt_pairing and self.rekey):
-                    raise
-                # only now ask, and try again straight away:
-                self.password = self.rekey(self.prompt_pairing())
-                self.has_pairing_code = True
-                attempt -= 1
-            except (OSError, asyncio.TimeoutError) as err:
-                if attempt == attempts:
-                    raise
-                self.output(f"coordinator not reachable ({err}), retrying in {delay}s")
-                await asyncio.sleep(delay)
-
-    async def run(self, host: str, port: int, attempts: int = 1) -> None:
-        """Serve the coordinator until it says bye."""
-        channel = await self.connect(host, port, attempts)
-        sender = asyncio.create_task(self._send_commands(channel))
-        try:
-            while True:
-                message = await channel.recv()
-                kind = message.get("type")
-                if kind == "welcome":
-                    self.share = message.get("share") or {}
-                    self.name = message.get("name") or self.name
-                    self.output(
-                        f"connected as {self.name}, share {self.share.get('unc')}"
-                    )
-                    self._ask_missing_password()
-                    if self.read_stdin:
-                        # NOTE: only after any prompts, so they don't compete for input:
-                        threading.Thread(
-                            target=_read_stdin_commands,
-                            args=(self.command_queue, asyncio.get_running_loop()),
-                            daemon=True,
-                        ).start()
-                        self.output("commands: status, retry, done")
-                    for command in self.commands or []:
-                        await self.command_queue.put(command)
-                elif kind == "diagnose" and "console" not in self.roles:
-                    await self._diagnose(channel)
-                elif kind == "result":
-                    for line in format_findings(message["node"], message["result"]):
-                        self.output(line)
-                elif kind == "status":
-                    for line in message.get("lines", []):
-                        self.output(line)
-                elif kind == "bye":
-                    self.output("coordinator finished the session")
-                    return
-        except (asyncio.IncompleteReadError, ConnectionError):
-            self.output("coordinator disconnected")
-        finally:
-            sender.cancel()
-            channel.close()
-
-    async def _send_commands(self, channel) -> None:
-        while True:
-            command = await self.command_queue.get()
-            await channel.send({"type": "command", "command": command})
-
-    def _ask_missing_password(self) -> None:
-        """Ask for the share password once, if the coordinator didn't send one."""
-        user = self.share.get("user")
-        if (
-            "console" not in self.roles
-            and user
-            and self.share.get("password") is None
-            and self.prompt_password
-        ):
-            self.share["password"] = self.prompt_password(user)
-
-    async def _diagnose(self, channel) -> None:
-        user = self.share.get("user")
-        password = self.share.get("password")
-        findings = await asyncio.get_running_loop().run_in_executor(
-            None,
-            diagnose_share_access,
-            self.host,
-            str(self.share.get("unc") or ""),
-            user,
-            password,
-            self.sql_server,
-        )
-        result = summarize_findings(findings)
-        for line in format_findings(self.name, result):
-            self.output(line)
-        await channel.send({"type": "share_result", **result})
-
-
-def save_session_results(state: dict, results: dict) -> None:
-    """Keep each node's share check results in the state file."""
-    state.setdefault("share", {})["results"] = results
-
-
-def _read_stdin_commands(queue: asyncio.Queue, loop) -> None:
-    """Feed typed commands into the event loop, from a thread."""
-    while True:
-        try:
-            line = input()
-        except EOFError:
-            return
-        if line.strip():
-            loop.call_soon_threadsafe(queue.put_nowait, line.strip())
-
-
-def _parse_address(value: str, default_port: int) -> tuple:
-    host, _, port = value.rpartition(":")
-    if not host:
-        return value, default_port
-    return host, int(port)
-
-
-def run_share_session(args, bes_conn, host) -> int:
-    """The --share-session mode: as coordinator, peer or console, auto detected.
-
-    Everything has a default: the role, the share, the addresses and the
-    pairing code, so on most nodes `--share-session` is all that's needed.
-    """
-    channel = load_channel()
-    serial = resolve_masthead_serial(
-        args.masthead_serial, bes_conn, CLIENT_MASTHEAD_PATHS
-    )
-    psk, psk_source = channel.load_psk(os.environ, args.psk_file)
-    given_code = args.pairing_code or channel.pairing_code_from_env(os.environ)
-    node = args.node or ("coordinator" if args.listen else detect_node_role(host))
-    print(f"share session as {node}, masthead serial {serial}")
-    if node == "coordinator":
-        return _run_coordinator(
-            args, bes_conn, host, channel, serial, psk, psk_source, given_code
-        )
-    return _run_node(args, host, channel, node, serial, psk, psk_source, given_code)
-
-
-def _root_ip_from_rest(bes_conn) -> Optional[str]:
-    if bes_conn is None:
-        return None
-    addresses = _get(_probe(_root_server, bes_conn), "properties", "IP Address")
-    return str(addresses[0]) if addresses else None
-
-
-def _run_coordinator(
-    args, bes_conn, host, channel, serial, psk, psk_source, given_code
-) -> int:
-    # pylint: disable=too-many-arguments,too-many-locals
-    state = load_state(args.state_file)
-    state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
-    listen_host, listen_port = _parse_address(
-        args.listen or f"0.0.0.0:{channel.DEFAULT_PORT}", channel.DEFAULT_PORT
-    )
-    host_ips = _probe(host.powershell_json, PS_HOST_IPS) if host.is_windows() else []
-    root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(CLIENT_MASTHEAD_PATHS)
-    print(f"root server: {root_ip or 'not found, give --allow with its address'}")
-    if not host.is_windows() and not args.share_unc:
-        raise SystemExit("give --share-unc, a share can only be set up on Windows")
-    plan = plan_share(
-        host,
-        args.share_unc,
-        root_ip,
-        host_ips,
-        socket.gethostname(),
-        _ask,
-        args.share_folder,
-    )
-    print(
-        f"backup share: {plan['unc']}"
-        + (f" ({plan['folder']})" if plan["folder"] else "")
-    )
-
-    peers = list(
-        dict.fromkeys(
-            [ip for ip in [root_ip] if ip]
-            + [entry for entry in args.allow or [] if "/" not in entry]
-        )
-    )
-    share: Dict[str, Optional[str]] = {"user": None, "password": None}
-    if plan["folder"]:
-        if not host.is_admin():
-            raise SystemExit("setting up the share needs an elevated prompt")
-        spec = {
-            "share_name": plan["share_name"],
-            "folder": plan["folder"],
-            "account": args.share_account,
-            "peers": peers,
-            "coordinator_port": listen_port,
-            "coordinator_remote": ["LocalSubnet"] + list(args.allow or []),
-        }
-        share = setup_share_owner(
-            host,
-            spec,
-            state,
-            state["run_id"],
-            lambda prompt: _ask(prompt, ["yes", "no"], "yes") == "yes",
-            args.dry_run,
-            socket.gethostname(),
-        )
-        save_state(args.state_file, state)
-    elif args.backup_share_user:
-        share = {
-            "user": args.backup_share_user,
-            "password": getpass.getpass(
-                f"Password for {args.backup_share_user}, to give to the nodes: "
-            ),
-        }
-
-    pairing_code = decide_pairing_code(
-        given_code, psk_source, channel.generate_pairing_code
-    )
-    if pairing_code and pairing_code != given_code:
-        print(
-            f"\n    pairing code: {pairing_code}\n    the other nodes ask for it once\n"
-        )
-    password = channel.derive_password(psk, serial, pairing_code)
-
-    async def serve():
-        coordinator = ShareSessionCoordinator(
-            share=share,
-            output=print,
-            password=password,
-            serial=serial,
-            share_unc=plan["unc"],
-            allow=args.allow or [],
-            pairing_required=bool(pairing_code),
-        )
-        server = await coordinator.start(listen_host, listen_port)
-        discovery = None
-        try:
-            discovery = await channel.serve_discovery(
-                serial, listen_port, listen_host, listen_port
-            )
-        except OSError as err:
-            print(f"discovery is off ({err}), nodes need --coordinator")
-        print(
-            f"listening on {listen_host}:{listen_port}. On the other computers run:"
-            f" {os.path.basename(__file__)} --share-session"
-        )
-        print("commands: status, retry, done")
-        queue: asyncio.Queue = asyncio.Queue()
-        loop = asyncio.get_running_loop()
-        threading.Thread(
-            target=_read_stdin_commands, args=(queue, loop), daemon=True
-        ).start()
-        while not coordinator.done.is_set():
-            getter = asyncio.create_task(queue.get())
-            finished = asyncio.create_task(coordinator.done.wait())
-            done, _ = await asyncio.wait(
-                {getter, finished}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if getter in done:
-                await coordinator.handle_command(getter.result(), "coordinator")
-            else:
-                getter.cancel()
-        server.close()
-        if discovery:
-            discovery.close()
-        save_session_results(state, coordinator.results)
-        save_state(args.state_file, state)
-
-    asyncio.run(serve())
-    print("after the upgrade, remove what was set up with --share-cleanup here")
-    return 0
-
-
-def _run_node(args, host, channel, node, serial, psk, psk_source, given_code) -> int:
-    # pylint: disable=too-many-arguments
-    if node == "peer" and not host.is_windows():
-        raise SystemExit(
-            "a peer checks the share with Windows SMB, on this computer use"
-            " --node console to watch and send commands"
-        )
-    roles = (
-        ["console"]
-        if node == "console"
-        else (["root"] if is_local_root_server(host) else ["peer"])
-    )
-    sql_server = None
-    if "root" in roles and host.is_admin():
-        dsns = _probe(_bigfix_dsns, host)
-        sql_server = _bigfix_sql_server(dsns) if "error" not in dsns else None
-    if not psk and not given_code:
-        # nothing to trust the coordinator by without the code, ask for it now:
-        given_code = input("Pairing code shown on the coordinator: ").strip()
-    options = dict(
-        password=channel.derive_password(psk, serial, given_code),
-        serial=serial,
-        share_unc=None,
-        allow=[],
-    )
-
-    async def serve_node():
-        coord_host, coord_port = await find_coordinator(
-            args.coordinator, serial, channel.discover_coordinator
-        )
-        print(f"coordinator: {coord_host}:{coord_port}")
-        node_obj = ShareSessionNode(
-            channel.default_node_id(),
-            roles,
-            None if node == "console" else host,
-            output=print,
-            prompt_password=lambda user: getpass.getpass(
-                f"Password for {user} on the share: "
-            ),
-            sql_server=sql_server,
-            read_stdin=True,
-            has_pairing_code=bool(given_code),
-            prompt_pairing=lambda: input("Pairing code shown on the coordinator: "),
-            rekey=lambda code: channel.derive_password(psk, serial, code),
-            **options,
-        )
-        await node_obj.run(coord_host, coord_port, attempts=120)
-
-    try:
-        asyncio.run(serve_node())
-    except channel.HandshakeError as err:
-        raise SystemExit(f"could not join the session: {err}") from err
-    except OSError as err:
-        raise SystemExit(f"could not reach the coordinator: {err}") from err
-    return 0
-
-
 # ---------------------------------------------------------------- node channel
 #
 # Encrypted, mutually authenticated connections between share session nodes.
@@ -3949,10 +3082,6 @@ def _hkdf(material: bytes, salt: bytes, info: bytes) -> bytes:
 
 class HandshakeError(Exception):
     """The other node could not be authenticated."""
-
-
-class PairingRequired(HandshakeError):
-    """The coordinator requires a pairing code, and this node has none."""
 
 
 class WrongCode(HandshakeError):
@@ -4141,17 +3270,10 @@ class SecureChannel:
 # ---------------------------------------------------------------- handshake
 
 
-def make_hello(
-    node_id: str,
-    roles: List[str],
-    serial: str,
-    pairing_required: bool = False,
-    has_pairing_code: bool = False,
-) -> dict:
+def make_hello(node_id: str, roles: List[str], serial: str) -> dict:
     """The first, unencrypted message from each side.
 
-    `pairing_required` tells nodes without a code to ask for it, rather than
-    failing as a wrong code. The whole hello is bound into the key exchange.
+    The whole hello is bound into the key exchange, so it can't be altered.
     """
     return {
         "protocol": PROTOCOL,
@@ -4159,8 +3281,6 @@ def make_hello(
         "roles": roles,
         "serial": serial,
         "nonce": secrets.token_hex(32),
-        "pairing_required": pairing_required,
-        "has_pairing_code": has_pairing_code,
     }
 
 
@@ -4195,18 +3315,6 @@ def _check_peer_hello(peer: dict, own: dict) -> None:
         )
 
 
-def _check_pairing(peer: dict, own: dict, side: str) -> None:
-    if side == "client" and peer.get("pairing_required"):
-        if not own.get("has_pairing_code"):
-            raise PairingRequired("the coordinator requires its pairing code")
-    if side == "server" and own.get("pairing_required"):
-        if not peer.get("has_pairing_code"):
-            raise HandshakeError(
-                "the other node has no pairing code yet, it asks for it and"
-                " connects again"
-            )
-
-
 async def _read(reader) -> bytes:
     return await asyncio.wait_for(_read_frame(reader), HANDSHAKE_TIMEOUT)
 
@@ -4221,7 +3329,6 @@ async def _handshake(
         peer_bytes = await _read(reader)
         peer = json.loads(peer_bytes)
         _check_peer_hello(peer, hello)
-        _check_pairing(peer, hello, side)
 
         # both hellos are the SPAKE2 identities, so neither can be altered:
         client_bytes, server_bytes = (
@@ -4279,7 +3386,7 @@ async def _handshake(
     return channel
 
 
-async def connect(
+async def open_channel(
     host: str, port: int, password: bytes, hello: dict
 ) -> Tuple[SecureChannel, dict]:
     """Connect to the coordinator, and negotiate an authenticated key."""
@@ -4294,7 +3401,7 @@ async def connect(
     return channel, channel.peer_hello
 
 
-async def accept(
+async def accept_channel(
     reader, writer, password: bytes, hello: dict
 ) -> Tuple[SecureChannel, dict]:
     """Negotiate an authenticated key with a node that connected."""
@@ -4407,14 +3514,796 @@ async def discover_coordinator(
         transport.close()
 
 
-def pairing_code_from_env(environ: Mapping[str, str]) -> Optional[str]:
-    """A pairing code can also come from BIGFIX_UPGRADE_PAIRING_CODE."""
-    return environ.get("BIGFIX_UPGRADE_PAIRING_CODE") or None
-
-
 def default_node_id() -> str:
     """This node's name in messages: its hostname."""
     return os.environ.get("COMPUTERNAME") or os.uname().nodename
+
+
+# ---------------------------------------------------------------- share session: discovery
+
+PS_HYPERV_HOST = (
+    "[bool](Get-Service vmms -ErrorAction SilentlyContinue) | ConvertTo-Json -Compress"
+)
+PS_LOCAL_SHARES = (
+    "@(Get-SmbShare | Select-Object Name, Path, Special) | ConvertTo-Json -Compress"
+)
+PS_HOST_IPS = (
+    "@(Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,"
+    " PrefixLength, InterfaceAlias) | ConvertTo-Json -Compress"
+)
+DEFAULT_SHARE_NAME = "bigfix_upgrade_backup"
+# wrong pairing codes before the coordinator stops accepting nodes, each is
+# one guess out of a million:
+MAX_WRONG_CODES = 5
+
+
+def detect_node_role(host) -> str:
+    """The share session role for this computer, from what it is.
+
+    The Hyper-V host coordinates, since it stays up while the others reboot.
+    Other Windows computers are peers, anything else can only be a console.
+    """
+    if not host.is_windows():
+        return "console"
+    if _probe(host.powershell_json, PS_HYPERV_HOST) is True:
+        return "coordinator"
+    return "peer"
+
+
+def _local_shares(host) -> List[dict]:
+    """This computer's own shares, not the special ones like C$ or IPC$."""
+    shares = _probe(host.powershell_json, PS_LOCAL_SHARES)
+    return [
+        share
+        for share in (_as_list(shares) if not isinstance(shares, dict) else [])
+        if isinstance(share, dict)
+        and not share.get("Special")
+        and not str(share.get("Name", "")).endswith("$")
+    ]
+
+
+def _default_share_folder(host, name: str) -> str:
+    """A folder for a new share, on the fixed drive with the most free space."""
+    disks = _probe(lambda: _as_list(host.powershell_json(PS_DISKS)))
+    disks = [d for d in disks if isinstance(d, dict)] if isinstance(disks, list) else []
+    drive = (
+        max(disks, key=lambda d: d.get("FreeSpace") or 0)["DeviceID"] if disks else "C:"
+    )
+    return f"{drive}\\{name}"
+
+
+def choose_backup_share(host, ask, output=print) -> dict:
+    """Pick the backup share on this computer: an existing one, or a new one.
+
+    Enter at each question takes the default.
+    """
+    shares = _local_shares(host)
+    if len(shares) == 1:
+        share = shares[0]
+        if (
+            ask(
+                f"Use the share {share['Name']} ({share['Path']}) for the backups?",
+                ["yes", "no"],
+                "yes",
+            )
+            == "yes"
+        ):
+            return {"share_name": share["Name"], "folder": share["Path"]}
+    elif shares:
+        for number, share in enumerate(shares, start=1):
+            output(f"  {number}) {share['Name']} ({share['Path']})")
+        answer = ask(
+            "Which share for the backups? A number, or new",
+            [str(n) for n in range(1, len(shares) + 1)] + ["new"],
+            "1",
+        )
+        if answer != "new":
+            share = shares[int(answer) - 1]
+            return {"share_name": share["Name"], "folder": share["Path"]}
+    folder = _default_share_folder(host, DEFAULT_SHARE_NAME)
+    if (
+        ask(f"Create the share {DEFAULT_SHARE_NAME} at {folder}?", ["yes", "no"], "yes")
+        != "yes"
+    ):
+        raise SystemExit("no backup share: give --share-unc, or --share-folder")
+    return {"share_name": DEFAULT_SHARE_NAME, "folder": folder}
+
+
+def choose_host_ip(host_ips: Any, target: Optional[str] = None) -> Optional[str]:
+    """This computer's IPv4 address that others reach: the one facing `target`."""
+    candidates = []
+    for entry in _as_list(host_ips) if not isinstance(host_ips, dict) else []:
+        with contextlib.suppress(ValueError, KeyError, TypeError):
+            interface = ipaddress.ip_interface(
+                f"{entry['IPAddress']}/{entry['PrefixLength']}"
+            )
+            if not (interface.ip.is_loopback or interface.ip.is_link_local):
+                candidates.append(interface)
+    if target:
+        with contextlib.suppress(ValueError):
+            address = ipaddress.ip_address(target)
+            for interface in candidates:
+                if address in interface.network:
+                    return str(interface.ip)
+    return str(candidates[0].ip) if candidates else None
+
+
+def _resolve(name: str) -> Optional[str]:
+    try:
+        return socket.gethostbyname(name)
+    except OSError:
+        return None
+
+
+def discover_root_ip(masthead_paths: List[str], resolver=_resolve) -> Optional[str]:
+    """The root server's address, from the host in the local masthead gather URL."""
+    for path in masthead_paths:
+        name = read_masthead_gather_host(path)
+        if name:
+            with contextlib.suppress(ValueError):
+                return str(ipaddress.ip_address(name))
+            return resolver(name)
+    return None
+
+
+def plan_share(
+    host,
+    share_unc: Optional[str],
+    root_ip: Optional[str],
+    host_ips: Any,
+    hostname: str,
+    ask,
+    share_folder: Optional[str] = None,
+) -> dict:
+    """Work out the backup share: its UNC path, and its folder if it is local.
+
+    With no --share-unc, a share on this computer is picked or created, and
+    its UNC path uses this computer's address facing the root server.
+    """
+    if share_unc:
+        root = unc_share_root(share_unc)
+        if not root:
+            raise SystemExit(f"--share-unc {share_unc} is not a UNC path")
+        server, name = root[2:].split("\\", 1)
+        own = {hostname.lower(), "localhost", "."} | {
+            str(e.get("IPAddress")) for e in _as_list(host_ips) if isinstance(e, dict)
+        }
+        if server.lower() not in own and server not in own:
+            # on another server, only checked from here:
+            return {"unc": share_unc, "share_name": name, "folder": None}
+        existing = {s["Name"].lower(): s["Path"] for s in _local_shares(host)}
+        folder = (
+            share_folder
+            or existing.get(name.lower())
+            or _default_share_folder(host, name)
+        )
+        return {"unc": share_unc, "share_name": name, "folder": folder}
+
+    if share_folder:
+        choice = {"share_name": DEFAULT_SHARE_NAME, "folder": share_folder}
+    else:
+        choice = choose_backup_share(host, ask)
+    address = choose_host_ip(host_ips, root_ip) or hostname
+    return {
+        "unc": f"\\\\{address}\\{choice['share_name']}",
+        "share_name": choice["share_name"],
+        "folder": choice["folder"],
+    }
+
+
+def decide_pairing_code(given: Optional[str], psk_source: str) -> Optional[str]:
+    """The pairing code: the one given, or a new one when there's no PSK.
+
+    Without BIGFIX_UPGRADE_PSK, the code is what the nodes trust each other by.
+    """
+    if given:
+        return given
+    return generate_pairing_code() if code_required(psk_source) else None
+
+
+async def find_coordinator(explicit, serial: str, discover) -> tuple:
+    """The coordinator's address: --coordinator, or found by broadcast."""
+    if explicit:
+        return _parse_address(explicit, DEFAULT_PORT)
+    found = await discover(serial)
+    if found:
+        return found
+    raise SystemExit(
+        "could not find the coordinator on this subnet, give --coordinator"
+        " host:port (check it's running, and its firewall allows UDP discovery)"
+    )
+
+
+# ---------------------------------------------------------------- share session: nodes
+
+
+def require_session_packages() -> None:
+    """Exit with an install hint unless `cryptography` and `spake2` are installed.
+
+    Share sessions need them, reports and the walkthrough don't.
+    """
+    missing = [
+        name
+        for name in ("cryptography", "spake2")
+        if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        raise SystemExit(
+            f"share sessions need {' and '.join(missing)}:"
+            f" pip install {' '.join(missing)}"
+        )
+
+
+CLIENT_MASTHEAD_PATHS = [
+    r"C:\Program Files (x86)\BigFix Enterprise\BES Client\ActionSite.afxm",
+    "/Library/Application Support/BigFix/BES Agent/actionsite.afxm",
+    "/etc/opt/BESClient/actionsite.afxm",
+]
+
+
+def resolve_masthead_serial(override, bes_conn, masthead_paths: List[str]) -> str:
+    """The masthead serial of the deployment being upgraded.
+
+    From --masthead-serial, then the REST connection, then the local client's
+    masthead. REST wins over the client, since this computer's client might
+    belong to another deployment.
+    """
+    if override:
+        return str(override)
+    rest_serial = None
+    if bes_conn is not None:
+        masthead = _probe(_masthead, bes_conn)
+        if "serial" in masthead:
+            rest_serial = str(masthead["serial"])
+    local_serial = next(
+        (s for s in (read_masthead_serial(p) for p in masthead_paths) if s),
+        None,
+    )
+    if rest_serial and local_serial and rest_serial != local_serial:
+        logging.warning(
+            "this computer's BigFix client is for a different BigFix deployment"
+            " (masthead serial %s), using %s from the REST connection",
+            local_serial,
+            rest_serial,
+        )
+    serial = rest_serial or local_serial
+    if not serial:
+        raise SystemExit(
+            "no masthead serial found: give --masthead-serial, or a REST connection"
+        )
+    return serial
+
+
+class ShareSessionCoordinator:
+    """The share owner's side: hands out the share and collects each node's checks.
+
+    Commands (`status`, `retry`, `done`) can come from its own console or from
+    any connected node.
+    """
+
+    def __init__(
+        self,
+        share,
+        output,
+        password,
+        serial,
+        share_unc,
+        allow,
+        max_failures=MAX_WRONG_CODES,
+    ):
+        self.share = share
+        self.output = output
+        # authenticates the key exchange with each node, never used as a key:
+        self.password = password
+        self.serial = serial
+        self.max_failures = max_failures
+        self.failures = 0
+        self.locked = False
+        self.share_unc = share_unc
+        self.allow = allow
+        self.nodes: Dict[str, dict] = {}
+        self.results: Dict[str, List[dict]] = {}
+        self.pending: Dict[str, int] = {}
+        self.done = asyncio.Event()
+        self._changed = asyncio.Event()
+
+    async def start(self, host: str, port: int):
+        """Listen for nodes, returning the asyncio server."""
+        return await asyncio.start_server(self._on_connect, host, port)
+
+    def _share_for(self, roles: List[str]) -> dict:
+        share = {"unc": self.share_unc, "user": self.share.get("user")}
+        # only over the negotiated key, and never to consoles:
+        if "console" not in roles:
+            share["password"] = self.share.get("password")
+        return share
+
+    async def _send(self, name: str, message: dict) -> None:
+        node = self.nodes.get(name)
+        if node:
+            with contextlib.suppress(ConnectionError):
+                await node["channel"].send(message)
+
+    async def _broadcast_consoles(self, message: dict) -> None:
+        for name, node in list(self.nodes.items()):
+            if "console" in node["roles"]:
+                await self._send(name, message)
+
+    async def _diagnose(self, name: str) -> None:
+        self.pending[name] = self.pending.get(name, 0) + 1
+        await self._send(name, {"type": "diagnose"})
+
+    async def _on_connect(self, reader, writer) -> None:
+        peer_ip = str(writer.get_extra_info("peername")[0])
+        if self.locked:
+            self.output(f"refused {peer_ip}: locked after too many wrong codes")
+            writer.close()
+            return
+        try:
+            if not peer_allowed(peer_ip, self.allow):
+                self.output(f"refused {peer_ip}: not in --allow")
+                writer.close()
+                return
+            hello = make_hello("coordinator", ["coordinator"], self.serial)
+            channel, peer = await accept_channel(reader, writer, self.password, hello)
+        except WrongCode as err:
+            # each wrong code is one online guess, so only allow a few:
+            self.failures += 1
+            self.output(
+                f"refused {peer_ip}: {err} ({self.failures}/{self.max_failures})"
+            )
+            if self.failures >= self.max_failures:
+                self.locked = True
+                self.output(
+                    "too many wrong pairing codes, no more nodes are accepted:"
+                    " restart the coordinator for a new code"
+                )
+            return
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            self.output(f"refused {peer_ip}: {err}")
+            return
+        # names must be unique, a peer and a console can run on the same computer:
+        base_name = name = str(peer.get("node_id"))
+        suffix = 2
+        while name in self.nodes:
+            name = f"{base_name}-{suffix}"
+            suffix += 1
+        roles = [str(role) for role in peer.get("roles") or []]
+        self.nodes[name] = {"channel": channel, "roles": roles, "ip": peer_ip}
+        self.output(f"{name} ({', '.join(roles)}) connected from {peer_ip}")
+        await channel.send(
+            {"type": "welcome", "name": name, "share": self._share_for(roles)}
+        )
+        self._changed.set()
+        if "console" not in roles:
+            await self._diagnose(name)
+        try:
+            while True:
+                message = await channel.recv()
+                await self._on_message(name, message)
+        except (asyncio.IncompleteReadError, ConnectionError):
+            pass
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            self.output(f"{name}: dropped, {err}")
+        finally:
+            self.nodes.pop(name, None)
+            self.pending.pop(name, None)
+            self._changed.set()
+            channel.close()
+            self.output(f"{name} disconnected")
+
+    async def _on_message(self, name: str, message: dict) -> None:
+        if message.get("type") == "share_result":
+            result = {
+                "ok": bool(message.get("ok")),
+                "findings": message.get("findings", []),
+            }
+            self.results.setdefault(name, []).append(result)
+            for line in format_findings(name, result):
+                self.output(line)
+            await self._broadcast_consoles(
+                {"type": "result", "node": name, "result": result}
+            )
+            self.pending[name] = max(0, self.pending.get(name, 1) - 1)
+            self._changed.set()
+        elif message.get("type") == "command":
+            await self.handle_command(str(message.get("command")), source=name)
+
+    def status_lines(self) -> List[str]:
+        """The current state of every node."""
+        lines = [f"share {self.share_unc}, {len(self.nodes)} node(s) connected"]
+        for name, node in self.nodes.items():
+            history = self.results.get(name)
+            last = history[-1] if history else None
+            state = (
+                "console"
+                if "console" in node["roles"]
+                else (
+                    "checking"
+                    if self.pending.get(name)
+                    else (
+                        "OK"
+                        if last and last["ok"]
+                        else "problems" if last else "waiting"
+                    )
+                )
+            )
+            lines.append(f"  {name} ({node['ip']}): {state}")
+        return lines
+
+    async def handle_command(self, command: str, source: str) -> None:
+        """Run one command, from this console or a node."""
+        command = command.strip().lower()
+        self.output(f"{source}: {command}")
+        if command == "status":
+            lines = self.status_lines()
+            for line in lines:
+                self.output(line)
+            if source in self.nodes:
+                await self._send(source, {"type": "status", "lines": lines})
+        elif command == "retry":
+            for name, node in list(self.nodes.items()):
+                if "console" not in node["roles"]:
+                    await self._diagnose(name)
+        elif command == "done":
+            await self._wait(lambda: not any(self.pending.values()), timeout=120)
+            for name in list(self.nodes):
+                await self._send(name, {"type": "bye"})
+            self.done.set()
+        else:
+            self.output(f"unknown command {command!r}, use status, retry or done")
+
+    async def _wait(self, condition, timeout: float) -> None:
+        async def waiter():
+            while not condition():
+                self._changed.clear()
+                await self._changed.wait()
+
+        await asyncio.wait_for(waiter(), timeout)
+
+    async def wait_for_nodes(self, count: int, timeout: float) -> None:
+        """Wait until this many nodes are connected."""
+        await self._wait(lambda: len(self.nodes) >= count, timeout)
+
+
+class ShareSessionNode:
+    """A node connecting to the coordinator: checks the share and reports back.
+
+    A `console` node only shows results and sends commands.
+    """
+
+    # pylint: disable=too-many-instance-attributes
+    def __init__(
+        self,
+        name,
+        roles,
+        host,
+        output,
+        password,
+        serial,
+        commands=None,
+        prompt_password=None,
+        sql_server=None,
+        read_stdin=False,
+    ):
+        self.name = name
+        self.read_stdin = read_stdin
+        self.roles = roles
+        self.host = host
+        self.output = output
+        self.password = password
+        self.serial = serial
+        self.commands = commands
+        self.prompt_password = prompt_password
+        self.sql_server = sql_server
+        self.share: dict = {}
+        self.command_queue: asyncio.Queue = asyncio.Queue()
+
+    async def connect(self, host: str, port: int, attempts: int = 1, delay: float = 5):
+        """Connect and authenticate, retrying while the coordinator isn't up yet."""
+        for attempt in range(1, attempts + 1):
+            hello = make_hello(self.name, self.roles, self.serial)
+            try:
+                channel, _peer = await open_channel(host, port, self.password, hello)
+                return channel
+            except (OSError, asyncio.TimeoutError) as err:
+                if attempt == attempts:
+                    raise
+                self.output(f"coordinator not reachable ({err}), retrying in {delay}s")
+                await asyncio.sleep(delay)
+        raise ConnectionError(f"coordinator {host}:{port} not reachable")
+
+    async def run(self, host: str, port: int, attempts: int = 1) -> None:
+        """Serve the coordinator until it says bye."""
+        channel = await self.connect(host, port, attempts)
+        sender = asyncio.create_task(self._send_commands(channel))
+        try:
+            while True:
+                message = await channel.recv()
+                kind = message.get("type")
+                if kind == "welcome":
+                    self.share = message.get("share") or {}
+                    self.name = message.get("name") or self.name
+                    self.output(
+                        f"connected as {self.name}, share {self.share.get('unc')}"
+                    )
+                    self._ask_missing_password()
+                    if self.read_stdin:
+                        # NOTE: only after any prompts, so they don't compete for input:
+                        threading.Thread(
+                            target=_read_stdin_commands,
+                            args=(self.command_queue, asyncio.get_running_loop()),
+                            daemon=True,
+                        ).start()
+                        self.output("commands: status, retry, done")
+                    for command in self.commands or []:
+                        await self.command_queue.put(command)
+                elif kind == "diagnose" and "console" not in self.roles:
+                    await self._diagnose(channel)
+                elif kind == "result":
+                    for line in format_findings(message["node"], message["result"]):
+                        self.output(line)
+                elif kind == "status":
+                    for line in message.get("lines", []):
+                        self.output(line)
+                elif kind == "bye":
+                    self.output("coordinator finished the session")
+                    return
+        except (asyncio.IncompleteReadError, ConnectionError):
+            self.output("coordinator disconnected")
+        finally:
+            sender.cancel()
+            channel.close()
+
+    async def _send_commands(self, channel) -> None:
+        while True:
+            command = await self.command_queue.get()
+            await channel.send({"type": "command", "command": command})
+
+    def _ask_missing_password(self) -> None:
+        """Ask for the share password once, if the coordinator didn't send one."""
+        user = self.share.get("user")
+        if (
+            "console" not in self.roles
+            and user
+            and self.share.get("password") is None
+            and self.prompt_password
+        ):
+            self.share["password"] = self.prompt_password(user)
+
+    async def _diagnose(self, channel) -> None:
+        user = self.share.get("user")
+        password = self.share.get("password")
+        findings = await asyncio.get_running_loop().run_in_executor(
+            None,
+            diagnose_share_access,
+            self.host,
+            str(self.share.get("unc") or ""),
+            user,
+            password,
+            self.sql_server,
+        )
+        result = summarize_findings(findings)
+        for line in format_findings(self.name, result):
+            self.output(line)
+        await channel.send({"type": "share_result", **result})
+
+
+def save_session_results(state: dict, results: dict) -> None:
+    """Keep each node's share check results in the state file."""
+    state.setdefault("share", {})["results"] = results
+
+
+def _read_stdin_commands(queue: asyncio.Queue, loop) -> None:
+    """Feed typed commands into the event loop, from a thread."""
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            return
+        if line.strip():
+            loop.call_soon_threadsafe(queue.put_nowait, line.strip())
+
+
+def _parse_address(value: str, default_port: int) -> tuple:
+    host, _, port = value.rpartition(":")
+    if not host:
+        return value, default_port
+    return host, int(port)
+
+
+def run_share_session(args, bes_conn, host) -> int:
+    """The --share-session mode: as coordinator, peer or console, auto detected.
+
+    Everything has a default: the role, the share, the addresses and the
+    pairing code, so on most nodes `--share-session` is all that's needed.
+    """
+    require_session_packages()
+    serial = resolve_masthead_serial(
+        args.masthead_serial, bes_conn, CLIENT_MASTHEAD_PATHS
+    )
+    psk, psk_source = load_psk(os.environ, args.psk_file)
+    given_code = args.pairing_code
+    node = args.node or ("coordinator" if args.listen else detect_node_role(host))
+    print(f"share session as {node}, masthead serial {serial}")
+    if node == "coordinator":
+        return _run_coordinator(
+            args, bes_conn, host, serial, psk, psk_source, given_code
+        )
+    return _run_node(args, host, node, serial, psk, given_code)
+
+
+def _root_ip_from_rest(bes_conn) -> Optional[str]:
+    if bes_conn is None:
+        return None
+    addresses = _get(_probe(_root_server, bes_conn), "properties", "IP Address")
+    return str(addresses[0]) if addresses else None
+
+
+def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) -> int:
+    # pylint: disable=too-many-arguments,too-many-locals
+    state = load_state(args.state_file)
+    state.setdefault("run_id", datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+    listen_host, listen_port = _parse_address(
+        args.listen or f"0.0.0.0:{DEFAULT_PORT}", DEFAULT_PORT
+    )
+    host_ips = _probe(host.powershell_json, PS_HOST_IPS) if host.is_windows() else []
+    root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(CLIENT_MASTHEAD_PATHS)
+    print(f"root server: {root_ip or 'not found, give --allow with its address'}")
+    if not host.is_windows() and not args.share_unc:
+        raise SystemExit("give --share-unc, a share can only be set up on Windows")
+    plan = plan_share(
+        host,
+        args.share_unc,
+        root_ip,
+        host_ips,
+        socket.gethostname(),
+        _ask,
+        args.share_folder,
+    )
+    print(
+        f"backup share: {plan['unc']}"
+        + (f" ({plan['folder']})" if plan["folder"] else "")
+    )
+
+    peers = list(
+        dict.fromkeys(
+            [ip for ip in [root_ip] if ip]
+            + [entry for entry in args.allow or [] if "/" not in entry]
+        )
+    )
+    share: Dict[str, Optional[str]] = {"user": None, "password": None}
+    if plan["folder"]:
+        if not host.is_admin():
+            raise SystemExit("setting up the share needs an elevated prompt")
+        spec = {
+            "share_name": plan["share_name"],
+            "folder": plan["folder"],
+            "account": args.share_account,
+            "peers": peers,
+            "coordinator_port": listen_port,
+            "coordinator_remote": ["LocalSubnet"] + list(args.allow or []),
+        }
+        share = setup_share_owner(
+            host,
+            spec,
+            state,
+            state["run_id"],
+            lambda prompt: _ask(prompt, ["yes", "no"], "yes") == "yes",
+            args.dry_run,
+            socket.gethostname(),
+        )
+        save_state(args.state_file, state)
+    elif args.backup_share_user:
+        share = {
+            "user": args.backup_share_user,
+            "password": getpass.getpass(
+                f"Password for {args.backup_share_user}, to give to the nodes: "
+            ),
+        }
+
+    pairing_code = decide_pairing_code(given_code, psk_source)
+    if pairing_code and pairing_code != given_code:
+        print(
+            f"\n    pairing code: {pairing_code}\n    the other nodes ask for it once\n"
+        )
+    password = derive_password(psk, serial, pairing_code)
+
+    async def serve():
+        coordinator = ShareSessionCoordinator(
+            share=share,
+            output=print,
+            password=password,
+            serial=serial,
+            share_unc=plan["unc"],
+            allow=args.allow or [],
+        )
+        server = await coordinator.start(listen_host, listen_port)
+        discovery = None
+        try:
+            discovery = await serve_discovery(
+                serial, listen_port, listen_host, listen_port
+            )
+        except OSError as err:
+            print(f"discovery is off ({err}), nodes need --coordinator")
+        print(
+            f"listening on {listen_host}:{listen_port}. On the other computers run:"
+            f" {os.path.basename(__file__)} --share-session"
+        )
+        print("commands: status, retry, done")
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        threading.Thread(
+            target=_read_stdin_commands, args=(queue, loop), daemon=True
+        ).start()
+        while not coordinator.done.is_set():
+            getter = asyncio.create_task(queue.get())
+            finished = asyncio.create_task(coordinator.done.wait())
+            done, _ = await asyncio.wait(
+                {getter, finished}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if getter in done:
+                await coordinator.handle_command(getter.result(), "coordinator")
+            else:
+                getter.cancel()
+        server.close()
+        if discovery:
+            discovery.close()
+        save_session_results(state, coordinator.results)
+        save_state(args.state_file, state)
+
+    asyncio.run(serve())
+    print("after the upgrade, remove what was set up with --share-cleanup here")
+    return 0
+
+
+def _run_node(args, host, node, serial, psk, given_code) -> int:
+    # pylint: disable=too-many-arguments
+    if node == "peer" and not host.is_windows():
+        raise SystemExit(
+            "a peer checks the share with Windows SMB, on this computer use"
+            " --node console to watch and send commands"
+        )
+    roles = (
+        ["console"]
+        if node == "console"
+        else (["root"] if is_local_root_server(host) else ["peer"])
+    )
+    sql_server = None
+    if "root" in roles and host.is_admin():
+        dsns = _probe(_bigfix_dsns, host)
+        sql_server = _bigfix_sql_server(dsns) if "error" not in dsns else None
+    if not psk and not given_code:
+        # nothing to trust the coordinator by without the code, ask for it now:
+        given_code = input("Pairing code shown on the coordinator: ").strip()
+
+    async def serve_node():
+        coord_host, coord_port = await find_coordinator(
+            args.coordinator, serial, discover_coordinator
+        )
+        print(f"coordinator: {coord_host}:{coord_port}")
+        node_obj = ShareSessionNode(
+            default_node_id(),
+            roles,
+            None if node == "console" else host,
+            output=print,
+            prompt_password=lambda user: getpass.getpass(
+                f"Password for {user} on the share: "
+            ),
+            sql_server=sql_server,
+            read_stdin=True,
+            password=derive_password(psk, serial, given_code),
+            serial=serial,
+        )
+        await node_obj.run(coord_host, coord_port, attempts=120)
+
+    try:
+        asyncio.run(serve_node())
+    except HandshakeError as err:
+        raise SystemExit(f"could not join the session: {err}") from err
+    except OSError as err:
+        raise SystemExit(f"could not reach the coordinator: {err}") from err
+    return 0
 
 
 # ---------------------------------------------------------------- main
@@ -4528,7 +4417,8 @@ def build_parser():
     )
     session.add_argument(
         "--pairing-code",
-        help="a one time code mixed into the key, `new` on the coordinator makes one",
+        help="the pairing code to use, instead of one the coordinator makes up"
+        " when BIGFIX_UPGRADE_PSK isn't set",
     )
     session.add_argument("--psk-file", help="file with the preshared key")
     session.add_argument(

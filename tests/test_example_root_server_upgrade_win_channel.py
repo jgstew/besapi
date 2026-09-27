@@ -41,11 +41,11 @@ MASTHEAD_HEADERS = (
 
 @pytest.fixture
 def channel():
-    """The node channel functions, from the script."""
+    """The script, for its node channel section."""
     spec = importlib.util.spec_from_file_location("upgrade_channel", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.load_channel()
+    return module
 
 
 # ---------------------------------------------------------------- masthead serial
@@ -163,7 +163,7 @@ async def handshake_pair(
 
     async def on_connect(reader, writer):
         try:
-            results["server"] = await channel.accept(
+            results["server"] = await channel.accept_channel(
                 reader, writer, server_password, hello(channel, "hyperv", server_serial)
             )
         except Exception as err:  # pylint: disable=broad-exception-caught
@@ -172,7 +172,7 @@ async def handshake_pair(
     server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     try:
-        results["client"] = await channel.connect(
+        results["client"] = await channel.open_channel(
             "127.0.0.1", port, client_password, hello(channel, "root", client_serial)
         )
     except Exception as err:  # pylint: disable=broad-exception-caught
@@ -285,7 +285,7 @@ def test_handshake_bad_pake_message(channel):
 
         async def on_connect(reader, writer):
             try:
-                results["server"] = await channel.accept(
+                results["server"] = await channel.accept_channel(
                     reader, writer, password, hello(channel, "hyperv")
                 )
             except Exception as err:  # pylint: disable=broad-exception-caught
@@ -399,48 +399,6 @@ def test_discover_coordinator(channel):
     assert other is None
 
 
-def test_handshake_pairing_required(channel):
-    """Test a node without a pairing code learns the coordinator requires one."""
-
-    async def scenario():
-        results = {}
-        key = channel.derive_password(None, "123456789", "123456")
-
-        async def on_connect(reader, writer):
-            try:
-                results["server"] = await channel.accept(
-                    reader,
-                    writer,
-                    key,
-                    channel.make_hello("hyperv", ["coordinator"], "123456789", True),
-                )
-            except Exception as err:  # pylint: disable=broad-exception-caught
-                results["server"] = err
-
-        server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
-        port = server.sockets[0].getsockname()[1]
-        try:
-            await channel.connect(
-                "127.0.0.1",
-                port,
-                channel.derive_password(b"psk", "123456789"),
-                channel.make_hello("root", ["root"], "123456789"),
-            )
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            results["client"] = err
-        for _ in range(100):
-            if "server" in results:
-                break
-            await asyncio.sleep(0.01)
-        server.close()
-        return results
-
-    results = asyncio.run(scenario())
-    assert isinstance(results["client"], channel.PairingRequired)
-    assert isinstance(results["server"], channel.HandshakeError)
-    assert "pairing code" in str(results["server"])
-
-
 # coverage of existing behaviour, checked by mutation rather than red first:
 def test_discovery_silent_for_other_serial(channel):
     """Test the coordinator doesn't even answer discovery for another deployment."""
@@ -484,7 +442,7 @@ def test_handshake_tampered_hello_rejected(channel):
 
         async def on_connect(reader, writer):
             try:
-                results["server"] = await channel.accept(
+                results["server"] = await channel.accept_channel(
                     reader, writer, password, hello(channel, "hyperv")
                 )
             except Exception as err:  # pylint: disable=broad-exception-caught
@@ -520,7 +478,7 @@ def test_handshake_tampered_hello_rejected(channel):
         proxy = await asyncio.start_server(on_proxy, "127.0.0.1", 0)
         proxy_port = proxy.sockets[0].getsockname()[1]
         try:
-            await channel.connect(
+            await channel.open_channel(
                 "127.0.0.1",
                 proxy_port,
                 password,
@@ -565,7 +523,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert module.sql_major_from_version("10.50.2500.0") == "2008 R2"
 try:
-    module.load_channel()
+    module.require_session_packages()
 except SystemExit as err:
     print("EXIT", err)
 """

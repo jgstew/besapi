@@ -1851,12 +1851,15 @@ def test_resolve_masthead_serial_mismatch_warns(upgrade, tmp_path, caplog):
 
 
 def session_options(upgrade, **changes):
-    options = dict(
-        password=b"k" * 32,
-        serial="123456789",
-        share_unc=SHARE_UNC,
-        allow=[],
-    )
+    """Options for a ShareSessionNode."""
+    options = dict(password=b"k" * 32, serial="123456789")
+    options.update(changes)
+    return options
+
+
+def coordinator_options(upgrade, **changes):
+    """Options for a ShareSessionCoordinator."""
+    options = dict(session_options(upgrade), share_unc=SHARE_UNC, allow=[])
     options.update(changes)
     return options
 
@@ -1879,7 +1882,7 @@ async def run_session(
             "password": "temp-Pw-123!",
         },
         output=output["coordinator"].append,
-        **session_options(upgrade, **options),
+        **coordinator_options(upgrade, **options),
     )
     server = await coordinator.start("127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
@@ -1962,7 +1965,7 @@ def test_share_session_console_drives(upgrade):
 
 def test_share_session_locks_after_wrong_codes(upgrade):
     """Test the coordinator stops accepting nodes after too many wrong codes."""
-    channel = upgrade.load_channel()
+    channel = upgrade
     output = []
 
     async def scenario():
@@ -1970,7 +1973,7 @@ def test_share_session_locks_after_wrong_codes(upgrade):
             share={"unc": SHARE_UNC, "user": None, "password": None},
             output=output.append,
             max_failures=3,
-            **session_options(
+            **coordinator_options(
                 upgrade, password=channel.derive_password(None, "123456789", "111111")
             ),
         )
@@ -2012,7 +2015,7 @@ def test_share_session_duplicate_names(upgrade):
         coordinator = upgrade.ShareSessionCoordinator(
             share={"unc": SHARE_UNC, "user": None, "password": None},
             output=lambda line: None,
-            **session_options(upgrade),
+            **coordinator_options(upgrade),
         )
         server = await coordinator.start("127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
@@ -2047,7 +2050,7 @@ def test_share_session_node_coordinator_gone(upgrade):
         coordinator = upgrade.ShareSessionCoordinator(
             share={"unc": SHARE_UNC, "user": None, "password": None},
             output=lambda line: None,
-            **session_options(upgrade),
+            **coordinator_options(upgrade),
         )
         server = await coordinator.start("127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
@@ -2074,14 +2077,6 @@ def test_share_session_results_saved_without_share_setup(upgrade):
     state = {}
     upgrade.save_session_results(state, {"bigfix": [{"ok": True, "findings": []}]})
     assert state["share"]["results"]["bigfix"][0]["ok"] is True
-
-
-def test_load_channel_once(upgrade):
-    """Test the channel module is loaded once, so its exceptions can be caught."""
-    assert upgrade.load_channel() is upgrade.load_channel()
-    assert (
-        upgrade.load_channel().HandshakeError is upgrade.load_channel().HandshakeError
-    )
 
 
 # coverage of existing behaviour, checked by mutation rather than red first:
@@ -2268,14 +2263,37 @@ def test_plan_share_remote_unc(upgrade):
     "given,source,expected",
     [
         ("123456", "none", "123456"),
+        ("123456", "env", "123456"),
         (None, "none", "generated"),
         (None, "env", None),
-        ("new", "env", "generated"),
     ],
 )
-def test_decide_pairing_code(upgrade, given, source, expected):
-    """Test a pairing code is made up whenever there's no PSK to trust instead."""
-    assert upgrade.decide_pairing_code(given, source, lambda: "generated") == expected
+def test_decide_pairing_code(upgrade, given, source, expected, monkeypatch):
+    """Test a code is generated exactly when there's no PSK to trust instead."""
+    monkeypatch.setattr(upgrade, "generate_pairing_code", lambda: "generated")
+    assert upgrade.decide_pairing_code(given, source) == expected
+
+
+def test_require_session_packages(upgrade):
+    """Test the share session packages check passes when they're installed."""
+    upgrade.require_session_packages()
+
+
+def test_service_commands_quoted(upgrade, tmp_path):
+    """Test walkthrough service commands use the PowerShell helper, quoted."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+
+    upgrade.ACTIONS["stop_services"](ctx)
+    upgrade.ACTIONS["start_services"](ctx)
+    upgrade.ACTIONS["restore_start_types"](ctx)
+
+    scripts = [cmd[-1] for cmd in ctx.host.ran]
+    assert all(cmd[:4] == upgrade._powershell("")[:4] for cmd in ctx.host.ran)
+    assert "Stop-Service -Name 'FillDB' -Force" in scripts
+    assert "Start-Service -Name 'FillDB'" in scripts
+    assert "Set-Service -Name 'FillDB' -StartupType Automatic" in scripts
+    with pytest.raises(ValueError):
+        upgrade.service_command("Stop-Service", "Fill'DB")
 
 
 def test_find_coordinator(upgrade):
@@ -2296,46 +2314,6 @@ def test_find_coordinator(upgrade):
         asyncio.run(upgrade.find_coordinator(None, "1", nothing))
 
 
-def test_share_session_pairing_prompted(upgrade):
-    """Test a node is asked for the pairing code only when the coordinator needs
-    one.
-    """
-    channel = upgrade.load_channel()
-    code = "123456"
-    prompts = []
-
-    async def scenario():
-        coordinator = upgrade.ShareSessionCoordinator(
-            share={"unc": SHARE_UNC, "user": None, "password": None},
-            output=lambda line: None,
-            pairing_required=True,
-            **session_options(
-                upgrade, password=channel.derive_password(b"psk", "123456789", code)
-            ),
-        )
-        server = await coordinator.start("127.0.0.1", 0)
-        port = server.sockets[0].getsockname()[1]
-        node = upgrade.ShareSessionNode(
-            "console1",
-            ["console"],
-            None,
-            output=lambda line: None,
-            prompt_pairing=lambda: prompts.append("asked") or code,
-            rekey=lambda pairing: channel.derive_password(b"psk", "123456789", pairing),
-            **session_options(
-                upgrade, password=channel.derive_password(b"psk", "123456789")
-            ),
-        )
-        task = asyncio.create_task(node.run("127.0.0.1", port))
-        await coordinator.wait_for_nodes(1, timeout=5)
-        await coordinator.handle_command("done", source="coordinator")
-        await asyncio.wait_for(task, timeout=5)
-        server.close()
-
-    asyncio.run(scenario())
-    assert prompts == ["asked"]
-
-
 # coverage of existing behaviour, checked by mutation rather than red first:
 def test_share_session_credentials_only_to_peers(upgrade):
     """Test peers receive the share password, consoles never do."""
@@ -2348,7 +2326,7 @@ def test_share_session_credentials_only_to_peers(upgrade):
                 "password": "temp-Pw-123!",
             },
             output=lambda line: None,
-            **session_options(upgrade),
+            **coordinator_options(upgrade),
         )
         server = await coordinator.start("127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
