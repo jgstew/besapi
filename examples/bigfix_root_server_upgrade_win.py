@@ -94,6 +94,7 @@ import getpass
 import hashlib
 import hmac
 import importlib.util
+import io
 import ipaddress
 import json
 import logging
@@ -106,11 +107,12 @@ import shutil
 import socket
 import string
 import struct
+import subprocess
 import sys
 import threading
 import types
 import urllib.parse
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, TextIO, Tuple, cast
 
 import besapi
 import besapi.plugin_utilities
@@ -250,6 +252,28 @@ SQL_DATABASES = (
 
 BIGFIX_DATABASES = ["BFEnterprise", "BESReporting"]
 KEY_FILES = ["masthead.afxm", "license.crt", "license.pvk"]
+# HCL's backup keeps a copy of the server's actionsite.afxm as masthead.afxm:
+MASTHEAD_SOURCE = "actionsite.afxm"
+SEARCHED_KEY_FILES = KEY_FILES + [MASTHEAD_SOURCE]
+DEFAULT_SERVER_FOLDER = r"C:\Program Files (x86)\BigFix Enterprise\BES Server"
+DEFAULT_CLIENT_FOLDER = r"C:\Program Files (x86)\BigFix Enterprise\BES Client"
+CLIENT_GLOBAL_OPTIONS_KEY = (
+    r"SOFTWARE\Wow6432Node\BigFix\EnterpriseClient\GlobalOptions"
+)
+# HCL's server backup: files and folders under the BES Server folder
+# https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/c_backup_procedure_windows.html
+SERVER_BACKUP_ITEMS = [
+    ("BESReportsData",),
+    ("BESReportsServer", "wwwroot", "ReportFiles"),
+    ("Encryption Keys",),
+    ("Mirror Server", "Inbox"),
+    ("Mirror Server", "Config", "DownloadWhitelist.txt"),
+    ("UploadManagerData",),
+    ("wwwrootbes",),
+]
+# asked about before copying, UploadManagerData can hold years of uploads:
+LARGE_BACKUP_BYTES = 5 * 1024**3
+DB_INFO_TABLES = ["DBINFO", "REPLICATION_SERVERS"]
 # searched below the `BigFix Enterprise` folder, skipping folders of site and
 # client data that can hold many thousands of files:
 KEY_FILE_SEARCH_DEPTH = 4
@@ -933,6 +957,17 @@ class LocalHost:
         """Run a command, raising if it fails."""
         return besapi.plugin_utilities.run_logged(cmd).stdout
 
+    def run_secret(self, cmd: List[str]) -> None:
+        """Run a command with a secret in its arguments, logging none of it."""
+        result = subprocess.run(  # nosec B603
+            cmd, capture_output=True, text=True, check=False
+        )
+        if result.returncode:
+            # NOTE: the arguments and output could hold the secret, never shown:
+            raise RuntimeError(
+                f"{os.path.basename(cmd[0])} failed with exit code {result.returncode}"
+            )
+
 
 def is_local_root_server(host) -> bool:
     """Check if this is the BigFix root server: Windows, with its registry key."""
@@ -1144,7 +1179,7 @@ def find_key_files(
     host, folders: List[str], max_depth: int = KEY_FILE_SEARCH_DEPTH
 ) -> dict:
     """Find the masthead and license files by name, reporting paths only."""
-    found: Dict[str, List[str]] = {name: [] for name in KEY_FILES}
+    found: Dict[str, List[str]] = {name: [] for name in SEARCHED_KEY_FILES}
     other_afxm = []
     for root in folders:
         for dirpath, dirnames, filenames in host.walk(root):
@@ -1215,9 +1250,7 @@ def collect_local_info(host, sql_server: Optional[str] = None) -> dict:
 # ---------------------------------------------------------------- report
 
 REDACTED = "<redacted>"
-SECRET_KEY_PATTERN = re.compile(
-    r"pass|pwd|secret|token|credential|private.?key|pvk", re.I
-)
+SECRET_KEY_PATTERN = re.compile(r"pass|pwd|secret|token|credential|private.?key", re.I)
 # flags about a secret, like `SOAPPasswordIsEncrypted`, not the secret itself:
 SECRET_FLAG_KEY_PATTERN = re.compile(r"(IsEncrypted|Encryption)$", re.I)
 SECRET_IN_STRING_PATTERN = re.compile(r"(?i)\b(pwd|password)=[^;]*")
@@ -1351,9 +1384,12 @@ def report_warnings(local: dict, now: Optional[datetime.datetime] = None) -> Lis
         warnings.append(
             f"license.pvk is on the server ({', '.join(pvk_paths)}), keep it offline"
         )
-    if _get(local, "bigfix", "key_files", "found", "masthead.afxm") == []:
+    found = _get(local, "bigfix", "key_files", "found") or {}
+    # the backup copies the server's actionsite.afxm as masthead.afxm:
+    if found.get("masthead.afxm") == [] and found.get(MASTHEAD_SOURCE) == []:
         warnings.append(
-            "masthead.afxm was not found on the server, have a copy before the backup"
+            "no masthead.afxm or actionsite.afxm was found on the server,"
+            " have a masthead copy before the backup"
         )
 
     if _get(local, "sql", "server_properties", "IsSysAdmin") is False:
@@ -1556,10 +1592,16 @@ def _upgrade_instructions(step: dict, local_sql: bool) -> str:
 
 
 def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
-    """Build the walkthrough steps for an upgrade path from find_upgrade_path()."""
-    backup_actions = ["registry_export", "key_files"]
+    """Build the walkthrough steps for an upgrade path from find_upgrade_path().
+
+    BigFix is stopped before the backup, as HCL's backup procedure says, and
+    stays stopped for the first snapshot.
+    """
+    backup_actions = ["registry_export", "key_files", "masthead", "client_data"]
+    backup_actions += ["folder_backup", "db_info"]
     if local_sql:
         backup_actions.append("sql_backup")
+    backup_actions += ["server_keys", "restore_notes"]
 
     steps = [
         Step(
@@ -1570,24 +1612,37 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
             ["collect_baseline"],
         ),
         Step(
+            "stop_services_0",
+            "Stop BigFix for the backup",
+            "BigFix services are stopped in HCL's order and set to Manual. Close"
+            " all consoles, and stop remote WebUI or Web Reports servers.",
+            ["remote_processes", "stop_services"],
+        ),
+        Step(
             "backup",
             "Back up BigFix",
-            "Keys, registry and COPY_ONLY database backups go to the backup folder."
-            " Copy them off this server, and keep license.pvk offline.",
+            "Following HCL's server backup: registry, keys, masthead, the server's"
+            " own client identity, server folders, DB info, COPY_ONLY database"
+            " backups, and optionally the decrypted server keys. RESTORE_NOTES.txt"
+            " in the backup folder says how to restore. Copy the backups off this"
+            " server, and keep license.pvk offline.",
             backup_actions,
         ),
     ]
     for number, step in enumerate(path["steps"], start=1):
         upgrade_id = f"upgrade_{number}_{step['component']}_{_id_part(step['to'])}"
-        steps.extend(
-            [
+        if number > 1:
+            steps.append(
                 Step(
                     f"stop_services_{number}",
                     "Stop BigFix services",
                     "BigFix services are stopped and set to Manual so they stay"
                     " stopped across reboots. Close all consoles.",
                     ["stop_services"],
-                ),
+                )
+            )
+        steps.extend(
+            [
                 Step(
                     f"snapshot_{number}",
                     "Snapshot the VM",
@@ -1628,7 +1683,8 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                 "cleanup",
                 "Clean up",
                 "After an agreed soak period, delete the VM snapshots, and securely"
-                " remove old backups that are no longer needed.",
+                " remove old backups that are no longer needed, especially the"
+                " decrypted server keys and client KeyStorage.",
             ),
         ]
     )
@@ -1663,18 +1719,17 @@ def next_step(steps: List[Step], state: dict) -> Optional[Step]:
     return next((step for step in steps if step.id not in state["done"]), None)
 
 
-# lower stops first: front ends, then the server, the client last.
+# HCL's backup procedure stops WebUI, Web Reports, Client, GatherDB, FillDB,
+# then the Root Server. Lower stops first, any other BES service before them:
 SERVICE_STOP_RANKS = [
     ("webui", 0),
     ("web reports", 1),
     ("webreports", 1),
-    ("plugin portal", 2),
-    ("pluginportal", 2),
-    ("gather", 4),
-    ("filldb", 5),
-    ("root server", 6),
-    ("rootserver", 6),
-    ("client", 7),
+    ("client", 2),
+    ("gather", 3),
+    ("filldb", 4),
+    ("root server", 5),
+    ("rootserver", 5),
 ]
 
 
@@ -1683,7 +1738,7 @@ def service_stop_order(services: List[dict]) -> List[str]:
 
     def rank(service: dict) -> int:
         names = f"{service.get('DisplayName', '')} {service.get('Name', '')}".lower()
-        return next((r for keyword, r in SERVICE_STOP_RANKS if keyword in names), 3)
+        return next((r for keyword, r in SERVICE_STOP_RANKS if keyword in names), -1)
 
     return [service["Name"] for service in sorted(services, key=rank)]
 
@@ -1902,13 +1957,23 @@ class WalkthroughContext:
     host: Any
     state: dict
     state_path: str
-    # asks the operator a yes/no question, replaceable in tests:
+    # ask the operator, replaceable in tests:
     ask: Any = None
+    input_fn: Any = None
+    getpass_fn: Any = None
     share_connected: bool = False
 
-    def confirm(self, prompt: str) -> bool:
-        """Ask the operator to confirm, yes or no."""
-        return (self.ask or _ask)(prompt, ["yes", "no"]) == "yes"
+    def confirm(self, prompt: str, default: str = "yes") -> bool:
+        """Ask the operator to confirm, yes or no, Enter takes the default."""
+        return (self.ask or _ask)(prompt, ["yes", "no"], default) == "yes"
+
+    def read(self, prompt: str) -> str:
+        """Ask the operator for a value."""
+        return (self.input_fn or input)(prompt).strip()
+
+    def read_secret(self, prompt: str) -> str:
+        """Ask the operator for a secret, not echoed."""
+        return (self.getpass_fn or getpass.getpass)(prompt)
 
     @property
     def dry_run(self) -> bool:
@@ -1944,7 +2009,11 @@ class WalkthroughContext:
         if not self.args.backup_dir:
             raise SystemExit("--backup-dir is required for the backup step")
         if not self.share_connected:
-            connect_backup_share(self)
+            if self.dry_run:
+                if self.args.backup_share_user:
+                    print(f"DRY RUN, would connect as {self.args.backup_share_user}")
+            else:
+                connect_backup_share(self)
             self.share_connected = True
         run_dir = self.state.get("backup_run_dir")
         if not run_dir:
@@ -1975,16 +2044,26 @@ def _action_key_files(ctx: WalkthroughContext) -> None:
     found = _get(ctx.state, "baseline", "bigfix", "key_files", "found") or {}
     dest = os.path.join(ctx.backup_dir(), "key_files")
     for name in KEY_FILES:
-        paths = found.get(name) or []
+        paths = found.get(name)
+        paths = paths if isinstance(paths, list) else []
         if not paths:
             print(f"NOTE: {name} was not found on this server, add your copy to {dest}")
         if name == "license.pvk" and paths:
             print("WARNING: license.pvk is on the server, keep it offline instead")
         for index, source in enumerate(paths, start=1):
-            # several copies can exist, keep them all apart:
-            target = os.path.join(dest, name if len(paths) == 1 else f"{index}_{name}")
+            # several copies can exist, keep them all apart, and the masthead
+            # copy HCL asks for (from actionsite.afxm) is masthead.afxm:
+            if name == "masthead.afxm":
+                target = os.path.join(dest, f"found_{index}_{name}")
+            else:
+                target = os.path.join(
+                    dest, name if len(paths) == 1 else f"{index}_{name}"
+                )
             if ctx.dry_run:
                 print(f"DRY RUN, would copy {source} to {target}")
+                continue
+            if not os.path.isfile(source):
+                print(f"NOTE: {source} is gone since the baseline, not copied")
                 continue
             os.makedirs(dest, exist_ok=True)
             shutil.copy2(source, target)
@@ -2051,6 +2130,327 @@ def _action_sql_backup(ctx: WalkthroughContext) -> None:
         save_state(ctx.state_path, ctx.state)
 
 
+def _server_folder(baseline: dict) -> str:
+    """The BES Server folder: from the registry, the root server service, or HCL's
+    default.
+    """
+    folder = (
+        _get(baseline, "bigfix", "registry", "values", "EnterpriseServerFolder")
+        or _get(baseline, "bigfix", "install_folder")
+        or DEFAULT_SERVER_FOLDER
+    )
+    return str(folder).rstrip("\\/")
+
+
+def _client_folder(baseline: dict) -> str:
+    """The BES Client folder, from the BESClient service, or the default."""
+    services = _get(baseline, "bigfix", "services")
+    for service in services if isinstance(services, list) else []:
+        if service.get("Name") == "BESClient" and service.get("PathName"):
+            return os.path.dirname(str(service["PathName"]).strip().strip('"'))
+    return DEFAULT_CLIENT_FOLDER
+
+
+def server_backup_items(baseline: dict) -> List[tuple]:
+    """HCL's server backup items as (label, full path), in the server folder."""
+    server = _server_folder(baseline)
+    return [
+        ("/".join(parts), os.path.join(server, *parts)) for parts in SERVER_BACKUP_ITEMS
+    ]
+
+
+def _tree_size(path: str) -> tuple:
+    """(files, bytes) of a file or a folder tree."""
+    if os.path.isfile(path):
+        return 1, os.path.getsize(path)
+    files = size = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for filename in filenames:
+            with contextlib.suppress(OSError):
+                size += os.path.getsize(os.path.join(dirpath, filename))
+                files += 1
+    return files, size
+
+
+def _copy_item(source: str, dest: str) -> None:
+    if os.path.isdir(source):
+        shutil.copytree(source, dest, dirs_exist_ok=True)
+    else:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(source, dest)
+
+
+def _action_remote_processes(ctx: WalkthroughContext) -> None:
+    if not ctx.confirm(
+        "Are remote WebUI and Web Reports servers that use the BigFix databases"
+        " stopped? (Enter if there are none)"
+    ):
+        print("Stop them before continuing, HCL's backup procedure needs them stopped.")
+
+
+def _action_folder_backup(ctx: WalkthroughContext) -> None:
+    run_dir = ctx.backup_dir()
+    dest_root = os.path.join(run_dir, "server_files")
+    record = ctx.state.setdefault("server_files", {})
+    chosen = []
+    for label, path in server_backup_items(ctx.state.get("baseline") or {}):
+        if not os.path.exists(path):
+            record[label] = {"missing": True}
+            continue
+        files, size = _tree_size(path)
+        if size > LARGE_BACKUP_BYTES and not ctx.confirm(
+            f"{label} is {size / 1024**3:.1f} GB in {files} files, back it up too?"
+        ):
+            record[label] = {"skipped": True, "files": files, "bytes": size}
+            continue
+        chosen.append((label, path, files, size))
+
+    needed = sum(size for *_rest, size in chosen) * BACKUP_SPACE_FACTOR
+    if not ctx.dry_run:
+        free = shutil.disk_usage(run_dir).free
+        if free < needed and not ctx.confirm(
+            f"only {free / 1024**3:.1f} GB free for about {needed / 1024**3:.1f} GB"
+            " of server files, continue anyway?",
+            default="no",
+        ):
+            raise BackupError(
+                f"not enough free space in {run_dir} for the server files"
+            )
+
+    for label, path, files, size in chosen:
+        dest = os.path.join(dest_root, *label.split("/"))
+        if ctx.dry_run:
+            print(f"DRY RUN, would copy {path} ({files} files) to {dest}")
+            continue
+        _copy_item(path, dest)
+        record[label] = {"files": files, "bytes": size, "copied_to": dest}
+        save_state(ctx.state_path, ctx.state)
+
+
+def _action_masthead(ctx: WalkthroughContext) -> None:
+    sources = _get(
+        ctx.state, "baseline", "bigfix", "key_files", "found", MASTHEAD_SOURCE
+    )
+    if not sources:
+        print(f"NOTE: {MASTHEAD_SOURCE} was not found, keep your own masthead copy")
+        return
+    # the server's own copy, nearest the top of the BES Server folder:
+    server = _server_folder(ctx.state.get("baseline") or {}).lower()
+
+    def preference(path: str) -> tuple:
+        in_server = path.lower().startswith(server + "\\") or path.lower().startswith(
+            server + "/"
+        )
+        return (not in_server, path.count("\\") + path.count("/"), path)
+
+    source = min(sources, key=preference)
+    dest = os.path.join(ctx.backup_dir(), "key_files", "masthead.afxm")
+    if ctx.dry_run:
+        print(f"DRY RUN, would copy {source} to {dest}")
+        return
+    _copy_item(source, dest)
+    ctx.state["masthead_copy"] = {"from": source, "to": dest}
+
+
+def _action_client_data(ctx: WalkthroughContext) -> None:
+    """The root server's own client identity, so its restore makes no duplicate.
+
+    See https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/t_preserving_bundling_when_clientreinstalled.html
+    """
+    folder = os.path.join(ctx.backup_dir(), "client_data")
+    values = ctx.host.reg_values(CLIENT_GLOBAL_OPTIONS_KEY) or {}
+    computer_id = values.get("ComputerID")
+    key_storage = os.path.join(
+        _client_folder(ctx.state.get("baseline") or {}), "KeyStorage"
+    )
+    ctx.execute(
+        [
+            "reg.exe",
+            "export",
+            "HKLM\\" + CLIENT_GLOBAL_OPTIONS_KEY,
+            os.path.join(folder, "GlobalOptions.reg"),
+            "/y",
+        ]
+    )
+    if ctx.dry_run:
+        print(f"DRY RUN, would save ComputerID {computer_id} and copy {key_storage}")
+        return
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "ComputerID.txt"), "w", encoding="utf-8") as saved:
+        saved.write(f"{computer_id}\n")
+    copied = os.path.isdir(key_storage)
+    if copied:
+        _copy_item(key_storage, os.path.join(folder, "KeyStorage"))
+    else:
+        print(f"WARNING: {key_storage} was not found")
+    ctx.state["client_data"] = {"computer_id": computer_id, "key_storage": copied}
+    print(
+        "NOTE: before restoring this client, set ClientIdentityMatch to 100 in the"
+        " BigFix Administrative Tool, Advanced Options"
+    )
+
+
+def table_columns_query(table: str) -> str:
+    """T-SQL for the column names of a BFEnterprise table from DB_INFO_TABLES."""
+    if table not in DB_INFO_TABLES:
+        raise ValueError(f"unexpected table: {table!r}")
+    return (
+        "SET NOCOUNT ON; SELECT name FROM BFEnterprise.sys.columns WHERE object_id ="
+        f" OBJECT_ID('BFEnterprise.dbo.{table}') ORDER BY column_id"
+    )
+
+
+def table_rows_query(table: str) -> str:
+    """T-SQL for all rows of a BFEnterprise table from DB_INFO_TABLES."""
+    if table not in DB_INFO_TABLES:
+        raise ValueError(f"unexpected table: {table!r}")
+    return f"SET NOCOUNT ON; SELECT * FROM [BFEnterprise].[dbo].[{table}]"
+
+
+def _action_db_info(ctx: WalkthroughContext) -> None:
+    """Record DBINFO and REPLICATION_SERVERS, as HCL's backup says, to check a
+    restore.
+    """
+    path = os.path.join(ctx.backup_dir(), "db_info.json")
+    if ctx.dry_run:
+        for table in DB_INFO_TABLES:
+            print("DRY RUN, would run SQL:", table_rows_query(table))
+        return
+    info: Dict[str, Any] = {}
+    for table in DB_INFO_TABLES:
+        try:
+            columns = ctx.host.sqlcmd(ctx.sql_server(), table_columns_query(table))
+            rows = ctx.host.sqlcmd(ctx.sql_server(), table_rows_query(table))
+            info[table] = {"columns": [row[0] for row in columns], "rows": rows}
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            info[table] = {"error": str(err)}
+    with open(path, "w", encoding="utf-8") as saved:
+        json.dump(info, saved, indent=2)
+
+
+def _action_server_keys(ctx: WalkthroughContext) -> None:
+    """Optionally decrypt the server's Encrypted* key files with ServerKeyTool.
+
+    It needs license.pvk and its password, which ServerKeyTool only takes on its
+    command line: it's run without logging, and the password is never kept.
+    """
+    server = _server_folder(ctx.state.get("baseline") or {})
+    tool = os.path.join(server, "ServerKeyTool.exe")
+    if not os.path.isfile(tool):
+        ctx.state["server_keys"] = {"error": f"ServerKeyTool.exe not found in {server}"}
+        print(f"NOTE: ServerKeyTool.exe not found in {server}, key files not decrypted")
+        return
+    if not ctx.confirm(
+        "Decrypt the server key files with ServerKeyTool, as HCL's backup does?"
+        " It needs license.pvk and its password",
+        default="no",
+    ):
+        ctx.state["server_keys"] = {"skipped": True}
+        return
+    pvk = ctx.read("Path to license.pvk, like a USB drive: ").strip('"')
+    if not pvk:
+        ctx.state["server_keys"] = {"skipped": True}
+        return
+    out = os.path.join(ctx.backup_dir(), "server_keys")
+    arguments = [
+        "/decrypt",
+        f"/dirIn:{server}",
+        f"/dirOut:{out}",
+        f"/sitePvkLocation:{pvk}",
+    ]
+    if ctx.dry_run:
+        print("DRY RUN, would run:", tool, *arguments, "/sitePvkPassword:<password>")
+        return
+    command = [
+        tool,
+        *arguments,
+        "/sitePvkPassword:" + ctx.read_secret("license.pvk password: "),
+    ]
+    os.makedirs(out, exist_ok=True)
+    try:
+        ctx.host.run_secret(command)
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        ctx.state["server_keys"] = {"error": str(err)}
+        print(f"WARNING: ServerKeyTool failed: {err}")
+        return
+    finally:
+        del command
+    ctx.state["server_keys"] = {"decrypted_to": out}
+    print(
+        f"WARNING: {out} now holds decrypted server keys, as sensitive as"
+        " license.pvk: keep the backup secure, and remove them when done"
+    )
+
+
+def _action_restore_notes(ctx: WalkthroughContext) -> None:
+    """Write RESTORE_NOTES.txt: what was backed up, and HCL's recovery steps.
+
+    Only from the state file, which never holds secrets.
+    """
+    state = ctx.state
+    run_dir = ctx.backup_dir()
+    lines = [
+        f"BigFix server backup in {run_dir}",
+        f"made {datetime.datetime.now().isoformat(timespec='seconds')} by"
+        f" {os.path.basename(__file__)} {__version__}",
+        "",
+        "Contents:",
+    ]
+    for backup in state.get("backups") or []:
+        lines.append(f"- database {backup.get('database')}: {backup.get('file')}")
+    lines.append(f"- database info: {os.path.join(run_dir, 'db_info.json')}")
+    for label, item in (state.get("server_files") or {}).items():
+        status = item.get("copied_to") or (
+            "missing" if item.get("missing") else "skipped"
+        )
+        lines.append(f"- server file {label}: {status}")
+    if state.get("masthead_copy"):
+        lines.append(f"- masthead.afxm: {state['masthead_copy']['to']}")
+    for target in state.get("key_file_copies") or {}:
+        lines.append(f"- key file: {target}")
+    lines.append(f"- registry: {os.path.join(run_dir, 'bigfix_registry.reg')}")
+    client = state.get("client_data") or {}
+    lines.append(
+        f"- the root server's client: ComputerID {client.get('computer_id')},"
+        " KeyStorage (holds its private key, protect it)"
+    )
+    keys = state.get("server_keys") or {}
+    lines.append(
+        f"- server keys: decrypted to {keys['decrypted_to']}, as sensitive as license.pvk"
+        if keys.get("decrypted_to")
+        else "- server keys: not decrypted, keep license.pvk and its password"
+    )
+    lines += [
+        "",
+        "Restore, following HCL's Server Recovery in order:",
+        "https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/c_recovery_procedure.html",
+        "1. check the masthead URL reaches the new server",
+        "2. on the same computer, remove the existing BigFix components",
+        "3. reinstall SQL Server if needed",
+        "4. restore the BFEnterprise and BESReporting databases",
+        "5. restore the backed up server files",
+        "6. encrypt the server keys again:",
+        '   ServerKeyTool.exe /encrypt /dirIn:"<backup>\\server_keys"'
+        ' /dirOut:"<BigFix Server folder>" /sitePvkLocation:"<path to license.pvk>"'
+        " /sitePvkPassword:<password>",
+        "7. continue with the installer steps on HCL's Server Recovery page",
+        "",
+        "Restore the root server's own client without a duplicate computer:",
+        "https://help.hcl-software.com/bigfix/11.0/platform/Platform/Installation/t_preserving_bundling_when_clientreinstalled.html",
+        "- first set ClientIdentityMatch to 100 (BigFix Administrative Tool, Advanced Options)",
+        "- install the client, stop it, remove RegCount, ComputerID and"
+        " ReportSequenceNumber from GlobalOptions, delete __BESData and KeyStorage",
+        "- put back ComputerID and KeyStorage from client_data, start the client",
+    ]
+    if ctx.dry_run:
+        print("DRY RUN, would write RESTORE_NOTES.txt:\n" + "\n".join(lines))
+        return
+    with open(
+        os.path.join(run_dir, "RESTORE_NOTES.txt"), "w", encoding="utf-8"
+    ) as notes:
+        notes.write("\n".join(lines) + "\n")
+
+
 def _bigfix_services(ctx: WalkthroughContext) -> List[dict]:
     services = _get(ctx.state, "baseline", "bigfix", "services")
     return services if isinstance(services, list) else []
@@ -2107,7 +2507,14 @@ ACTIONS = {
     "collect_baseline": _action_collect_baseline,
     "registry_export": _action_registry_export,
     "key_files": _action_key_files,
+    "masthead": _action_masthead,
+    "client_data": _action_client_data,
+    "folder_backup": _action_folder_backup,
+    "db_info": _action_db_info,
     "sql_backup": _action_sql_backup,
+    "server_keys": _action_server_keys,
+    "restore_notes": _action_restore_notes,
+    "remote_processes": _action_remote_processes,
     "stop_services": _action_stop_services,
     "start_services": _action_start_services,
     "restore_start_types": _action_restore_start_types,
@@ -2126,11 +2533,56 @@ def _ask(prompt: str, choices: List[str], default: Optional[str] = None) -> str:
             return answer
 
 
+DEFAULT_DRY_RUN_FILE = "bigfix_root_server_upgrade_win.dryrun.txt"
+
+
+def _auto_answer(prompt: str, choices: List[str], default: Optional[str] = None) -> str:
+    """Answer a question without asking, for dry runs: the default, or go ahead."""
+    answer = next((c for c in (default, "done", "yes") if c in choices), choices[0])
+    print(f"{prompt} [{'/'.join(choices)}]: {answer} (dry run)")
+    return answer
+
+
+class _Tee(io.TextIOBase):
+    """Writes to several streams, to keep a copy of what's printed."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text: str) -> int:
+        for stream in self.streams:
+            stream.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
+
+
 def run_walkthrough(args, bes_conn, host, compat: dict) -> int:
-    """Guide the upgrade one step at a time, resuming from the state file."""
+    """Guide the upgrade one step at a time, resuming from the state file.
+
+    A dry run asks nothing, changes nothing, and saves everything it prints to
+    --dry-run-file, to hand over in one go.
+    """
+    if not args.dry_run:
+        return _run_walkthrough(args, bes_conn, host, compat, _ask)
+    path = getattr(args, "dry_run_file", None) or DEFAULT_DRY_RUN_FILE
+    with open(path, "w", encoding="utf-8") as saved:
+        with contextlib.redirect_stdout(cast(TextIO, _Tee(sys.stdout, saved))):
+            result = _run_walkthrough(args, bes_conn, host, compat, _auto_answer)
+    print(f"dry run saved to {os.path.abspath(path)}")
+    return result
+
+
+def _run_walkthrough(args, bes_conn, host, compat: dict, ask) -> int:
     require_walkthrough_host(host)
     state = load_state(args.state_file)
 
+    # NOTE: a dry run walks the steps in memory, and never saves the state:
+    persist = (
+        (lambda: None) if args.dry_run else (lambda: save_state(args.state_file, state))
+    )
     if "plan" not in state:
         report = build_report(
             bes_conn, host, compat, _target_from_args(args), args.sql_instance
@@ -2140,13 +2592,13 @@ def run_walkthrough(args, bes_conn, host, compat: dict) -> int:
         if not _get(assessment, "compatibility", "reachable"):
             print("No supported upgrade path was found, see the assessment above.")
             return 1
-        if _ask("Use this upgrade plan?", ["yes", "no"]) != "yes":
+        if ask("Use this upgrade plan?", ["yes", "no"], "yes") != "yes":
             return 1
         state["plan"] = assessment["compatibility"]
         state["local_sql"] = (
             _get(report, "local", "sql", "bigfix_sql_is_local") is not False
         )
-        save_state(args.state_file, state)
+        persist()
 
     steps = build_steps(state["plan"], local_sql=state.get("local_sql", True))
     if args.step:
@@ -2155,7 +2607,16 @@ def run_walkthrough(args, bes_conn, host, compat: dict) -> int:
             raise SystemExit(f"unknown step {args.step}, one of: {', '.join(ids)}")
         state["done"] = ids[: ids.index(args.step)]
 
-    ctx = WalkthroughContext(args, host, state, args.state_file)
+    ctx = WalkthroughContext(
+        args,
+        host,
+        state,
+        args.state_file,
+        ask=ask,
+        # a dry run never asks for a license.pvk or its password:
+        input_fn=(lambda prompt: "") if args.dry_run else None,
+        getpass_fn=(lambda prompt: "") if args.dry_run else None,
+    )
     while True:
         step = next_step(steps, state)
         if step is None:
@@ -2165,14 +2626,14 @@ def run_walkthrough(args, bes_conn, host, compat: dict) -> int:
         for action in step.actions:
             logging.info("running action %s for step %s", action, step.id)
             ACTIONS[action](ctx)
-        save_state(args.state_file, state)
-        answer = _ask("Is this step complete?", ["done", "skip", "quit"])
+        persist()
+        answer = ask("Is this step complete?", ["done", "skip", "quit"])
         if answer == "quit":
             return 0
         mark_step_done(state, step.id)
         if answer == "skip":
             state.setdefault("skipped", []).append(step.id)
-        save_state(args.state_file, state)
+        persist()
 
 
 # ---------------------------------------------------------------- shares
@@ -4371,7 +4832,13 @@ def build_parser():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="walkthrough prints commands instead of running them",
+        help="walkthrough prints commands instead of running them, asks nothing,"
+        " and saves its output to --dry-run-file",
+    )
+    parser.add_argument(
+        "--dry-run-file",
+        default=DEFAULT_DRY_RUN_FILE,
+        help="where a dry run saves its output",
     )
     session = parser.add_argument_group(
         "share session", "check and troubleshoot the backup share across nodes"

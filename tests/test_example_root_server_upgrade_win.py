@@ -135,6 +135,7 @@ class FakeHost:
         self.users = {}
         self.user_passwords = {}
         self.run_handler = None
+        self.secret_runs = []
 
     def is_windows(self):
         return self.windows
@@ -243,6 +244,9 @@ class FakeHost:
     def run(self, cmd):
         self.ran.append(cmd)
         return self.run_handler(cmd) if self.run_handler else ""
+
+    def run_secret(self, cmd):
+        self.secret_runs.append(cmd)
 
 
 # ---------------------------------------------------------------- parsing
@@ -678,6 +682,7 @@ def local_host(upgrade, **overrides):
         "sql": sql,
         "files": {
             SERVER_FOLDER + r"\BESRootServer.exe",
+            SERVER_FOLDER + r"\actionsite.afxm",
             SERVER_FOLDER + r"\wwwrootbes\masthead\masthead.afxm",
             SERVER_FOLDER + r"\wwwrootbes\bfsites\actionsite.afxm",
             SERVER_FOLDER + r"\FillDBData\bufferdir\license.crt",
@@ -780,6 +785,7 @@ def test_key_files_searched(upgrade):
         # the copy under FillDBData\bufferdir is skipped:
         "license.crt": [BIGFIX_FOLDER + r"\BES Installers\license\license.crt"],
         "license.pvk": [],
+        "actionsite.afxm": [SERVER_FOLDER + r"\actionsite.afxm"],
     }
     # bfsites is skipped too:
     assert key_files["other_afxm"] == [
@@ -855,7 +861,8 @@ def test_redact_keeps_harmless_values(upgrade):
             "RESTPasswordEncryption": "1",
             "SOAPPassword": "hunter2",
             "PrivateKey": "abc",
-            "license.pvk": "def",
+            # a list of where license.pvk files are, not the key itself:
+            "license.pvk": [r"C:\\keys\\license.pvk"],
         }
     )
     assert result["Private Data Directory"] == r"C:\wr"
@@ -863,7 +870,7 @@ def test_redact_keeps_harmless_values(upgrade):
     assert result["RESTPasswordEncryption"] == "1"
     assert result["SOAPPassword"] == upgrade.REDACTED
     assert result["PrivateKey"] == upgrade.REDACTED
-    assert result["license.pvk"] == upgrade.REDACTED
+    assert result["license.pvk"] == [r"C:\\keys\\license.pvk"]
 
 
 def test_redact_hosts(upgrade):
@@ -923,22 +930,26 @@ def test_build_report(upgrade, compat):
 
 
 def test_service_stop_order(upgrade):
-    """Test services are stopped front ends first, root server and client last."""
+    """Test HCL's stop order, with any other BES services stopped first."""
     services = [
         {"Name": "BESClient", "DisplayName": "BES Client"},
         {"Name": "BESRootServer", "DisplayName": "BES Root Server"},
         {"Name": "FillDB", "DisplayName": "BES FillDB"},
         {"Name": "BESWebReportsServer", "DisplayName": "BES Web Reports Server"},
-        {"Name": "GatherDB", "DisplayName": "BES Gather Service"},
+        {"Name": "GatherDB", "DisplayName": "BES GatherDB"},
         {"Name": "BESWebUI", "DisplayName": "BES WebUI"},
+        {"Name": "BESPluginService", "DisplayName": "BES Server Plugin Service"},
+        {"Name": "BESProxyAgent", "DisplayName": "BES Proxy Agent"},
     ]
     assert upgrade.service_stop_order(services) == [
+        "BESPluginService",
+        "BESProxyAgent",
         "BESWebUI",
         "BESWebReportsServer",
+        "BESClient",
         "GatherDB",
         "FillDB",
         "BESRootServer",
-        "BESClient",
     ]
 
 
@@ -954,18 +965,32 @@ def test_build_steps_from_path(upgrade, compat):
     steps = upgrade.build_steps(path, local_sql=True)
     ids = [step.id for step in steps]
 
-    assert ids[:2] == ["preflight", "backup"]
-    assert ids[-2:] == ["final_validation", "cleanup"]
-    assert "upgrade_1_mssql_2017" in ids
-    first = ids.index("upgrade_1_mssql_2017")
-    assert ids[first - 2 : first + 3] == [
-        "stop_services_1",
+    # BigFix is stopped before the backup, and stays stopped for the first snapshot:
+    assert ids[:5] == [
+        "preflight",
+        "stop_services_0",
+        "backup",
         "snapshot_1",
         "upgrade_1_mssql_2017",
-        "start_services_1",
-        "validate_1",
     ]
+    assert ids[5:7] == ["start_services_1", "validate_1"]
+    second = ids.index("upgrade_2_windows_2019")
+    assert ids[second - 2 : second] == ["stop_services_2", "snapshot_2"]
+    assert ids[-2:] == ["final_validation", "cleanup"]
     assert len(ids) == len(set(ids))
+    backup = next(step for step in steps if step.id == "backup")
+    assert backup.actions == [
+        "registry_export",
+        "key_files",
+        "masthead",
+        "client_data",
+        "folder_backup",
+        "db_info",
+        "sql_backup",
+        "server_keys",
+        "restore_notes",
+    ]
+    assert "remote_processes" in steps[1].actions
 
 
 def test_build_steps_remote_sql(upgrade, compat):
@@ -1165,9 +1190,9 @@ def test_services_to_start_only_running(upgrade):
     services = upgrade.collect_local_info(local_host(upgrade))["bigfix"]["services"]
 
     assert upgrade.services_to_start(services) == [
-        "BESClient",
         "BESRootServer",
         "FillDB",
+        "BESClient",
     ]
 
 
@@ -1293,7 +1318,13 @@ def walkthrough_ctx(upgrade, tmp_path, host):
         database["size_mb"] = 1
     state = {"done": [], "reports": {}, "baseline": baseline}
     return upgrade.WalkthroughContext(
-        args, host, state, str(tmp_path / "state.json"), ask=lambda *a: "yes"
+        args,
+        host,
+        state,
+        str(tmp_path / "state.json"),
+        ask=lambda *a: "yes",
+        input_fn=lambda prompt: "",
+        getpass_fn=lambda prompt: "",
     )
 
 
@@ -2354,3 +2385,362 @@ def test_share_session_credentials_only_to_peers(upgrade):
     peer_share, console_share = asyncio.run(scenario())
     assert peer_share["password"] == "temp-Pw-123!"
     assert "password" not in console_share
+
+
+# ---------------------------------------------------------------- HCL backup
+
+
+def make_server_folder(tmp_path):
+    """A real BES Server folder tree with the HCL backup items, some missing."""
+    server = tmp_path / "BES Server"
+    files = {
+        "BESReportsData/archive.db": b"reports",
+        "BESReportsServer/wwwroot/ReportFiles/custom.html": b"<html/>",
+        "Mirror Server/Inbox/action.fxf": b"fxf",
+        "Mirror Server/Config/DownloadWhitelist.txt": b"http://example.com/.*",
+        "UploadManagerData/BufferDir/sha1/1/upload.bin": b"x" * 100,
+        "wwwrootbes/masthead/masthead.afxm": b"masthead",
+        "actionsite.afxm": b"X-Fixlet-Site-Serial-Number: 123456789\r\n",
+        "ServerKeyTool.exe": b"MZ",
+    }
+    for relative, content in files.items():
+        path = server / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    return server
+
+
+def hcl_ctx(upgrade, tmp_path, **changes):
+    """A walkthrough context whose baseline points at a real server folder."""
+    server = make_server_folder(tmp_path)
+    client = tmp_path / "BES Client"
+    (client / "KeyStorage").mkdir(parents=True)
+    (client / "KeyStorage" / "client.key").write_bytes(b"client key")
+    host = local_host(upgrade)
+    host.registry[upgrade.CLIENT_GLOBAL_OPTIONS_KEY] = {"ComputerID": 11333902}
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    baseline = ctx.state["baseline"]
+    baseline["bigfix"]["registry"]["values"]["EnterpriseServerFolder"] = str(server)
+    baseline["bigfix"]["key_files"]["found"]["actionsite.afxm"] = [
+        str(server / "actionsite.afxm")
+    ]
+    for service in baseline["bigfix"]["services"]:
+        if service["Name"] == "BESClient":
+            service["PathName"] = f'"{client / "BESClient.exe"}"'
+    for key, value in changes.items():
+        setattr(ctx, key, value)
+    return ctx, server
+
+
+def test_server_backup_items_resolved(upgrade, tmp_path):
+    """Test HCL's folders are found under the registry's server folder."""
+    ctx, server = hcl_ctx(upgrade, tmp_path)
+
+    items = dict(upgrade.server_backup_items(ctx.state["baseline"]))
+
+    assert items["BESReportsData"] == str(server / "BESReportsData")
+    assert items["Encryption Keys"] == str(server / "Encryption Keys")
+    assert items["Mirror Server/Config/DownloadWhitelist.txt"] == str(
+        server / "Mirror Server" / "Config" / "DownloadWhitelist.txt"
+    )
+    assert len(items) == 7
+
+
+def test_folder_backup_copies_and_records(upgrade, tmp_path):
+    """Test each HCL item is copied with its size, a missing one is recorded."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+
+    upgrade.ACTIONS["folder_backup"](ctx)
+
+    copied = ctx.state["server_files"]
+    run_dir = ctx.backup_dir()
+    assert copied["Encryption Keys"] == {"missing": True}
+    assert copied["UploadManagerData"]["files"] == 1
+    assert copied["UploadManagerData"]["bytes"] == 100
+    assert os.path.isfile(
+        os.path.join(
+            run_dir, "server_files", "Mirror Server", "Config", "DownloadWhitelist.txt"
+        )
+    )
+    assert os.path.isfile(
+        os.path.join(run_dir, "server_files", "wwwrootbes", "masthead", "masthead.afxm")
+    )
+
+
+def test_folder_backup_large_folder_confirmed(upgrade, tmp_path, monkeypatch):
+    """Test a large folder is only copied if the operator agrees."""
+    monkeypatch.setattr(upgrade, "LARGE_BACKUP_BYTES", 50)
+    prompts = []
+    ctx, _server = hcl_ctx(
+        upgrade,
+        tmp_path,
+        ask=lambda prompt, choices, default=None: prompts.append(prompt) or "no",
+    )
+
+    upgrade.ACTIONS["folder_backup"](ctx)
+
+    assert ctx.state["server_files"]["UploadManagerData"] == {
+        "skipped": True,
+        "files": 1,
+        "bytes": 100,
+    }
+    assert any("UploadManagerData" in prompt for prompt in prompts)
+    assert "files" in ctx.state["server_files"]["BESReportsData"]
+
+
+def test_folder_backup_space_warning(upgrade, tmp_path, monkeypatch):
+    """Test not enough free space is asked about before copying."""
+    ctx, _server = hcl_ctx(
+        upgrade, tmp_path, ask=lambda prompt, choices, default=None: "no"
+    )
+    usage = types.SimpleNamespace(total=10, used=10, free=10)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    with pytest.raises(upgrade.BackupError, match="free space"):
+        upgrade.ACTIONS["folder_backup"](ctx)
+
+
+def test_masthead_copied_as_hcl_says(upgrade, tmp_path):
+    """Test the server's actionsite.afxm is kept as masthead.afxm."""
+    ctx, server = hcl_ctx(upgrade, tmp_path)
+
+    upgrade.ACTIONS["masthead"](ctx)
+
+    copy = os.path.join(ctx.backup_dir(), "key_files", "masthead.afxm")
+    assert open(copy, "rb").read() == (server / "actionsite.afxm").read_bytes()
+
+
+def test_db_info_exported(upgrade, tmp_path):
+    """Test DBINFO and REPLICATION_SERVERS are saved with their column names."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    for table, columns, rows in (
+        ("DBINFO", [["Name"], ["Value"]], [["DBVersion", "10.70"]]),
+        ("REPLICATION_SERVERS", [["ServerID"], ["URL"]], [["0", "http://bigfix"]]),
+    ):
+        ctx.host.sql[upgrade.table_columns_query(table)] = columns
+        ctx.host.sql[upgrade.table_rows_query(table)] = rows
+
+    upgrade.ACTIONS["db_info"](ctx)
+
+    with open(
+        os.path.join(ctx.backup_dir(), "db_info.json"), encoding="utf-8"
+    ) as saved:
+        info = json.load(saved)
+    assert info["DBINFO"] == {
+        "columns": ["Name", "Value"],
+        "rows": [["DBVersion", "10.70"]],
+    }
+    assert info["REPLICATION_SERVERS"]["rows"] == [["0", "http://bigfix"]]
+
+
+def test_db_info_table_names_checked(upgrade):
+    """Test only the known table names can be queried."""
+    with pytest.raises(ValueError):
+        upgrade.table_rows_query("DBINFO]; DROP TABLE x;--")
+
+
+def test_client_data_backed_up(upgrade, tmp_path):
+    """Test the root's client ComputerID and KeyStorage are saved, per HCL."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+
+    upgrade.ACTIONS["client_data"](ctx)
+
+    folder = os.path.join(ctx.backup_dir(), "client_data")
+    assert open(os.path.join(folder, "ComputerID.txt"), encoding="utf-8").read() == (
+        "11333902\n"
+    )
+    assert os.path.isfile(os.path.join(folder, "KeyStorage", "client.key"))
+    assert ctx.state["client_data"]["computer_id"] == 11333902
+    assert any(
+        cmd[:2] == ["reg.exe", "export"] and "GlobalOptions" in cmd[2]
+        for cmd in ctx.host.ran
+    )
+
+
+def test_server_keys_skipped_by_default(upgrade, tmp_path):
+    """Test ServerKeyTool only runs when asked, Enter skips it."""
+    ctx, _server = hcl_ctx(
+        upgrade,
+        tmp_path,
+        ask=lambda prompt, choices, default=None: default,
+        # even with a license.pvk and password at hand, Enter means no:
+        input_fn=lambda prompt: r"E:\license.pvk",
+        getpass_fn=lambda prompt: "Pvk-Passw0rd!",
+    )
+
+    upgrade.ACTIONS["server_keys"](ctx)
+
+    assert ctx.host.secret_runs == []
+    assert ctx.state["server_keys"] == {"skipped": True}
+
+
+def test_server_keys_password_never_kept(upgrade, tmp_path, caplog):
+    """Test the license.pvk password is only given to ServerKeyTool."""
+    password = "Pvk-Passw0rd!"
+    ctx, server = hcl_ctx(
+        upgrade,
+        tmp_path,
+        input_fn=lambda prompt: r"E:\license.pvk",
+        getpass_fn=lambda prompt: password,
+    )
+    caplog.set_level(logging.DEBUG)
+
+    upgrade.ACTIONS["server_keys"](ctx)
+    upgrade.ACTIONS["restore_notes"](ctx)
+
+    (command,) = ctx.host.secret_runs
+    assert command[0] == str(server / "ServerKeyTool.exe")
+    assert command[1:] == [
+        "/decrypt",
+        f"/dirIn:{server}",
+        f"/dirOut:{os.path.join(ctx.backup_dir(), 'server_keys')}",
+        r"/sitePvkLocation:E:\license.pvk",
+        f"/sitePvkPassword:{password}",
+    ]
+    notes = open(
+        os.path.join(ctx.backup_dir(), "RESTORE_NOTES.txt"), encoding="utf-8"
+    ).read()
+    for text in (caplog.text, json.dumps(ctx.state), json.dumps(ctx.host.ran), notes):
+        assert password not in text
+
+
+def test_server_keys_tool_missing(upgrade, tmp_path):
+    """Test a missing ServerKeyTool.exe is reported, not guessed."""
+    ctx, server = hcl_ctx(upgrade, tmp_path)
+    (server / "ServerKeyTool.exe").unlink()
+
+    upgrade.ACTIONS["server_keys"](ctx)
+
+    assert ctx.host.secret_runs == []
+    assert "not found" in ctx.state["server_keys"]["error"]
+
+
+def test_restore_notes(upgrade, tmp_path):
+    """Test the restore notes list the backups and HCL's re-encrypt command."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    ctx.state["backups"] = [{"database": "BFEnterprise", "file": r"D:\b.bak"}]
+
+    upgrade.ACTIONS["restore_notes"](ctx)
+
+    notes = open(
+        os.path.join(ctx.backup_dir(), "RESTORE_NOTES.txt"), encoding="utf-8"
+    ).read()
+    assert "BFEnterprise" in notes
+    assert "ServerKeyTool.exe /encrypt" in notes
+    assert "/sitePvkPassword:<password>" in notes
+    assert "ClientIdentityMatch" in notes
+
+
+def test_remote_processes_prompt(upgrade, tmp_path):
+    """Test the operator is asked to stop remote WebUI and Web Reports first."""
+    prompts = []
+    ctx, _server = hcl_ctx(
+        upgrade,
+        tmp_path,
+        ask=lambda prompt, choices, default=None: prompts.append(prompt) or default,
+    )
+
+    upgrade.ACTIONS["remote_processes"](ctx)
+
+    assert prompts and "remote" in prompts[0].lower()
+
+
+def test_masthead_warning_only_without_actionsite(upgrade):
+    """Test no masthead warning while the server's actionsite.afxm can be copied."""
+    local = upgrade.collect_local_info(local_host(upgrade))
+    local["bigfix"]["key_files"]["found"]["masthead.afxm"] = []
+
+    assert not any(
+        "masthead" in w for w in upgrade.report_warnings(local, now=REPORT_NOW)
+    )
+
+    local["bigfix"]["key_files"]["found"]["actionsite.afxm"] = []
+    assert any("masthead" in w for w in upgrade.report_warnings(local, now=REPORT_NOW))
+
+
+def test_masthead_prefers_the_server_copy(upgrade, tmp_path):
+    """Test the BES Server folder's ActionSite.afxm wins over the client's."""
+    ctx, server = hcl_ctx(upgrade, tmp_path)
+    client_copy = tmp_path / "BES Client" / "ActionSite.afxm"
+    client_copy.write_bytes(b"client copy")
+    ctx.state["baseline"]["bigfix"]["key_files"]["found"]["actionsite.afxm"] = [
+        str(client_copy),
+        str(server / "actionsite.afxm"),
+    ]
+
+    upgrade.ACTIONS["masthead"](ctx)
+
+    assert ctx.state["masthead_copy"]["from"] == str(server / "actionsite.afxm")
+
+
+def test_key_files_ignores_redacted_values(upgrade, tmp_path):
+    """Test a redacted value from an older state file is never copied as paths."""
+    ctx, _server = hcl_ctx(upgrade, tmp_path)
+    ctx.state["baseline"]["bigfix"]["key_files"]["found"]["license.pvk"] = "<redacted>"
+
+    upgrade.ACTIONS["key_files"](ctx)
+
+    assert not any(
+        "license.pvk" in target for target in ctx.state.get("key_file_copies", {})
+    )
+
+
+def test_dry_run_keeps_no_progress(upgrade, tmp_path, monkeypatch):
+    """Test a dry run walkthrough leaves the state file exactly as it was."""
+    state_path = tmp_path / "state.json"
+    host = local_host(upgrade)
+    state = {
+        "done": [],
+        "reports": {},
+        "plan": {"steps": []},
+        "local_sql": True,
+        "baseline": upgrade.collect_local_info(host),
+    }
+    state_path.write_text(json.dumps(state))
+    before = state_path.read_text()
+    args = types.SimpleNamespace(
+        state_file=str(state_path),
+        step=None,
+        dry_run=True,
+        backup_dir=str(tmp_path / "share"),
+        backup_share_user=None,
+        staging_dir=None,
+        sql_instance=None,
+        dry_run_file=str(tmp_path / "dryrun.txt"),
+    )
+
+    def no_prompts(*args, **kwargs):
+        raise AssertionError("a dry run must not prompt")
+
+    monkeypatch.setattr(upgrade, "_ask", no_prompts)
+    monkeypatch.setattr("builtins.input", no_prompts)
+    monkeypatch.setattr(upgrade.getpass, "getpass", no_prompts)
+    monkeypatch.setattr(
+        upgrade.besapi.plugin_utilities, "get_besapi_connection", lambda args: None
+    )
+
+    assert upgrade.run_walkthrough(args, None, host, {}) == 0
+
+    assert state_path.read_text() == before
+    assert not (tmp_path / "share").exists()
+    # everything it printed is saved, to hand over in one file:
+    saved = (tmp_path / "dryrun.txt").read_text(encoding="utf-8")
+    for step_id in ("preflight", "stop_services_0", "backup", "final_validation"):
+        assert f"===== {step_id}:" in saved
+    assert "DRY RUN, would" in saved
+    assert "All steps are complete." in saved
+
+
+def test_dry_run_doesnt_connect_share(upgrade, tmp_path, monkeypatch):
+    """Test a dry run never asks for the share password or connects."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.dry_run = True
+    ctx.args.backup_dir = r"\\fileserver\share\bigfix"
+    ctx.args.backup_share_user = r"fileserver\operator"
+    monkeypatch.setattr(
+        upgrade.getpass, "getpass", lambda prompt: pytest.fail("prompted")
+    )
+
+    ctx.backup_dir()
+
+    assert ctx.host.shares == []
