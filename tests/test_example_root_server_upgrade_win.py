@@ -12,6 +12,7 @@ import logging
 import ntpath
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -6892,3 +6893,270 @@ def test_walkthrough_never_starts_from_the_session(upgrade):
     rig = asyncio.run(scenario())
     assert runs == []
     assert "walkthrough only starts typed at the node" in rig.text("coordinator")
+
+
+# ---------------------------------------------------------------- several questions at once
+
+
+def test_questions_from_two_nodes_both_kept(upgrade):
+    """Test questions from two nodes at once are both kept, shown in status, a
+    bare answer asks which, and `answer <node> <choice>` picks.
+    """
+    answers = {}
+
+    def ask_as(name):
+        def walkthrough(bridge):
+            answers[name] = bridge.ask(f"{name} ready?", ["yes", "no"])
+
+        return walkthrough
+
+    async def scenario():
+        rig = WalkRig(upgrade, ask_as("root"))
+        await rig.start()
+        rig.add(
+            "HYPERV", ["hyperv"], hyperv_host(upgrade), walkthrough=ask_as("HYPERV")
+        )
+        await rig.until(lambda: len(rig.coordinator.questions) == 2)
+        status = rig.coordinator.status_lines()
+        await rig.coordinator.handle_command("yes", source="coordinator")
+        await asyncio.sleep(0.2)
+        unanswered = dict(answers)
+        await rig.coordinator.handle_command("answer hyperv no", source="coordinator")
+        await rig.until(lambda: "HYPERV" in answers)
+        await rig.coordinator.handle_command("yes", source="coordinator")
+        await rig.until(lambda: "root" in answers)
+        await rig.finish()
+        return rig, status, unanswered
+
+    rig, status, unanswered = asyncio.run(scenario())
+    assert unanswered == {}
+    assert answers == {"HYPERV": "no", "root": "yes"}
+    assert any("QUESTION from root: root ready?" in line for line in status)
+    assert any("QUESTION from HYPERV: HYPERV ready?" in line for line in status)
+    assert "answer <node> <choice>" in rig.text("coordinator")
+
+
+def test_backup_waits_for_share_owner_credentials(upgrade, tmp_path):
+    """Test a session share with no account yet stops the backup with a reason,
+    instead of trying the share as this computer's own user.
+    """
+
+    class NoAccountYet(FakeSession):
+        def share_credentials(self):
+            return {"unc": SHARE_UNC, "user": None, "password": None}
+
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.backup_dir = None
+    ctx.session = NoAccountYet()
+
+    with pytest.raises(SystemExit, match="hasn't handed out the share account"):
+        ctx.backup_dir()
+    assert ctx.host.shares == []
+
+
+def test_dry_run_notes_missing_share_account(upgrade, tmp_path, capsys):
+    """Test a dry run only notes the share owner hasn't handed out the account."""
+
+    class NoAccountYet(FakeSession):
+        def share_credentials(self):
+            return {"unc": SHARE_UNC, "user": None, "password": None}
+
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.args.backup_dir = None
+    ctx.args.dry_run = True
+    ctx.session = NoAccountYet()
+
+    ctx.backup_dir()
+
+    assert "hasn't handed out the share account" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- streamed output
+
+
+def test_run_stream_gives_lines_as_they_come(upgrade):
+    """Test each output line arrives while the command still runs."""
+    host = upgrade.LocalHost()
+    seen = []
+    script = "import time; print('first', flush=True); time.sleep(1); print('second'); raise SystemExit(3)"
+    started = time.monotonic()
+
+    code, output = host.run_stream(
+        [sys.executable, "-u", "-c", script],
+        lambda line: seen.append((time.monotonic() - started, line)),
+    )
+
+    assert code == 3
+    assert output.splitlines() == ["first", "second"]
+    assert [line for _when, line in seen] == ["first", "second"]
+    # the first line came about a second before the second:
+    assert seen[1][0] - seen[0][0] > 0.5
+
+
+def test_run_stream_timeout(upgrade):
+    """Test a command that runs too long is stopped."""
+    host = upgrade.LocalHost()
+
+    code, output = host.run_stream(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        lambda line: None,
+        timeout=0.5,
+    )
+
+    assert code is None and "timed out" in output
+
+
+class StreamingHost(FakeHost):
+    """A fake host that streams its commands' output."""
+
+    def __init__(self, lines, code=0, **options):
+        super().__init__(**options)
+        self.stream_lines, self.stream_code = lines, code
+        self.streamed = []
+
+    def run_stream(self, cmd, on_line, timeout=None):
+        self.streamed.append(cmd)
+        for line in self.stream_lines:
+            on_line(line)
+        return self.stream_code, "\n".join(self.stream_lines) + "\n"
+
+
+def test_walkthrough_command_output_streams(upgrade, tmp_path, capsys):
+    """Test the walkthrough prints a command's lines as they come, and a failing
+    command still fails the action.
+    """
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.host = StreamingHost(["10 percent processed.", "100 percent processed."])
+
+    ctx.execute(["powershell.exe", "Export-VM"])
+
+    assert "10 percent processed." in capsys.readouterr().out
+    ctx.host = StreamingHost(["Access is denied."], code=1)
+    with pytest.raises(subprocess.CalledProcessError):
+        ctx.execute(["reg.exe", "export"])
+
+
+def test_localcmd_output_streams_to_session(upgrade):
+    """Test localcmd sends each line to the session as it comes."""
+    printed = []
+    host = StreamingHost(["line one", "line two"])
+    node = upgrade.ShareSessionNode(
+        "root", ["root"], host, output=printed.append, **session_options(upgrade)
+    )
+    node._print = printed.append
+
+    node._local_command("Get-Something")
+    for _ in range(300):
+        if any("exit code" in line for line in printed):
+            break
+        time.sleep(0.01)
+
+    logged = [entry["message"] for entry in node.log_buffer]
+    assert "[localcmd] line one" in logged and "[localcmd] line two" in logged
+    assert logged.index("[localcmd] line one") < logged.index(
+        "localcmd exit 0: Get-Something"
+    )
+
+
+# ---------------------------------------------------------------- progress
+
+
+def test_progress_poller_reports_while_running(upgrade, monkeypatch):
+    """Test the poller reports every interval while the body runs, then stops."""
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
+    reports = []
+
+    with upgrade.ProgressPoller(lambda: reports.append(time.monotonic())):
+        time.sleep(0.3)
+    count = len(reports)
+    time.sleep(0.2)
+
+    assert count >= 3
+    assert len(reports) == count  # stopped
+
+
+def test_progress_interval_is_a_minute(upgrade):
+    """Test progress is reported every 60 seconds."""
+    assert upgrade.PROGRESS_INTERVAL == 60
+
+
+def test_sql_backup_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
+    """Test a backup shows SQL Server's percent done while it runs."""
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
+    host = local_host(upgrade)
+    host.sql[upgrade.SQL_PROGRESS] = [["BACKUP DATABASE", "42.5", "6"]]
+    host.sqlcmd_stream = lambda server, query, on_line: time.sleep(0.3)
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+
+    ctx.sql("BACKUP DATABASE [BFEnterprise] TO DISK = N'x.bak'")
+
+    assert "BACKUP DATABASE: 42.5% done, about 6 min left" in capsys.readouterr().out
+
+
+def test_other_sql_has_no_progress(upgrade, tmp_path, monkeypatch):
+    """Test a quick statement doesn't poll for progress."""
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.01)
+    host = local_host(upgrade)
+    host.sqlcmd_stream = lambda server, query, on_line: time.sleep(0.1)
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+
+    ctx.sql("ALTER DATABASE [BFEnterprise] SET COMPATIBILITY_LEVEL = 120")
+
+    assert upgrade.SQL_PROGRESS not in host.sql_ran
+
+
+def test_folder_copy_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
+    """Test copying a folder shows files and GB copied so far."""
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0)
+    source = tmp_path / "wwwrootbes"
+    for n in range(3):
+        (source / f"d{n}").mkdir(parents=True)
+        (source / f"d{n}" / "f.txt").write_text("x" * 100)
+
+    upgrade._copy_item(
+        str(source), str(tmp_path / "copy"), label="wwwrootbes", total=(3, 300)
+    )
+
+    out = capsys.readouterr().out
+    assert "wwwrootbes: 3 of 3 files" in out
+    assert (tmp_path / "copy" / "d2" / "f.txt").exists()
+
+
+def test_staged_copy_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
+    """Test copying a staged backup to the share shows GB copied so far."""
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0)
+    monkeypatch.setattr(upgrade, "COPY_CHUNK", 1024)
+    source = tmp_path / "BFEnterprise.bak"
+    source.write_bytes(os.urandom(5000))
+    dest = tmp_path / "share"
+    dest.mkdir()
+
+    record = upgrade.copy_verified(str(source), str(dest))
+
+    assert "BFEnterprise.bak:" in capsys.readouterr().out
+    assert os.path.getsize(record["file"]) == 5000
+    assert not source.exists()
+
+
+def test_hyperv_export_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
+    """Test the export shows how much of the VM's disks is written so far."""
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.state["hyperv_plan"] = {"host_upgrades": []}
+    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    def exporting(cmd):
+        if "Export-VM" in cmd[-1]:
+            folder = os.path.join(ctx.backup_dir(), "bigfix-root")
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "disk.vhdx"), "wb") as disk:
+                disk.write(b"x" * 1000)
+            time.sleep(0.3)
+        return ""
+
+    ctx.host.run_handler = exporting
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    assert "export of bigfix-root:" in capsys.readouterr().out

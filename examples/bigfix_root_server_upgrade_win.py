@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.22"
+__version__ = "0.2.25"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -967,6 +967,11 @@ class LocalHost:
 
     def sqlcmd(self, server: str, query: str) -> List[List[str]]:
         """Run a query with Windows authentication, returning rows of columns."""
+        result = besapi.plugin_utilities.run_logged(self._sqlcmd(server, query))
+        return [line.split("|") for line in result.stdout.splitlines() if line.strip()]
+
+    @staticmethod
+    def _sqlcmd(server: str, query: str) -> List[str]:
         extra_paths = [
             rf"C:\Program Files\Microsoft SQL Server\{folder}\Tools\Binn\SQLCMD.EXE"
             for folder in ("170", "160", "150", "140", "130", "120", "110", "100")
@@ -974,10 +979,20 @@ class LocalHost:
         sqlcmd = besapi.plugin_utilities.find_executable("sqlcmd", extra_paths)
         if not sqlcmd:
             raise FileNotFoundError("sqlcmd was not found")
-        result = besapi.plugin_utilities.run_logged(
-            [sqlcmd, "-S", server, "-E", "-b", "-h", "-1", "-W", "-s", "|", "-Q", query]
-        )
-        return [line.split("|") for line in result.stdout.splitlines() if line.strip()]
+        return [
+            sqlcmd,
+            "-S",
+            server,
+            "-E",
+            "-b",
+            "-h",
+            "-1",
+            "-W",
+            "-s",
+            "|",
+            "-Q",
+            query,
+        ]
 
     def port_open(self, port: int) -> bool:
         """Check if something is listening on a local TCP port."""
@@ -1096,6 +1111,60 @@ class LocalHost:
     def run(self, cmd: List[str]) -> str:
         """Run a command, raising if it fails."""
         return besapi.plugin_utilities.run_logged(cmd).stdout
+
+    def run_stream(
+        self, cmd: List[str], on_line, timeout: Optional[float] = None
+    ) -> tuple:
+        """Run a command, giving each output line to `on_line` as it comes.
+
+        Returns (exit code, output). The exit code is None when it ran longer
+        than `timeout` seconds and was stopped.
+        """
+        try:
+            process = subprocess.Popen(  # nosec B603
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                errors="replace",
+                bufsize=1,
+            )
+        except OSError as err:
+            return None, f"could not run it: {err}\n"
+        timed_out = threading.Event()
+        timer = None
+        if timeout:
+
+            def stop():
+                timed_out.set()
+                process.kill()
+
+            timer = threading.Timer(timeout, stop)
+            timer.start()
+        lines = []
+        try:
+            for line in process.stdout:  # type: ignore[union-attr]
+                line = line.rstrip("\r\n")
+                lines.append(line)
+                on_line(line)
+            process.wait()
+        finally:
+            if timer:
+                timer.cancel()
+        output = "".join(line + "\n" for line in lines)
+        if timed_out.is_set():
+            return None, f"timed out after {timeout}s, stopped\n{output}"
+        return process.returncode, output
+
+    def sqlcmd_stream(self, server: str, query: str, on_line) -> None:
+        """Run T-SQL, giving each output line as it comes, like a backup's
+        progress, raising if it fails.
+        """
+        cmd = self._sqlcmd(server, query)
+        code, output = self.run_stream(cmd, on_line)
+        if code != 0:
+            raise subprocess.CalledProcessError(code or 1, cmd[:1], output)
 
     def run_capture(self, cmd: List[str], timeout: float = 300) -> tuple:
         """Run a command a person typed here, returning (exit code, output).
@@ -2263,10 +2332,86 @@ def sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+# long work reports its progress this often, in seconds:
+PROGRESS_INTERVAL = 60
+COPY_CHUNK = 8 * 1024 * 1024
+SQL_PROGRESS = (
+    "SET NOCOUNT ON; SELECT command, CAST(percent_complete AS decimal(5, 1)),"
+    " estimated_completion_time / 60000 FROM sys.dm_exec_requests"
+    " WHERE command LIKE 'BACKUP%' OR command LIKE 'RESTORE%'"
+)
+
+
+class ProgressPoller:
+    """Calls `report` every PROGRESS_INTERVAL seconds while its block runs, for
+    progress a command doesn't print itself, like a SQL backup's or an export's.
+    """
+
+    def __init__(self, report):
+        self.report = report
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.wait(PROGRESS_INTERVAL):
+            try:
+                self.report()
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logging.debug("progress check failed: %s", err)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+
+class _CopyProgress:
+    """Counts files and bytes copied, printing them every PROGRESS_INTERVAL."""
+
+    def __init__(self, label: str, total: Optional[tuple] = None):
+        self.label = label
+        self.total_files, self.total_bytes = total or (0, 0)
+        self.files = self.bytes = 0
+        self._last = time.monotonic()
+
+    def add(self, files: int, size: int) -> None:
+        self.files += files
+        self.bytes += size
+        if time.monotonic() - self._last >= PROGRESS_INTERVAL:
+            self._last = time.monotonic()
+            print(
+                f"  {self.label}: {self.files} of {self.total_files} files,"
+                f" {self.bytes / 1024**3:.1f} of {self.total_bytes / 1024**3:.1f} GB"
+            )
+
+
+def _copy_file_with_progress(source: str, dest: str) -> None:
+    """Copy a big file in chunks, printing GB copied every PROGRESS_INTERVAL."""
+    size = os.path.getsize(source)
+    done = 0
+    last = time.monotonic()
+    with open(source, "rb") as reader, open(dest, "wb") as writer:
+        while True:
+            chunk = reader.read(COPY_CHUNK)
+            if not chunk:
+                break
+            writer.write(chunk)
+            done += len(chunk)
+            if time.monotonic() - last >= PROGRESS_INTERVAL:
+                last = time.monotonic()
+                print(
+                    f"  {os.path.basename(source)}: {done / 1024**3:.1f} of"
+                    f" {size / 1024**3:.1f} GB copied"
+                )
+
+
 def copy_verified(source: str, dest_folder: str) -> dict:
     """Copy a file, compare SHA-256 hashes, and only then remove the source."""
     dest = os.path.join(dest_folder, os.path.basename(source))
-    shutil.copyfile(source, dest)
+    _copy_file_with_progress(source, dest)
     source_hash, dest_hash = sha256_file(source), sha256_file(dest)
     if source_hash != dest_hash:
         raise BackupError(
@@ -2365,6 +2510,12 @@ class WalkthroughContext:
         if self.dry_run:
             print("DRY RUN, would run:", " ".join(cmd))
             return
+        if hasattr(self.host, "run_stream"):
+            # each line as it comes, so a long command shows its progress:
+            code, output = self.host.run_stream(cmd, lambda line: print("  ", line))
+            if code != 0:
+                raise subprocess.CalledProcessError(code or 1, cmd, output)
+            return
         self.host.run(cmd)
 
     def sql(self, query: str) -> None:
@@ -2372,8 +2523,21 @@ class WalkthroughContext:
         if self.dry_run:
             print("DRY RUN, would run SQL:", query)
             return
-        for row in self.host.sqlcmd(self.sql_server(), query):
-            print("  ", "|".join(row))
+        server = self.sql_server()
+        long_running = query.lstrip().upper().startswith(("BACKUP", "RESTORE"))
+
+        def report() -> None:
+            # SQL Server's own progress, whatever sqlcmd buffers:
+            for row in self.host.sqlcmd(server, SQL_PROGRESS):
+                if len(row) >= 3:
+                    print(f"  {row[0]}: {row[1]}% done, about {row[2]} min left")
+
+        with ProgressPoller(report) if long_running else contextlib.nullcontext():
+            if hasattr(self.host, "sqlcmd_stream"):
+                self.host.sqlcmd_stream(server, query, lambda line: print("  ", line))
+                return
+            for row in self.host.sqlcmd(server, query):
+                print("  ", "|".join(row))
 
     def sql_server(self) -> str:
         """The SQL server BigFix uses, from the baseline."""
@@ -2386,6 +2550,23 @@ class WalkthroughContext:
         the folder can be written to. The folder is kept in the state file, so a
         resumed walkthrough keeps using it.
         """
+        share = session_share(self)
+        if (
+            share.get("unc")
+            and not share.get("user")
+            and (
+                not self.args.backup_dir
+                or unc_share_root(self.args.backup_dir) == unc_share_root(share["unc"])
+            )
+        ):
+            message = (
+                "the share owner (the Hyper-V host) hasn't handed out the share"
+                " account yet: answer its questions (see status), then run"
+                " walkthrough again"
+            )
+            if not self.dry_run:
+                raise SystemExit(message)
+            print(f"NOTE: {message}")
         if not self.args.backup_dir and session_share(self).get("unc"):
             # in a session, the share the coordinator handed out:
             self.args.backup_dir = session_share(self)["unc"]
@@ -2592,9 +2773,17 @@ def _tree_size(path: str, excluded: Optional[List[str]] = None) -> tuple:
     return files, size
 
 
-def _copy_item(source: str, dest: str, excluded: Optional[List[str]] = None) -> None:
+def _copy_item(
+    source: str,
+    dest: str,
+    excluded: Optional[List[str]] = None,
+    label: Optional[str] = None,
+    total: Optional[tuple] = None,
+) -> None:
+    """Copy a file or folder, printing progress for a labelled folder."""
     if os.path.isdir(source):
         skip = _excluded_paths(source, excluded or [])
+        progress = _CopyProgress(label, total) if label else None
 
         def ignore(folder: str, names: List[str]) -> List[str]:
             return [
@@ -2603,7 +2792,16 @@ def _copy_item(source: str, dest: str, excluded: Optional[List[str]] = None) -> 
                 if os.path.normcase(os.path.join(folder, name)) in skip
             ]
 
-        shutil.copytree(source, dest, dirs_exist_ok=True, ignore=ignore)
+        def copy(src: str, dst: str) -> str:
+            result = shutil.copy2(src, dst)
+            if progress:
+                with contextlib.suppress(OSError):
+                    progress.add(1, os.path.getsize(src))
+            return result
+
+        shutil.copytree(
+            source, dest, dirs_exist_ok=True, ignore=ignore, copy_function=copy
+        )
     else:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(source, dest)
@@ -2672,7 +2870,7 @@ def _action_folder_backup(ctx: WalkthroughContext) -> None:
                 f" {size / 1024**3:.1f} GB) to {dest}"
             )
             continue
-        _copy_item(path, dest, excluded)
+        _copy_item(path, dest, excluded, label=label, total=(files, size))
         record[label] = {"files": files, "bytes": size, "copied_to": dest}
         if excluded:
             record[label]["excluded"] = excluded
@@ -3576,7 +3774,18 @@ def _action_hv_export(ctx: WalkthroughContext) -> None:
         )
         if stopped:
             ctx.execute(_powershell(f"Stop-VM -Name {_ps_quote(name)}"))
-        ctx.execute(_powershell(export))
+        exported = os.path.join(run_dir, name)
+
+        def report(name=name, size=size, exported=exported) -> None:
+            written = _tree_size(exported)[1] if os.path.isdir(exported) else 0
+            print(
+                f"  export of {name}: {written / 1024**3:.1f} of"
+                f" {size / 1024**3:.1f} GB"
+                + (f" ({100 * written / size:.0f}%)" if size else "")
+            )
+
+        with ProgressPoller(report) if not ctx.dry_run else contextlib.nullcontext():
+            ctx.execute(_powershell(export))
         if not ctx.dry_run:
             ctx.state.setdefault("hyperv_exports", []).append(
                 {
@@ -5986,7 +6195,8 @@ class ShareSessionCoordinator:
         self.log_acks: Dict[str, dict] = {}
         self._background: set = set()
         # the walkthrough question waiting for an answer, and a halt, if any:
-        self.question: Optional[dict] = None
+        # waiting questions, one per node, several nodes can ask at once:
+        self.questions: Dict[str, dict] = {}
         # a halt is saved as it changes, so a restart never continues a halt:
         self.halted: Optional[dict] = halted
         self.on_halt = on_halt
@@ -6010,6 +6220,11 @@ class ShareSessionCoordinator:
         self.tokens: Dict[str, dict] = tokens if tokens is not None else {}
         self.on_tokens = on_tokens
         self.now = now
+
+    @property
+    def question(self) -> Optional[dict]:
+        """The latest waiting question, None when none is waiting."""
+        return list(self.questions.values())[-1] if self.questions else None
 
     def output(self, line: str) -> None:
         """Show a line here, keep it in coordinator.log, and send it to consoles."""
@@ -6214,9 +6429,10 @@ class ShareSessionCoordinator:
         )
         if not token:
             await channel.send({"type": "resume", **self._issue_token(name)})
-        if "console" in roles and self.question:
+        if "console" in roles:
             # a console that joins late still sees what's waiting:
-            await channel.send({"type": "question", **self.question})
+            for waiting in list(self.questions.values()):
+                await channel.send({"type": "question", **waiting})
         self._changed.set()
         if "console" not in roles and "share_owner" not in roles and self.share_unc:
             await self._diagnose(name)
@@ -6261,12 +6477,12 @@ class ShareSessionCoordinator:
         elif message.get("type") == "artifact":
             await self._on_artifact(name, message)
         elif message.get("type") == "question_cleared":
-            if self.question and self.question["node"] == name:
+            cleared = self.questions.pop(name, None)
+            if cleared:
                 self.output(
-                    f"{self.question['prompt']} was answered on {name} while the"
+                    f"{cleared['prompt']} was answered on {name} while the"
                     " coordinator was away"
                 )
-                self.question = None
         elif message.get("type") in (
             "state_reply",
             "diag_reply",
@@ -6311,17 +6527,20 @@ class ShareSessionCoordinator:
 
     async def _on_question(self, name: str, message: dict) -> None:
         choices = [clean_log_text(c, 40) for c in message.get("choices") or []]
-        self.question = {
+        question = {
             "id": clean_log_text(message.get("id", ""), 16),
             "node": name,
             "prompt": clean_log_text(message.get("prompt", "")),
             "choices": choices,
         }
+        self.questions.pop(name, None)
+        self.questions[name] = question
         self.output(
-            f"QUESTION from {name}: {self.question['prompt']}"
+            f"QUESTION from {name}: {question['prompt']}"
             f" [{'/'.join(choices)}], answer with: answer <choice>"
+            + (f" or answer {name} <choice>" if len(self.questions) > 1 else "")
         )
-        await self._broadcast_consoles({"type": "question", **self.question})
+        await self._broadcast_consoles({"type": "question", **question})
 
     async def _relay_reply(self, name: str, message: dict) -> None:
         requester = self.requests.pop(str(message.get("id")), None)
@@ -6413,24 +6632,43 @@ class ShareSessionCoordinator:
         return node is not None and "oneshot" not in node["roles"]
 
     async def _answer(self, words: List[str], source: str) -> None:
-        question = self.question
-        if not question:
+        """`answer <choice>`, `answer <node> <choice>` or `answer <id> <choice>`."""
+        if not self.questions:
             self.output("no question is waiting for an answer")
             return
         if len(words) == 2:
-            asked_id, choice = words
-            if asked_id != question["id"]:
-                self.output(f"stale answer from {source}, that question was answered")
+            which, choice = words
+            node = self._node_name(which)
+            question = self.questions.get(node) or next(
+                (q for q in self.questions.values() if q["id"] == which), None
+            )
+            if not question:
+                self.output(
+                    f"stale answer from {source}, that question was answered"
+                    if re.fullmatch(r"[0-9a-f]{8}", which)
+                    else f"no question is waiting from {which}"
+                )
                 return
         elif len(words) == 1:
             choice = words[0]
+            if len(self.questions) > 1:
+                self.output(
+                    "several questions are waiting, from "
+                    + ", ".join(self.questions)
+                    + ": use answer <node> <choice>"
+                )
+                return
+            question = self.question
         else:
-            self.output("use: answer <choice>")
+            self.output("use: answer <choice>, or answer <node> <choice>")
+            return
+        if question is None:
+            self.output("no question is waiting for an answer")
             return
         if choice not in question["choices"]:
             self.output(f"{choice!r} is not one of {'/'.join(question['choices'])}")
             return
-        self.question = None
+        self.questions.pop(question["node"], None)
         self.output(
             f"{source} answered {choice} to {question['node']}"
             + (
@@ -6535,6 +6773,11 @@ class ShareSessionCoordinator:
                 f"HALTED by {self.halted.get('by')}: {self.halted.get('reason')},"
                 " type continue to resume"
             )
+        for waiting in self.questions.values():
+            lines.append(
+                f"QUESTION from {waiting['node']}: {waiting['prompt']}"
+                f" [{'/'.join(waiting['choices'])}]"
+            )
         for name, node in self.nodes.items():
             history = self.results.get(name)
             last = history[-1] if history else None
@@ -6573,7 +6816,9 @@ class ShareSessionCoordinator:
             return
         if words[0] == "answer":
             await self._answer(words[1:], source)
-        elif self.question and len(words) == 1 and words[0] in self.question["choices"]:
+        elif len(words) == 1 and any(
+            words[0] in q["choices"] for q in self.questions.values()
+        ):
             # a bare choice, like done, answers the question waiting:
             await self._answer(words, source)
         elif words[0] == "halt":
@@ -6817,7 +7062,16 @@ class ShareSessionNode:
         self._print(f"running here: {command}")
 
         def run():
-            code, output = self.host.run_capture(cmd, self.localcmd_timeout)
+            if hasattr(self.host, "run_stream"):
+
+                def on_line(line: str) -> None:
+                    # each line to the session as it comes:
+                    self._print(f"  {line}")
+                    self.log("INFO", f"[localcmd] {line}")
+
+                code, output = self.host.run_stream(cmd, on_line, self.localcmd_timeout)
+            else:
+                code, output = self.host.run_capture(cmd, self.localcmd_timeout)
             self.log("INFO", f"localcmd exit {code}: {command}")
             self._print(f"localcmd exit code {code}, its output is sent as {kind}")
             self.send_threadsafe(
