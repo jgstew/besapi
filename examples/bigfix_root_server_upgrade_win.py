@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.28"
+__version__ = "0.2.29"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -6282,8 +6282,10 @@ class ShareSessionCoordinator:
         self.nodes: Dict[str, dict] = {}
         self.results: Dict[str, List[dict]] = {}
         self.pending: Dict[str, int] = {}
-        self.done = asyncio.Event()
-        self._changed = asyncio.Event()
+        # made on first use, in the event loop: before 3.10, asyncio.Event()
+        # needs a current loop when it's created, and this is built without one
+        self._done: Optional[asyncio.Event] = None
+        self._changed_event: Optional[asyncio.Event] = None
         # resume tokens by id: {"node", "secret", "issued", "expires"}, the
         # caller keeps the dict in its state file:
         self.tokens: Dict[str, dict] = tokens if tokens is not None else {}
@@ -6346,6 +6348,19 @@ class ShareSessionCoordinator:
         if token and self.now() < float(token.get("expires", 0)):
             return token
         return None
+
+    @property
+    def done(self) -> asyncio.Event:
+        """Set when the session is finished."""
+        if self._done is None:
+            self._done = asyncio.Event()
+        return self._done
+
+    @property
+    def _changed(self) -> asyncio.Event:
+        if self._changed_event is None:
+            self._changed_event = asyncio.Event()
+        return self._changed_event
 
     def _tokens_changed(self) -> None:
         if self.on_tokens:
@@ -7065,7 +7080,9 @@ class ShareSessionNode:
         self.prompt_password = prompt_password
         self.sql_server = sql_server
         self.share: dict = {}
-        self.command_queue: asyncio.Queue = asyncio.Queue()
+        # made on first use, in the event loop: before 3.10, asyncio.Queue()
+        # needs a current loop when it's created, and a node is built without one
+        self._command_queue: Optional[asyncio.Queue] = None
         # a token from the coordinator, to rejoin after a reboot without the code:
         self.resume = resume
         self.on_resume = on_resume
@@ -7505,8 +7522,16 @@ class ShareSessionNode:
                 await asyncio.sleep(delay)
         raise ConnectionError(f"coordinator {host}:{port} not reachable")
 
+    @property
+    def command_queue(self) -> asyncio.Queue:
+        """Commands typed here, for the coordinator."""
+        if self._command_queue is None:
+            self._command_queue = asyncio.Queue()
+        return self._command_queue
+
     async def run(self, host: str, port: int, attempts: int = 1) -> None:
         """Serve the coordinator until it says bye."""
+        self.command_queue  # pylint: disable=pointless-statement
         channel = await self.connect(host, port, attempts)
         sender = asyncio.create_task(self._send_commands(channel))
         self._loop = asyncio.get_running_loop()
