@@ -47,7 +47,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install build tools
-        run: pip install setuptools wheel build pyinstaller pytest pytest-cov ruamel.yaml cryptography spake2
+        # --prefer-binary: a platform without a wheel of the newest release, like
+        # cryptography on windows-11-arm, gets the newest one that has a wheel
+        # instead of building from source
+        run: pip install --prefer-binary setuptools wheel build pyinstaller pytest pytest-cov ruamel.yaml cryptography spake2
 
       - name: Install requirements
         shell: bash
