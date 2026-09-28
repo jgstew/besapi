@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.25"
+__version__ = "0.2.28"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2349,15 +2349,25 @@ class ProgressPoller:
 
     def __init__(self, report):
         self.report = report
+        # The thread that started it, so its prints are forwarded like its own:
+        self._parent = threading.get_ident()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self) -> None:
-        while not self._stop.wait(PROGRESS_INTERVAL):
-            try:
-                self.report()
-            except Exception as err:  # pylint: disable=broad-exception-caught
-                logging.debug("progress check failed: %s", err)
+        adopt = getattr(sys.stdout, "adopt", None)
+        if adopt:
+            adopt(self._parent)
+        try:
+            while not self._stop.wait(PROGRESS_INTERVAL):
+                try:
+                    self.report()
+                except Exception as err:  # pylint: disable=broad-exception-caught
+                    logging.debug("progress check failed: %s", err)
+        finally:
+            release = getattr(sys.stdout, "release", None)
+            if release:
+                release()
 
     def __enter__(self):
         self._thread.start()
@@ -3615,7 +3625,10 @@ def build_hyperv_steps(plan: dict) -> List[Step]:
             "hv_export",
             "Export the BigFix VMs",
             "Each BigFix VM is exported with its whole disk chain, shut down first"
-            " for a consistent copy if you agree.",
+            " for a consistent copy if you agree. This can take many hours for a"
+            " large VM, and on an older host like 2012 R2 it can sit near 0% for"
+            " an hour or more before the copy starts. Progress is shown every"
+            " minute, from Hyper-V's own export status.",
             ["hv_export"],
         ),
     ]
@@ -3739,6 +3752,52 @@ def _free_bytes(folder: str) -> Optional[int]:
     return None
 
 
+# How far along a VM's export is, from Hyper-V's own records. The exported
+# files can't show it: Hyper-V creates each disk at full size before copying.
+# On 2012 R2 the export job's PercentComplete can stay 0 while the VM's status
+# says "Exporting (2%)", as Hyper-V Manager shows, so both are read.
+def ps_export_status(name: str) -> str:
+    """PowerShell for a VM's running export jobs and its status strings."""
+    return (
+        "$ns = 'root\\virtualization\\v2'; [pscustomobject]@{"
+        " Jobs = @(Get-CimInstance -Namespace $ns -ClassName Msvm_ConcreteJob |"
+        " Where-Object { $_.JobState -eq 4 -and"
+        " ($_.Caption + ' ' + $_.Description) -match 'export' } |"
+        " Select-Object Caption, Description, PercentComplete);"
+        " Status = @(Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem |"
+        f" Where-Object ElementName -eq {_ps_quote(name)} |"
+        " ForEach-Object { $_.StatusDescriptions }) } | ConvertTo-Json -Depth 3"
+    )
+
+
+def _export_percent(found: Any) -> Optional[int]:
+    """The export's percentage, above 0, from the jobs or the VM's status."""
+    found = found if isinstance(found, dict) else {}
+    percents = [
+        int(job["PercentComplete"])
+        for job in _dicts(found.get("Jobs"))
+        if job.get("PercentComplete") is not None
+    ]
+    status = found.get("Status") or []
+    for text in [status] if isinstance(status, str) else status:
+        percents += [int(p) for p in re.findall(r"(\d+)\s*%", str(text))]
+    percents = [p for p in percents if p > 0]
+    return max(percents) if percents else None
+
+
+def _export_progress(host, name: str, started: float) -> str:
+    """One progress line for a running export, from Hyper-V's own records."""
+    minutes = (time.monotonic() - started) / 60
+    try:
+        percent = _export_percent(host.powershell_json(ps_export_status(name)))
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        logging.debug("export status check failed: %s", err)
+        percent = None
+    if percent is not None:
+        return f"  export of {name}: {percent}% done, {minutes:.0f} min so far"
+    return f"  export of {name}: still running, {minutes:.0f} min so far"
+
+
 def _action_hv_export(ctx: WalkthroughContext) -> None:
     run_dir = ctx.backup_dir()
     vms = {
@@ -3774,15 +3833,10 @@ def _action_hv_export(ctx: WalkthroughContext) -> None:
         )
         if stopped:
             ctx.execute(_powershell(f"Stop-VM -Name {_ps_quote(name)}"))
-        exported = os.path.join(run_dir, name)
+        started = time.monotonic()
 
-        def report(name=name, size=size, exported=exported) -> None:
-            written = _tree_size(exported)[1] if os.path.isdir(exported) else 0
-            print(
-                f"  export of {name}: {written / 1024**3:.1f} of"
-                f" {size / 1024**3:.1f} GB"
-                + (f" ({100 * written / size:.0f}%)" if size else "")
-            )
+        def report(name=name, started=started) -> None:
+            print(_export_progress(ctx.host, name, started))
 
         with ProgressPoller(report) if not ctx.dry_run else contextlib.nullcontext():
             ctx.execute(_powershell(export))
@@ -5809,16 +5863,31 @@ class ThreadLogTee(io.TextIOBase):
         super().__init__()
         self.stream = stream
         self.node = node
-        self._thread: Optional[int] = None
+        self._threads: set = set()
         self._partial = ""
 
     def claim(self) -> None:
         """Forward what the calling thread prints from now on."""
-        self._thread = threading.get_ident()
+        self._threads = {threading.get_ident()}
+
+    def forwards(self, ident: int) -> bool:
+        """Whether what thread `ident` prints is forwarded."""
+        return ident in self._threads
+
+    def adopt(self, parent: int) -> None:
+        """Forward the calling thread's prints too, if `parent`'s are, as for
+        the progress a walkthrough step starts.
+        """
+        if self.forwards(parent):
+            self._threads = self._threads | {threading.get_ident()}
+
+    def release(self) -> None:
+        """Stop forwarding the calling thread's prints."""
+        self._threads = self._threads - {threading.get_ident()}
 
     def write(self, text: str) -> int:  # type: ignore[override]
         self.stream.write(text)
-        if threading.get_ident() == self._thread:
+        if self.forwards(threading.get_ident()):
             *lines, self._partial = (self._partial + text).split("\n")
             for line in lines:
                 if line.strip():

@@ -4364,6 +4364,44 @@ def test_walkthrough_prints_forwarded(upgrade):
     assert "from another thread" in sink.getvalue()
 
 
+def test_progress_poller_prints_forwarded(upgrade, monkeypatch):
+    """Test the 60 second progress lines, printed from the poller's own thread,
+    are forwarded when the walkthrough thread started the poller, and not.
+
+    otherwise.
+    """
+    node = upgrade.ShareSessionNode(
+        "root", ["root"], None, output=lambda line: None, **session_options(upgrade)
+    )
+    tee = upgrade.ThreadLogTee(io.StringIO(), node)
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.01)
+    monkeypatch.setattr(sys, "stdout", tee)
+
+    def poll(text):
+        printed = threading.Event()
+
+        def report():
+            print(text)
+            printed.set()
+
+        with upgrade.ProgressPoller(report):
+            printed.wait(5)
+
+    def walkthrough_thread():
+        tee.claim()
+        poll("backup: 40% done, about 3 min left")
+
+    # Unclaimed first: a finished thread's id can be reused by a later one.
+    poll("unclaimed progress")
+    thread = threading.Thread(target=walkthrough_thread)
+    thread.start()
+    thread.join()
+
+    messages = [e["message"] for e in node.log_buffer]
+    assert "backup: 40% done, about 3 min left" in messages
+    assert "unclaimed progress" not in messages
+
+
 def test_oneshot_console_state_as_json(upgrade):
     """Test a one-shot console runs one command, returns the reply as data, and
     leaves without ending the session.
@@ -5649,6 +5687,14 @@ def test_hyperv_steps_with_host_upgrade(upgrade):
         "hv_validate",
         "hv_cleanup",
     ]
+
+
+def test_hyperv_export_step_warns_it_can_take_hours(upgrade):
+    """Test the export step says up front that it can take many hours."""
+    steps = upgrade.build_hyperv_steps({"host_upgrades": ["2025"]})
+    export = next(s for s in steps if s.id == "hv_export")
+
+    assert "many hours" in export.instructions
 
 
 def test_hyperv_steps_without_host_upgrade(upgrade):
@@ -7160,3 +7206,84 @@ def test_hyperv_export_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
     upgrade.ACTIONS["hv_export"](ctx)
 
     assert "export of bigfix-root:" in capsys.readouterr().out
+
+
+def _slow_export(upgrade, ctx, monkeypatch):
+    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
+    ctx.state["hyperv_plan"] = {"host_upgrades": []}
+    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
+    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
+
+    def exporting(cmd):
+        if "Export-VM" in cmd[-1]:
+            # Hyper-V sizes the exported disks in full before copying:
+            folder = os.path.join(ctx.backup_dir(), "bigfix-root")
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "disk.vhdx"), "wb") as disk:
+                disk.write(b"x" * 1000)
+            time.sleep(0.3)
+        return ""
+
+    ctx.host.run_handler = exporting
+
+
+def test_hyperv_export_progress_from_hyperv_job(upgrade, tmp_path, monkeypatch, capsys):
+    """Test the export's progress is Hyper-V's own job percentage, not the size
+    of the exported files, which are full size from the start.
+    """
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.host.powershell[upgrade.ps_export_status("bigfix-root")] = {
+        "Jobs": [{"Description": "Exporting virtual machine", "PercentComplete": 37}],
+        "Status": ["Operating normally"],
+    }
+    _slow_export(upgrade, ctx, monkeypatch)
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    out = capsys.readouterr().out
+    assert "export of bigfix-root: 37% done" in out
+    assert "(100%)" not in out
+
+
+def test_hyperv_export_progress_from_vm_status(upgrade, tmp_path, monkeypatch, capsys):
+    """Test that when the job still says 0%, as on 2012 R2, the percentage is
+    taken from the VM's status, what Hyper-V Manager shows as Exporting (2%).
+    """
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.host.powershell[upgrade.ps_export_status("bigfix-root")] = {
+        "Jobs": {"Description": "Exporting Virtual Machine", "PercentComplete": 0},
+        "Status": ["Operating normally", "Exporting (2%)"],
+    }
+    _slow_export(upgrade, ctx, monkeypatch)
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    out = capsys.readouterr().out
+    assert "export of bigfix-root: 2% done" in out
+    assert "0% done" not in out
+
+
+def test_export_status_query_quotes_the_name(upgrade):
+    """Test the VM name is quoted in the status query, and a name that could
+    run code is refused.
+    """
+    assert "Where-Object ElementName -eq 'BigFixRoot'" in upgrade.ps_export_status(
+        "BigFixRoot"
+    )
+    with pytest.raises(ValueError):
+        upgrade.ps_export_status("x'; Remove-Item C:\\ -Recurse; '")
+
+
+def test_hyperv_export_progress_without_job(upgrade, tmp_path, monkeypatch, capsys):
+    """Test that without a Hyper-V job to read, the export only says it's still
+    running and for how long, not a misleading size.
+    """
+    ctx = hv_ctx(upgrade, tmp_path)
+    ctx.host.powershell[upgrade.ps_export_status("bigfix-root")] = OSError("no CIM")
+    _slow_export(upgrade, ctx, monkeypatch)
+
+    upgrade.ACTIONS["hv_export"](ctx)
+
+    out = capsys.readouterr().out
+    assert "export of bigfix-root: still running," in out
+    assert "(100%)" not in out
