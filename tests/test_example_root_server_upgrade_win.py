@@ -7111,9 +7111,16 @@ def test_progress_poller_reports_while_running(upgrade, monkeypatch):
     """Test the poller reports every interval while the body runs, then stops."""
     monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
     reports = []
+    three = threading.Event()
 
-    with upgrade.ProgressPoller(lambda: reports.append(time.monotonic())):
-        time.sleep(0.3)
+    def report():
+        reports.append(time.monotonic())
+        if len(reports) >= 3:
+            three.set()
+
+    # waits for the reports, not a fixed time, so a slow CI runner still passes:
+    with upgrade.ProgressPoller(report):
+        three.wait(10)
     count = len(reports)
     time.sleep(0.2)
 
@@ -7131,7 +7138,16 @@ def test_sql_backup_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
     host = local_host(upgrade)
     host.sql[upgrade.SQL_PROGRESS] = [["BACKUP DATABASE", "42.5", "6"]]
-    host.sqlcmd_stream = lambda server, query, on_line: time.sleep(0.3)
+
+    def backing_up(server, query, on_line):
+        # runs until progress was polled, however slow the runner:
+        for _ in range(1000):
+            if upgrade.SQL_PROGRESS in host.sql_ran:
+                break
+            time.sleep(0.01)
+        time.sleep(0.05)
+
+    host.sqlcmd_stream = backing_up
     ctx = walkthrough_ctx(upgrade, tmp_path, host)
 
     ctx.sql("BACKUP DATABASE [BFEnterprise] TO DISK = N'x.bak'")
@@ -7186,22 +7202,9 @@ def test_staged_copy_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
 
 def test_hyperv_export_reports_progress(upgrade, tmp_path, monkeypatch, capsys):
     """Test the export shows how much of the VM's disks is written so far."""
-    monkeypatch.setattr(upgrade, "PROGRESS_INTERVAL", 0.05)
     ctx = hv_ctx(upgrade, tmp_path)
-    ctx.state["hyperv_plan"] = {"host_upgrades": []}
-    usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
-    monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
-
-    def exporting(cmd):
-        if "Export-VM" in cmd[-1]:
-            folder = os.path.join(ctx.backup_dir(), "bigfix-root")
-            os.makedirs(folder, exist_ok=True)
-            with open(os.path.join(folder, "disk.vhdx"), "wb") as disk:
-                disk.write(b"x" * 1000)
-            time.sleep(0.3)
-        return ""
-
-    ctx.host.run_handler = exporting
+    ctx.host.powershell[upgrade.ps_export_status("bigfix-root")] = {"Jobs": []}
+    _slow_export(upgrade, ctx, monkeypatch)
 
     upgrade.ACTIONS["hv_export"](ctx)
 
@@ -7214,6 +7217,17 @@ def _slow_export(upgrade, ctx, monkeypatch):
     usage = types.SimpleNamespace(total=4000 * 1024**3, used=0, free=2000 * 1024**3)
     monkeypatch.setattr(upgrade.shutil, "disk_usage", lambda path: usage)
 
+    checked = threading.Event()
+    status_check = ctx.host.powershell_json
+
+    def checking(script):
+        try:
+            return status_check(script)
+        finally:
+            checked.set()
+
+    ctx.host.powershell_json = checking
+
     def exporting(cmd):
         if "Export-VM" in cmd[-1]:
             # Hyper-V sizes the exported disks in full before copying:
@@ -7221,7 +7235,9 @@ def _slow_export(upgrade, ctx, monkeypatch):
             os.makedirs(folder, exist_ok=True)
             with open(os.path.join(folder, "disk.vhdx"), "wb") as disk:
                 disk.write(b"x" * 1000)
-            time.sleep(0.3)
+            # runs until the progress was checked, however slow the runner:
+            checked.wait(10)
+            time.sleep(0.05)
         return ""
 
     ctx.host.run_handler = exporting
