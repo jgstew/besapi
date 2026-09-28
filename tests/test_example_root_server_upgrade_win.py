@@ -5012,7 +5012,8 @@ def test_script_fingerprint_ignores_line_endings(upgrade, tmp_path):
     """Test the same code copied with Windows line endings has the same
     fingerprint, and a changed copy doesn't.
     """
-    source = open(upgrade.__file__, "rb").read()
+    # LF first: a Windows checkout may already have CRLF line endings
+    source = open(upgrade.__file__, "rb").read().replace(b"\r\n", b"\n")
     windows = tmp_path / "windows.py"
     windows.write_bytes(source.replace(b"\n", b"\r\n"))
     changed = tmp_path / "changed.py"
