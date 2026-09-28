@@ -6,6 +6,7 @@ on:
     paths:
       - "src/**.py"
       - "tests/**.py"
+      - "examples/**.py"
       - "setup.cfg"
       - "MANIFEST.in"
       - "pyproject.toml"
@@ -18,6 +19,7 @@ on:
     paths:
       - "src/**.py"
       - "tests/**.py"
+      - "examples/**.py"
       - "setup.cfg"
       - "MANIFEST.in"
       - "pyproject.toml"
