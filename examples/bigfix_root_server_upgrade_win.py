@@ -122,6 +122,7 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
 import string
 import struct
 import subprocess
@@ -130,12 +131,13 @@ import threading
 import time
 import types
 import urllib.parse
+import urllib.request
 from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, cast
 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.33"
+__version__ = "0.2.35"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -1987,7 +1989,8 @@ def _upgrade_todo(step: dict, local_sql: bool) -> str:
         return (
             f"Run SQL Server {target} setup.exe {where} as Administrator, choose"
             " Upgrade from a previous version, pick the instance BigFix uses, and"
-            " let it finish, rebooting if it asks. Then come back here."
+            " let it finish, rebooting if it asks. Then install the latest"
+            f" Cumulative Update for SQL Server {target}, and come back here."
         )
     if component == "windows":
         return (
@@ -2009,7 +2012,7 @@ def _upgrade_verify(step: dict, local_sql: bool) -> List[str]:
         return [f"verify_mssql:{target}"]
     if component == "windows":
         return [f"verify_windows:{target}"]
-    return [f"verify_bigfix:{target}"]
+    return [f"verify_bigfix:{target}"] + (["verify_bigfix_db"] if local_sql else [])
 
 
 def _service_pack_instructions(service_pack: dict) -> str:
@@ -2104,6 +2107,26 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     verify=[f"verify_service_pack:{service_pack['level']}"],
                 )
             )
+        if step["component"] == "bigfix" and local_sql:
+            steps.append(
+                Step(
+                    f"pre_upgrade_{number}",
+                    "Check before the BigFix upgrade",
+                    "A BigFix upgrade changes the database schema, and an installer"
+                    " can report success with it left partially upgraded. So first:"
+                    " a fresh database backup, then SQL Server's patch level, recent"
+                    " crashes, scalar UDF inlining and memory are checked, and"
+                    " CHECKDB is offered.",
+                    [
+                        "sql_backup",
+                        "check_sql_patch",
+                        "check_sql_health",
+                        "check_udf_inlining",
+                        "checkdb",
+                        "sql_memory_note",
+                    ],
+                )
+            )
         steps.extend(
             [
                 Step(
@@ -2124,12 +2147,20 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                         f" {step['raise_compat']}, which BigFix needs."
                         if step.get("raise_compat")
                         else ""
+                    )
+                    + (
+                        " On SQL Server 2019 and later, TSQL_SCALAR_UDF_INLINING is"
+                        " turned off in the BigFix databases, after asking."
+                        if step["component"] == "mssql"
+                        else ""
                     ),
                     (
                         [f"raise_compat:{step['raise_compat']}"]
                         if step.get("raise_compat")
                         else []
                     )
+                    # after any SQL Server upgrade, as 2019 and later have it:
+                    + (["udf_inlining_off"] if step["component"] == "mssql" else [])
                     + ["start_services"],
                 ),
                 Step(
@@ -2137,7 +2168,8 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     "Validate",
                     "The server is checked against the baseline. Check the console"
                     " connects and clients report before continuing.",
-                    ["validate"],
+                    ["validate"]
+                    + (["check_web_reports"] if step["component"] == "bigfix" else []),
                 ),
             ]
         )
@@ -3583,6 +3615,245 @@ def _action_raise_compat(ctx: WalkthroughContext, level: str) -> None:
         ctx.sql(f"ALTER DATABASE [{name}] SET COMPATIBILITY_LEVEL = {target}")
 
 
+def sql_udf_inlining_query(database: str) -> str:
+    """Read-only: whether TSQL_SCALAR_UDF_INLINING is on in one BigFix database."""
+    if database not in BIGFIX_DATABASES:
+        raise ValueError(f"{database} isn't a BigFix database")
+    return (
+        "SET NOCOUNT ON; SELECT CAST(value AS int) FROM"
+        f" [{database}].sys.database_scoped_configurations"
+        " WHERE name = 'TSQL_SCALAR_UDF_INLINING'"
+    )
+
+
+def _action_udf_inlining_off(ctx: WalkthroughContext) -> None:
+    """Turn off scalar UDF inlining in the BigFix databases, after asking.
+
+    TSQL_SCALAR_UDF_INLINING is a database scoped setting from SQL Server 2019,
+    on by default there.
+    """
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_PRODUCT_VERSION)
+    version = rows[0][0] if rows and rows[0] else None
+    major = version_tuple(str(version))[:1] if version else ()
+    if not major or major[0] < 15:
+        print(
+            f"scalar UDF inlining: not in SQL Server {sql_major_from_version(version)}"
+            " (from 2019), nothing to turn off yet"
+        )
+        return
+    on = []
+    for name in BIGFIX_DATABASES:
+        found = ctx.host.sqlcmd(ctx.sql_server(), sql_udf_inlining_query(name))
+        value = found[0][0] if found and found[0] else None
+        if str(value).strip() == "0":
+            print(f"scalar UDF inlining: {name}: already off")
+        else:
+            on.append(name)
+    if not on:
+        return
+    if not ctx.dry_run and not ctx.confirm(
+        f"Turn off TSQL_SCALAR_UDF_INLINING in {' and '.join(on)}, for BigFix? It's"
+        " turned on again with the same command set to ON"
+    ):
+        print("not changed: scalar UDF inlining is still on")
+        return
+    for name in on:
+        # the name is one of BIGFIX_DATABASES:
+        ctx.sql(
+            f"USE [{name}]; ALTER DATABASE SCOPED CONFIGURATION SET"
+            " TSQL_SCALAR_UDF_INLINING = OFF"
+        )
+
+
+# ---- checks around a BigFix upgrade, from the BigFix 11.0.7 upgrade incident:
+# the installer reported success while the database was left partially upgraded
+
+SQL_UPGRADE_FLAG = (
+    "SET NOCOUNT ON; SELECT CAST(IsDeleted AS int) FROM [BFEnterprise].dbo.ADMINFIELDS"
+    " WHERE FieldName = N'PreviousUpgradeNotCompleted'"
+)
+SQL_PATCH_LEVEL = (
+    "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)),"
+    " CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(128)),"
+    " CAST(ISNULL(SERVERPROPERTY('ProductUpdateLevel'), '') AS nvarchar(128))"
+)
+SQL_MEMORY = (
+    "SET NOCOUNT ON; SELECT (SELECT CAST(value_in_use AS bigint) FROM sys.configurations"
+    " WHERE name = 'max server memory (MB)'),"
+    " (SELECT physical_memory_kb / 1024 FROM sys.dm_os_sys_info)"
+)
+# SQL Server terminating a session, assertions and exception dumps, in 30 days:
+PS_SQL_CRASH_EVENTS = (
+    "@(Get-WinEvent -FilterHashtable @{LogName='Application';"
+    " ProviderName='MSSQLSERVER'; Id=17310,17065,17066,17068;"
+    " StartTime=(Get-Date).AddDays(-30)} -MaxEvents 500"
+    " -ErrorAction SilentlyContinue) | Measure-Object |"
+    " Select-Object Count | ConvertTo-Json -Compress"
+)
+ROOT_SERVER_WAITING = "Waiting for the database"
+BIGFIX_PARTIAL_UPGRADE_RECOVERY = (
+    "The BigFix database looks partially upgraded. Don't reboot or rebuild: with"
+    " the BES services stopped, do this yourself, in order:\n"
+    "  1. Protect the current state: BACKUP DATABASE BFEnterprise and"
+    " BESReporting WITH COPY_ONLY to a new file.\n"
+    "  2. Check integrity: DBCC CHECKDB (BFEnterprise) WITH NO_INFOMSGS,"
+    " ALL_ERRORMSGS, and the same for BESReporting.\n"
+    "  3. On SQL Server 2019 and later: ALTER DATABASE SCOPED CONFIGURATION SET"
+    " TSQL_SCALAR_UDF_INLINING = OFF in both databases.\n"
+    "  4. Turn on BESAdmin logging: in HKLM\\SOFTWARE\\Wow6432Node\\BigFix\\"
+    "Enterprise Server\\BESAdmin, the string value DebugOut ="
+    " C:\\BESAdminDebugOut.txt.\n"
+    "  5. From an elevated prompt in the BES Server folder, re-run the installer's"
+    ' upgrade (start /wait gives its real exit code): start /wait ""'
+    " BESAdmin.exe /silentupgrade /lang:ENU /dsn:enterprise_setup"
+    ' /dbName:"BFEnterprise" /mastheadLocation:"<BES Server folder>\\'
+    'ActionSite.afxm" /sitePvkLocation:""\n'
+    "  6. Start BESRootServer first and check BESRelay.log says Successfully"
+    " connected to database, then FillDB, GatherDB and BESWebReportsServer."
+)
+
+
+def fetch_root_page(timeout: float = 15) -> str:
+    """The root server's page on this computer, to tell it's serving."""
+    # localhost only, whose certificate is the deployment's own, unverifiable here:
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(  # nosec B310
+        "https://localhost:52311/", timeout=timeout, context=context
+    ) as response:
+        return response.read(65536).decode("utf-8", errors="replace")
+
+
+def _verify_bigfix_db(ctx, _argument: str) -> tuple:
+    """After a BigFix upgrade: the database finished upgrading, and the root
+    server is serving rather than waiting for it.
+
+    Only read: a partial upgrade is reported with what to do, never fixed here.
+    """
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_UPGRADE_FLAG)
+    flag = rows[0][0] if rows and rows[0] else None
+    if flag is not None and str(flag).strip() == "0":
+        return (
+            False,
+            "the PreviousUpgradeNotCompleted flag is still set in BFEnterprise.\n"
+            + BIGFIX_PARTIAL_UPGRADE_RECOVERY,
+        )
+    try:
+        page = fetch_root_page()
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        return None, f"couldn't check the root server's page: {err}"
+    if ROOT_SERVER_WAITING.lower() in page.lower():
+        return (
+            False,
+            "the root server is waiting for the database.\n"
+            + BIGFIX_PARTIAL_UPGRADE_RECOVERY,
+        )
+    return True, "the database upgrade finished and the root server is serving"
+
+
+def _ask_to_go_on(ctx, problem: str) -> None:
+    """Stop before the BigFix upgrade, unless the operator agrees to go on."""
+    print(f"WARNING: {problem}")
+    if ctx.dry_run:
+        return
+    if not ctx.confirm("Go on with the BigFix upgrade anyway?", default="no"):
+        raise SystemExit(f"{problem}. Fix it, then rerun to continue at this step")
+
+
+def _action_check_sql_patch(ctx: WalkthroughContext) -> None:
+    """Before a BigFix upgrade: SQL Server isn't on RTM without any CU."""
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_PATCH_LEVEL)
+    version, level, update = (
+        (list(rows[0]) + ["", "", ""])[:3] if rows else ("", "", "")
+    )
+    name = sql_major_from_version(version) or version
+    print(
+        f"SQL Server {name} {version}, {level}"
+        + (f" {update}" if update else ", no Cumulative Update")
+    )
+    major = version_tuple(str(version))[:1] if version else ()
+    # from 2016 SQL Server is serviced by Cumulative Updates, not service packs:
+    if major and major[0] >= 13 and str(level).upper() == "RTM" and not update:
+        _ask_to_go_on(
+            ctx,
+            f"SQL Server {name} is on RTM with no Cumulative Update. RTM builds have"
+            " known crashes fixed in early CUs, one left a BigFix upgrade partially"
+            " done: install the latest Cumulative Update first",
+        )
+        return
+    print(
+        "OK. Check it's the latest Cumulative Update for this SQL Server before"
+        " upgrading BigFix."
+    )
+
+
+def _action_check_sql_health(ctx: WalkthroughContext) -> None:
+    """Before a BigFix upgrade: SQL Server hasn't been crashing lately."""
+    found = _probe(ctx.host.powershell_json, PS_SQL_CRASH_EVENTS)
+    count = int((found or {}).get("Count") or 0) if isinstance(found, dict) else 0
+    if count:
+        _ask_to_go_on(
+            ctx,
+            f"SQL Server logged {count} terminated sessions, assertions or"
+            " exception dumps (events 17310, 17065, 17066, 17068) in 30 days."
+            " Look at its ERRORLOG and SQLDump files first",
+        )
+        return
+    print("OK, no SQL Server crashes in the Application log in 30 days")
+
+
+def _action_checkdb(ctx: WalkthroughContext) -> None:
+    """Optional: DBCC CHECKDB on the BigFix databases, read-only, can be long."""
+    if not ctx.confirm(
+        "Run DBCC CHECKDB on BFEnterprise and BESReporting first? It only reads,"
+        " and can take 20 minutes or more on a large database",
+        default="no",
+    ):
+        print("CHECKDB skipped")
+        return
+    for name in BIGFIX_DATABASES:
+        # the name is one of BIGFIX_DATABASES:
+        ctx.sql(f"DBCC CHECKDB ([{name}]) WITH NO_INFOMSGS, ALL_ERRORMSGS")
+    print("CHECKDB finished: any errors are printed above")
+
+
+def _action_sql_memory_note(ctx: WalkthroughContext) -> None:
+    """A note when SQL Server's memory cap is far below the computer's."""
+    rows = _probe(ctx.host.sqlcmd, ctx.sql_server(), SQL_MEMORY)
+    try:
+        cap, total = (int(str(v).strip()) for v in rows[0][:2])
+    except (TypeError, ValueError, IndexError):
+        print("NOTE: couldn't read SQL Server's max server memory")
+        return
+    if cap >= 2**31 - 1:
+        print(f"SQL Server max server memory is unlimited, on {total} MB")
+    elif total and cap < total * 0.4:
+        print(
+            f"NOTE: SQL Server max server memory is {cap} MB of this computer's"
+            f" {total} MB. A low cap was a contributing condition in a failed BigFix"
+            " upgrade: consider raising it, leaving room for Windows and BigFix"
+        )
+    else:
+        print(f"SQL Server max server memory is {cap} MB of {total} MB")
+
+
+def _action_check_web_reports(ctx: WalkthroughContext) -> None:
+    """After a BigFix upgrade: Web Reports is running, and a person logs in."""
+    services = _dicts(_probe(ctx.host.powershell_json, PS_SERVICES))
+    found = [s for s in services if s.get("Name") == "BESWebReportsServer"]
+    if not found:
+        print("NOTE: no BESWebReportsServer service on this server")
+    elif str(found[0].get("State")) != "Running":
+        print(f"WARNING: BESWebReportsServer is {found[0].get('State')}, not Running")
+    else:
+        print("OK, BESWebReportsServer is running")
+    print(
+        "Please log in to Web Reports too: its database upgrade runs against"
+        " BFEnterprise, and should be re-run if anything looks off."
+    )
+
+
 def _action_check_compat(ctx: WalkthroughContext, level: str) -> None:
     """Stop before the BigFix upgrade while a database is below its level."""
     needed = _compat_level(level)
@@ -3739,6 +4010,14 @@ ACTIONS: Dict[str, Callable[..., None]] = {
     "server_keys": _action_server_keys,
     "restore_notes": _action_restore_notes,
     "verify_backup": _action_verify_backup,
+    "udf_inlining_off": _action_udf_inlining_off,
+    # the same, checked again before a BigFix upgrade:
+    "check_udf_inlining": _action_udf_inlining_off,
+    "check_sql_patch": _action_check_sql_patch,
+    "check_sql_health": _action_check_sql_health,
+    "checkdb": _action_checkdb,
+    "sql_memory_note": _action_sql_memory_note,
+    "check_web_reports": _action_check_web_reports,
     "remote_processes": _action_remote_processes,
     "stop_services": _action_stop_services,
     "start_services": _action_start_services,
@@ -3954,6 +4233,7 @@ VERIFIERS = {
     "verify_service_pack": _verify_service_pack,
     "verify_windows": _verify_windows,
     "verify_bigfix": _verify_bigfix,
+    "verify_bigfix_db": _verify_bigfix_db,
 }
 
 

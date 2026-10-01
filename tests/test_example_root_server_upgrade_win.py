@@ -5426,10 +5426,17 @@ def test_steps_raise_and_check_compat_level(upgrade, compat):
     """
     steps = {s.id: s for s in upgrade.build_steps(real_path(upgrade, compat))}
 
-    assert steps["start_services_1"].actions == ["raise_compat:120", "start_services"]
+    assert steps["start_services_1"].actions == [
+        "raise_compat:120",
+        "udf_inlining_off",
+        "start_services",
+    ]
     assert steps["upgrade_3_bigfix_11_0_6"].actions == ["check_compat:120"]
-    # already raised by then, so no more raising:
-    assert steps["start_services_4"].actions == ["start_services"]
+    # already raised by then, so no more raising, but SQL Server 2025 is new:
+    assert steps["start_services_4"].actions == ["udf_inlining_off", "start_services"]
+    # no SQL Server upgrade before these:
+    assert steps["start_services_2"].actions == ["start_services"]
+    assert steps["start_services_3"].actions == ["start_services"]
 
 
 def test_steps_check_hyperv_host_before_windows_2025(upgrade, compat):
@@ -7904,3 +7911,239 @@ def test_stray_done_doesnt_end_the_session(upgrade):
 
     assert asyncio.run(scenario()) == (False, True)
     assert any("next" in line and "end" in line for line in output)
+
+
+def _udf_host(upgrade, version, values):
+    host = local_host(upgrade)
+    host.sql[upgrade.SQL_PRODUCT_VERSION] = [[version, "RTM"]]
+    host.sql_handler = lambda server, query: []  # the ALTER statements
+    for name, value in values.items():
+        host.sql[upgrade.sql_udf_inlining_query(name)] = (
+            [[str(value)]] if value is not None else []
+        )
+    return host
+
+
+def test_udf_inlining_turned_off_on_sql_2019_and_later(upgrade, tmp_path, capsys):
+    """Test TSQL_SCALAR_UDF_INLINING is turned off in each BigFix database
+    where it's on, after asking, in that database.
+    """
+    host = _udf_host(upgrade, "17.0.1000.7", {"BFEnterprise": 1, "BESReporting": 0})
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    asked = []
+    ctx.ask = lambda prompt, choices, default=None: asked.append(prompt) or "yes"
+
+    upgrade.ACTIONS["udf_inlining_off"](ctx)
+
+    altered = [q for q in host.sql_ran if "SCOPED CONFIGURATION" in q]
+    assert altered == [
+        "USE [BFEnterprise]; ALTER DATABASE SCOPED CONFIGURATION SET"
+        " TSQL_SCALAR_UDF_INLINING = OFF"
+    ]
+    assert len(asked) == 1 and "BFEnterprise" in asked[0]
+    assert "BESReporting: already off" in capsys.readouterr().out
+
+
+def test_udf_inlining_not_changed_when_declined(upgrade, tmp_path):
+    """Test no is respected, and nothing is changed."""
+    host = _udf_host(upgrade, "16.0.1000.6", {"BFEnterprise": 1, "BESReporting": 1})
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.ask = lambda prompt, choices, default=None: "no"
+
+    upgrade.ACTIONS["udf_inlining_off"](ctx)
+
+    assert not [q for q in host.sql_ran if "ALTER" in q]
+
+
+def test_udf_inlining_skipped_before_sql_2019(upgrade, tmp_path, capsys):
+    """Test on SQL Server 2017 and earlier, which don't have the setting,
+    nothing is read or changed.
+    """
+    host = _udf_host(upgrade, "14.0.1000.169", {})
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+
+    upgrade.ACTIONS["udf_inlining_off"](ctx)
+
+    assert "2019" in capsys.readouterr().out
+    assert not [q for q in host.sql_ran if "SCOPED" in q or "scoped" in q]
+
+
+def test_udf_inlining_dry_run_changes_nothing(upgrade, tmp_path, capsys):
+    """Test a dry run says what it would run, without running it."""
+    host = _udf_host(upgrade, "17.0.1000.7", {"BFEnterprise": 1, "BESReporting": 1})
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.args.dry_run = True
+
+    upgrade.ACTIONS["udf_inlining_off"](ctx)
+
+    assert "DRY RUN" in capsys.readouterr().out
+    assert not [q for q in host.sql_ran if "ALTER" in q]
+
+
+# ---- checks around the BigFix upgrade, from the 11.0.7 upgrade incident
+
+
+def test_bigfix_upgrade_gets_checks_before_and_after(upgrade, compat):
+    """Test a BigFix upgrade is preceded by a fresh backup and SQL checks, is
+    checked in the database after done, and Web Reports is checked after.
+    """
+    steps = upgrade.build_steps(real_path(upgrade, compat))
+    ids = [s.id for s in steps]
+    by_id = {s.id: s for s in steps}
+
+    assert ids.index("pre_upgrade_3") == ids.index("upgrade_3_bigfix_11_0_6") - 1
+    assert by_id["pre_upgrade_3"].actions == [
+        "sql_backup",
+        "check_sql_patch",
+        "check_sql_health",
+        "check_udf_inlining",
+        "checkdb",
+        "sql_memory_note",
+    ]
+    assert not by_id["pre_upgrade_3"].manual
+    assert "verify_bigfix_db" in by_id["upgrade_3_bigfix_11_0_6"].verify
+    assert "check_web_reports" in by_id["validate_3"].actions
+    assert "check_web_reports" not in by_id["validate_1"].actions
+    assert "pre_upgrade_1" not in ids  # only before BigFix upgrades
+    assert "Cumulative Update" in by_id["upgrade_1_mssql_2017"].todo
+
+
+def _db_ctx(upgrade, tmp_path, flag_rows, page="<html>ok</html>"):
+    host = local_host(upgrade)
+    host.sql[upgrade.SQL_UPGRADE_FLAG] = flag_rows
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    return ctx, page
+
+
+@pytest.mark.parametrize(
+    "rows, page, passed",
+    [
+        ([["1"]], "<html>BigFix</html>", True),
+        ([], "<html>BigFix</html>", True),
+        ([["0"]], "<html>BigFix</html>", False),
+        (
+            [["1"]],
+            "Server is starting. Waiting for the database to become available",
+            False,
+        ),
+    ],
+)
+def test_bigfix_db_upgrade_checked(upgrade, tmp_path, monkeypatch, rows, page, passed):
+    """Test done on a BigFix upgrade checks the database finished upgrading:
+    the PreviousUpgradeNotCompleted flag is cleared and the root server isn't.
+
+    waiting for the database.
+    """
+    ctx, _ = _db_ctx(upgrade, tmp_path, rows)
+    monkeypatch.setattr(upgrade, "fetch_root_page", lambda: page)
+
+    ok, message = upgrade.VERIFIERS["verify_bigfix_db"](ctx, "")
+
+    assert ok is passed
+    if not passed:
+        # what a person does to finish it, never run by the script:
+        assert "start /wait" in message and "/silentupgrade" in message
+        assert "CHECKDB" in message and "COPY_ONLY" in message
+
+
+def test_bigfix_db_check_never_runs_besadmin(upgrade, tmp_path, monkeypatch):
+    """Test a partially upgraded database is only reported, never fixed."""
+    ctx, _ = _db_ctx(upgrade, tmp_path, [["0"]])
+    monkeypatch.setattr(upgrade, "fetch_root_page", lambda: "ok")
+
+    upgrade.VERIFIERS["verify_bigfix_db"](ctx, "")
+
+    assert not [c for c in ctx.host.ran if "BESAdmin" in " ".join(c)]
+    assert not [q for q in ctx.host.sql_ran if "UPDATE" in q.upper()]
+
+
+def _sql_ctx(upgrade, tmp_path, version, level, update, answer="no"):
+    host = local_host(upgrade)
+    host.sql[upgrade.SQL_PATCH_LEVEL] = [[version, level, update]]
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.ask = lambda prompt, choices, default=None: answer
+    return ctx
+
+
+def test_sql_rtm_without_cu_stops_unless_agreed(upgrade, tmp_path, capsys):
+    """Test SQL Server 2016 and later on RTM with no Cumulative Update is
+    warned about, and the BigFix upgrade only goes on if agreed.
+    """
+    ctx = _sql_ctx(upgrade, tmp_path / "declined", "15.0.2000.5", "RTM", "")
+    with pytest.raises(SystemExit) as stopped:
+        upgrade.ACTIONS["check_sql_patch"](ctx)
+    assert "Cumulative Update" in str(stopped.value)
+
+    ctx = _sql_ctx(upgrade, tmp_path / "agreed", "15.0.2000.5", "RTM", "", answer="yes")
+    upgrade.ACTIONS["check_sql_patch"](ctx)
+    assert "WARNING" in capsys.readouterr().out
+
+
+def test_sql_with_cu_passes(upgrade, tmp_path, capsys):
+    """Test a patched SQL Server passes, and the latest CU is still suggested."""
+    ctx = _sql_ctx(upgrade, tmp_path, "14.0.3456.2", "RTM", "CU31")
+    upgrade.ACTIONS["check_sql_patch"](ctx)
+    out = capsys.readouterr().out
+    assert "CU31" in out and "latest" in out
+
+
+def test_sql_crashes_warned_before_bigfix_upgrade(upgrade, tmp_path, capsys):
+    """Test recent SQL Server access violations and dumps are warned about,
+    and stop the BigFix upgrade unless agreed.
+    """
+    host = local_host(upgrade)
+    host.powershell[upgrade.PS_SQL_CRASH_EVENTS] = {"Count": 3}
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.ask = lambda prompt, choices, default=None: "no"
+    with pytest.raises(SystemExit):
+        upgrade.ACTIONS["check_sql_health"](ctx)
+
+    host.powershell[upgrade.PS_SQL_CRASH_EVENTS] = {"Count": 0}
+    upgrade.ACTIONS["check_sql_health"](ctx)
+    assert "no SQL Server crashes" in capsys.readouterr().out
+
+
+def test_checkdb_is_optional(upgrade, tmp_path):
+    """Test CHECKDB only runs when asked for, on both databases."""
+    host = local_host(upgrade)
+    host.sql_handler = lambda server, query: []
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.ask = lambda prompt, choices, default=None: default or "no"
+    upgrade.ACTIONS["checkdb"](ctx)
+    assert not [q for q in host.sql_ran if "CHECKDB" in q]
+
+    ctx.ask = lambda prompt, choices, default=None: "yes"
+    upgrade.ACTIONS["checkdb"](ctx)
+    ran = [q for q in host.sql_ran if "CHECKDB" in q]
+    assert len(ran) == 2 and "[BFEnterprise]" in ran[0] and "[BESReporting]" in ran[1]
+
+
+def test_low_sql_memory_noted(upgrade, tmp_path, capsys):
+    """Test max server memory much below the computer's memory is noted,
+    and nothing is changed.
+    """
+    host = local_host(upgrade)
+    host.sql[upgrade.SQL_MEMORY] = [["4096", "20480"]]
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+
+    upgrade.ACTIONS["sql_memory_note"](ctx)
+
+    assert "4096 MB" in capsys.readouterr().out
+    assert not [q for q in host.sql_ran if "sp_configure" in q]
+
+
+def test_web_reports_checked_after_bigfix_upgrade(upgrade, tmp_path, capsys):
+    """Test validation warns when Web Reports isn't running, and asks for a
+    login check either way.
+    """
+    host = local_host(upgrade)
+    host.powershell[upgrade.PS_SERVICES] = [
+        {"Name": "BESWebReportsServer", "State": "Stopped", "StartMode": "Manual"}
+    ]
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+
+    upgrade.ACTIONS["check_web_reports"](ctx)
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "BESWebReportsServer" in out
+    assert "log in to Web Reports" in out
