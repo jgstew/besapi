@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.30"
+__version__ = "0.2.33"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -258,6 +258,22 @@ SQL_SERVER_PROPERTIES = (
     " CAST(SERVERPROPERTY('Collation') AS nvarchar(128)),"
     " IS_SRVROLEMEMBER('sysadmin')"
 )
+SQL_PRODUCT_VERSION = (
+    "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)),"
+    " CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(128))"
+)
+# the highest database compatibility level each SQL Server version takes:
+MAX_COMPAT_LEVEL = {
+    "2008": 100,
+    "2008 R2": 100,
+    "2012": 110,
+    "2014": 120,
+    "2016": 130,
+    "2017": 140,
+    "2019": 150,
+    "2022": 160,
+    "2025": 170,
+}
 SQL_PRODUCT_LEVEL = (
     "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(128))"
 )
@@ -578,7 +594,8 @@ def _step_details(compat: dict, current: dict, path: List[tuple]) -> List[dict]:
                 elif not level_ok:
                     prerequisites.append(
                         f"Apply SQL Server {before['mssql']} {min_level} or later first"
-                        f" (currently {mssql_level})"
+                        f" (it was at {mssql_level} when this plan was made, the step"
+                        " checks it again)"
                     )
             mssql_level = None
             notes.extend(compat["mssql_upgrade_paths"].get("notes", []))
@@ -1905,6 +1922,13 @@ class Step:
     title: str
     instructions: str
     actions: List[str] = dataclasses.field(default_factory=list)
+    # True when a person has to change something, who then answers done, else
+    # the script did it and the operator reviews it and answers next:
+    manual: bool = False
+    # what the person has to do, said again just before the question:
+    todo: str = ""
+    # checks run when done is answered, by name from VERIFIERS:
+    verify: List[str] = dataclasses.field(default_factory=list)
 
 
 def _id_part(value: str) -> str:
@@ -1955,6 +1979,39 @@ def _upgrade_checks(step: dict, service_pack: Optional[dict]) -> List[str]:
     return checks
 
 
+def _upgrade_todo(step: dict, local_sql: bool) -> str:
+    """What the operator does for an upgrade step, said just before asking."""
+    component, target = step["component"], step["to"]
+    if component == "mssql":
+        where = "on this server" if local_sql else "on the SQL server host"
+        return (
+            f"Run SQL Server {target} setup.exe {where} as Administrator, choose"
+            " Upgrade from a previous version, pick the instance BigFix uses, and"
+            " let it finish, rebooting if it asks. Then come back here."
+        )
+    if component == "windows":
+        return (
+            f"Mount the Windows Server {target} media, run setup.exe, keep files and"
+            " apps and the same edition, and let it reboot. Then rerun this script"
+            " and answer done."
+        )
+    return (
+        f"Upgrade the BigFix server to {target} or later, with its installer or"
+        " the upgrade Fixlet. Then come back here."
+    )
+
+
+def _upgrade_verify(step: dict, local_sql: bool) -> List[str]:
+    """Checks run when done is answered for an upgrade step."""
+    component, target = step["component"], step["to"]
+    if component == "mssql":
+        # a remote SQL Server is still reached by its name from this server:
+        return [f"verify_mssql:{target}"]
+    if component == "windows":
+        return [f"verify_windows:{target}"]
+    return [f"verify_bigfix:{target}"]
+
+
 def _service_pack_instructions(service_pack: dict) -> str:
     version, level = service_pack["mssql"], service_pack["level"]
     return (
@@ -1977,7 +2034,7 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
     backup_actions += ["folder_backup", "db_info"]
     if local_sql:
         backup_actions.append("sql_backup")
-    backup_actions += ["server_keys", "restore_notes"]
+    backup_actions += ["server_keys", "restore_notes", "verify_backup"]
 
     steps = [
         Step(
@@ -2000,8 +2057,9 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
             "Following HCL's server backup: registry, keys, masthead, the server's"
             " own client identity, server folders, DB info, COPY_ONLY database"
             " backups, and optionally the decrypted server keys. RESTORE_NOTES.txt"
-            " in the backup folder says how to restore. Copy the backups off this"
-            " server, and keep license.pvk offline.",
+            " in the backup folder says how to restore. The backup is then checked"
+            " against what was recorded, before you look at it too. Copy the"
+            " backups off this server, and keep license.pvk offline.",
             backup_actions,
         ),
     ]
@@ -2038,6 +2096,12 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     f"Apply SQL Server {service_pack['mssql']}"
                     f" {service_pack['level']}",
                     _service_pack_instructions(service_pack),
+                    manual=True,
+                    todo=f"Run the SQL Server {service_pack['mssql']}"
+                    f" {service_pack['level']} setup on this server as Administrator,"
+                    " pick the instance BigFix uses, and reboot if it asks. Then come"
+                    " back here.",
+                    verify=[f"verify_service_pack:{service_pack['level']}"],
                 )
             )
         steps.extend(
@@ -2047,6 +2111,9 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     f"Upgrade {step['component']} to {step['to']}",
                     _upgrade_instructions(step, local_sql),
                     _upgrade_checks(step, service_pack),
+                    manual=True,
+                    todo=_upgrade_todo(step, local_sql),
+                    verify=_upgrade_verify(step, local_sql),
                 ),
                 Step(
                     f"start_services_{number}",
@@ -2089,6 +2156,9 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                 "After an agreed soak period, delete the VM snapshots, and securely"
                 " remove old backups that are no longer needed, especially the"
                 " decrypted server keys and client KeyStorage.",
+                manual=True,
+                todo="After the soak period, delete the VM snapshots and the old"
+                " backups you no longer need. quit leaves this for later.",
             ),
         ]
     )
@@ -2497,6 +2567,8 @@ class WalkthroughContext:
     share_connected: bool = False
     # the multi-node session this walkthrough runs in, None on its own:
     session: Any = None
+    # set by an action when the operator has to do the step after all:
+    manual_needed: bool = False
 
     def confirm(self, prompt: str, default: str = "yes") -> bool:
         """Ask the operator to confirm, yes or no, Enter takes the default."""
@@ -3066,6 +3138,272 @@ def _action_server_keys(ctx: WalkthroughContext) -> None:
     )
 
 
+BACKUP_MANIFEST = "backup_manifest.json"
+SAFE_FOLDER_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _relative(path: Any, run_dir: str) -> Optional[str]:
+    """Path inside run_dir as a relative path with "/", or None if outside."""
+    if not path or not _is_under(str(path), run_dir):
+        return None
+    full = str(path).replace("\\", "/").rstrip("/")
+    base = run_dir.replace("\\", "/").rstrip("/")
+    return full[len(base) :].lstrip("/") or "."
+
+
+def write_backup_manifest(state: dict, run_dir: str, databases: List[str]) -> dict:
+    """Write what this backup wrote, as BACKUP_MANIFEST in its folder.
+
+    Paths are relative to the folder, so the share's own host can check the
+    backup on its local disk. Only this run's records go in: the state keeps
+    earlier backups' too.
+    """
+    entries = []
+    for record in state.get("backups") or []:
+        relative = _relative(record.get("file"), run_dir)
+        if relative:
+            entries.append(
+                {
+                    "database": record.get("database"),
+                    "file": relative,
+                    "sha256": record.get("sha256"),
+                }
+            )
+    server_files = {}
+    for label, record in (state.get("server_files") or {}).items():
+        if record.get("skipped") or record.get("missing"):
+            server_files[label] = {
+                k: record.get(k) for k in ("skipped", "missing") if record.get(k)
+            }
+            continue
+        relative = _relative(record.get("copied_to"), run_dir)
+        if relative:
+            server_files[label] = {
+                "path": relative,
+                "files": record.get("files"),
+                "bytes": record.get("bytes"),
+            }
+    masthead = _relative((state.get("masthead_copy") or {}).get("to"), run_dir)
+    files = {"masthead": masthead or "key_files/masthead.afxm"}
+    for target in state.get("key_file_copies") or {}:
+        relative = _relative(target, run_dir)
+        if relative:
+            files[relative.rsplit("/", 1)[-1]] = relative
+    files.update(
+        {
+            "registry export": "bigfix_registry.reg",
+            "client ComputerID": "client_data/ComputerID.txt",
+            "restore notes": "RESTORE_NOTES.txt",
+        }
+    )
+    manifest = {
+        "written": utc_now().isoformat(),
+        "expected_databases": list(databases),
+        "databases": entries,
+        "server_files": server_files,
+        "files": files,
+        "db_info": "db_info.json",
+    }
+    with open(os.path.join(run_dir, BACKUP_MANIFEST), "w", encoding="utf-8") as out:
+        json.dump(manifest, out, indent=2)
+    return manifest
+
+
+def _inside(folder: str, relative: Any) -> Optional[str]:
+    """The local path of a manifest entry, or None if it leaves the folder."""
+    text = str(relative or "")
+    parts = text.replace("\\", "/").split("/")
+    if (
+        not text
+        or text.startswith(("/", "\\"))
+        or ":" in text
+        or any(part in ("..", "") for part in parts)
+    ):
+        return None
+    return os.path.join(folder, *parts)
+
+
+def check_backup_folder(folder: str, hash_fn=None) -> List[tuple]:
+    """Check a backup folder on this computer's disk against its manifest.
+
+    Returns (level, message) pairs, level "ok", "warn" or "FAIL". Nothing is
+    read outside the folder, and nothing is changed.
+    """
+    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    hash_fn = hash_fn or sha256_file
+    try:
+        with open(os.path.join(folder, BACKUP_MANIFEST), encoding="utf-8") as saved:
+            manifest = json.load(saved)
+    except (OSError, ValueError) as err:
+        return [("FAIL", f"no readable {BACKUP_MANIFEST} in {folder}: {err}")]
+    results: List[tuple] = []
+
+    def local(label: str, relative: Any) -> Optional[str]:
+        path = _inside(folder, relative)
+        if path is None:
+            results.append(("FAIL", f"{label}: {relative!r} is outside the backup"))
+        return path
+
+    def present(label: str, relative: Any) -> None:
+        path = local(label, relative)
+        if path is None:
+            return
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            results.append(("ok", f"{label}: {relative}"))
+        else:
+            results.append(("FAIL", f"{label} is missing or empty: {relative}"))
+
+    databases = manifest.get("databases") or []
+    for name in manifest.get("expected_databases") or []:
+        found = [d for d in databases if d.get("database") == name]
+        if not found:
+            results.append(("FAIL", f"no {name} backup in this folder"))
+            continue
+        entry = found[-1]
+        path = local(name, entry.get("file"))
+        if path is None:
+            continue
+        if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+            results.append(
+                ("FAIL", f"{name} backup is missing or empty: {entry['file']}")
+            )
+            continue
+        size = os.path.getsize(path) / 1024**3
+        if not entry.get("sha256"):
+            results.append(("ok", f"{name}: {size:.1f} GB, written there directly"))
+        elif hash_fn(path) == entry["sha256"]:
+            results.append(
+                ("ok", f"{name}: {size:.1f} GB, SHA-256 matches the copy taken")
+            )
+        else:
+            results.append(
+                ("FAIL", f"{name}: {entry['file']} doesn't match its SHA-256")
+            )
+    if databases:
+        results.append(
+            (
+                "ok",
+                "SQL Server checked each backup with RESTORE VERIFYONLY WITH"
+                " CHECKSUM when it was taken",
+            )
+        )
+
+    for label, entry in sorted((manifest.get("server_files") or {}).items()):
+        if entry.get("skipped"):
+            results.append(("warn", f"{label}: left out, as answered"))
+            continue
+        if entry.get("missing"):
+            results.append(("warn", f"{label}: not on the server"))
+            continue
+        path = local(label, entry.get("path"))
+        if path is None:
+            continue
+        if os.path.isfile(path):
+            files, size = 1, os.path.getsize(path)
+        else:
+            files, size = _tree_size(path) if os.path.isdir(path) else (0, 0)
+        if (files, size) == (entry.get("files"), entry.get("bytes")):
+            results.append(("ok", f"{label}: {files} files, {size / 1024**2:.1f} MB"))
+        else:
+            results.append(
+                (
+                    "FAIL",
+                    f"{label}: {files} files and {size} bytes in the backup,"
+                    f" {entry.get('files')} files and {entry.get('bytes')} bytes"
+                    " were copied",
+                )
+            )
+
+    for label, relative in (manifest.get("files") or {}).items():
+        present(label, relative)
+    db_info = local("db_info.json", manifest.get("db_info") or "db_info.json")
+    if db_info:
+        try:
+            with open(db_info, encoding="utf-8") as saved:
+                json.load(saved)
+            results.append(("ok", "db_info.json reads as JSON"))
+        except (OSError, ValueError) as err:
+            results.append(("FAIL", f"db_info.json can't be read: {err}"))
+    return results
+
+
+def share_host_backup_check(share_folder: str, params: dict) -> dict:
+    """On the computer hosting the share: check one backup folder in it, on
+    the local disk rather than through the share.
+
+    Only a plain folder name in the share is accepted.
+    """
+    name = str(params.get("folder") or "")
+    if not SAFE_FOLDER_NAME.match(name) or name in (".", ".."):
+        return {"ok": False, "error": f"not a backup folder name: {name!r}"}
+    folder = os.path.join(share_folder, name)
+    if not os.path.isdir(folder):
+        return {"ok": False, "error": f"{name} isn't in the share's folder"}
+    return {
+        "ok": True,
+        "checked_by": socket.gethostname(),
+        "folder": folder,
+        "results": [list(r) for r in check_backup_folder(folder)],
+    }
+
+
+def _action_verify_backup(ctx: WalkthroughContext) -> None:
+    """Write the backup's manifest, and have it checked where the share's
+    files are, before the operator looks too.
+    """
+    if ctx.dry_run:
+        print(
+            f"DRY RUN, would write {BACKUP_MANIFEST} and have the share's host"
+            " check the backup against it"
+        )
+        return
+    run_dir = ctx.backup_dir()
+    databases = (
+        list(_get(ctx.state, "baseline", "sql", "databases") or {})
+        if ctx.state.get("local_sql", True)
+        else []
+    )
+    databases = [name for name in BIGFIX_DATABASES if name in databases]
+    write_backup_manifest(ctx.state, run_dir, databases)
+    reply: dict = {"ok": False, "error": "not in a share session"}
+    if ctx.session is not None and hasattr(ctx.session, "remote_action"):
+        print("asking the share's host to check the backup on its own disk")
+        reply = ctx.session.remote_action(
+            "share_host",
+            "verify_backup",
+            {"folder": os.path.basename(run_dir.rstrip("\\/"))},
+            timeout=3600,
+        )
+    if reply.get("ok"):
+        where = f"{reply.get('checked_by')}, {reply.get('folder')}"
+        results = [tuple(r) for r in reply.get("results") or []]
+    else:
+        print(f"NOTE: {reply.get('error')}, checking it from here instead")
+        where = run_dir
+        results = check_backup_folder(run_dir)
+    print(f"backup check, on {where}:")
+    for level, message in results:
+        print(f"  [{level}] {message}")
+    failed = [m for level, m in results if level == "FAIL"]
+    warned = [m for level, m in results if level == "warn"]
+    print(
+        f"backup check: {len(results) - len(failed) - len(warned)} ok,"
+        f" {len(warned)} notes, {len(failed)} problems"
+        + (". Fix the problems before going on." if failed else "")
+    )
+    ctx.state["backup_check"] = {
+        "run_dir": run_dir,
+        "checked_on": where,
+        "at": utc_now().isoformat(),
+        "problems": failed,
+        "notes": warned,
+    }
+    print(
+        "Please also look in the backup folder yourself, and copy it somewhere"
+        " safe, before you say the step is done."
+    )
+
+
 def _action_restore_notes(ctx: WalkthroughContext) -> None:
     """Write RESTORE_NOTES.txt: what was backed up, and HCL's recovery steps.
 
@@ -3210,6 +3548,18 @@ def _action_raise_compat(ctx: WalkthroughContext, level: str) -> None:
     --db-compat-level picks another level.
     """
     target = _compat_level(getattr(ctx.args, "db_compat_level", None) or level)
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_PRODUCT_VERSION)
+    version = rows[0][0] if rows and rows[0] else None
+    running = sql_major_from_version(version)
+    highest = MAX_COMPAT_LEVEL.get(running or "")
+    if highest is not None and target > highest:
+        raise SystemExit(
+            f"SQL Server here is {running} ({version}), which only takes"
+            f" compatibility levels up to {highest}, so it can't be raised to"
+            f" {target}. The SQL Server upgrade before this step doesn't look done:"
+            " finish it, then rerun this script with --step and that upgrade"
+            " step's id (like upgrade_1_mssql_2017) to check it and go on."
+        )
     levels = compat_levels(ctx.host, ctx.sql_server())
     print(
         "database compatibility levels: "
@@ -3312,6 +3662,7 @@ def _action_checkpoint(ctx: WalkthroughContext, name: str) -> None:
         return
     if not result.get("ok"):
         print(f"NOTE: {result.get('error')}, take the VM snapshot yourself")
+        ctx.manual_needed = True
         return
     ctx.state.setdefault("checkpoints", []).append(
         {
@@ -3387,6 +3738,7 @@ ACTIONS: Dict[str, Callable[..., None]] = {
     "sql_backup": _action_sql_backup,
     "server_keys": _action_server_keys,
     "restore_notes": _action_restore_notes,
+    "verify_backup": _action_verify_backup,
     "remote_processes": _action_remote_processes,
     "stop_services": _action_stop_services,
     "start_services": _action_start_services,
@@ -3416,7 +3768,9 @@ DEFAULT_DRY_RUN_FILE = "bigfix_root_server_upgrade_win.dryrun.txt"
 
 def _auto_answer(prompt: str, choices: List[str], default: Optional[str] = None) -> str:
     """Answer a question without asking, for dry runs: the default, or go ahead."""
-    answer = next((c for c in (default, "done", "yes") if c in choices), choices[0])
+    answer = next(
+        (c for c in (default, "done", "next", "yes") if c in choices), choices[0]
+    )
     print(f"{prompt} [{'/'.join(choices)}]: {answer} (dry run)")
     return answer
 
@@ -3544,6 +3898,138 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> i
     return _walk_steps(args, steps, state, ctx, ask, session, persist)
 
 
+# a manual step answered done sooner than this is asked about first:
+FAST_DONE_SECONDS = 30
+MAX_VERIFY_TRIES = 3
+_monotonic = time.monotonic
+
+
+def _windows_order(version: str) -> tuple:
+    """Sort key for Windows Server versions like `2012 R2`."""
+    match = re.match(r"(\d{4})(\s*R2)?", str(version or ""))
+    return (int(match.group(1)), bool(match.group(2))) if match else (0, False)
+
+
+def _verify_mssql(ctx, target: str) -> tuple:
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_PRODUCT_VERSION)
+    version = rows[0][0] if rows and rows[0] else None
+    name = sql_major_from_version(version)
+    if name is None:
+        return None, f"couldn't check: SQL Server reported {version!r}"
+    order = list(MAX_COMPAT_LEVEL)
+    if name in order and target in order and order.index(name) >= order.index(target):
+        return True, f"SQL Server reports {version} ({name})"
+    return False, f"SQL Server still reports {version} ({name}), not {target}"
+
+
+def _verify_service_pack(ctx, level: str) -> tuple:
+    rows = ctx.host.sqlcmd(ctx.sql_server(), SQL_PRODUCT_VERSION)
+    found = rows[0][1] if rows and len(rows[0]) > 1 else None
+    if servicing_level_at_least(found, level):
+        return True, f"SQL Server reports {found}"
+    return False, f"SQL Server still reports {found}, not {level}"
+
+
+def _verify_windows(ctx, target: str) -> tuple:
+    name = _get(_windows_info(ctx.host), "ProductName")
+    version = windows_server_version(name)
+    if not version:
+        return None, f"couldn't check: Windows reports {name!r}"
+    if _windows_order(version) >= _windows_order(target):
+        return True, f"Windows reports {name}"
+    return False, f"Windows still reports {name}, not Windows Server {target}"
+
+
+def _verify_bigfix(ctx, target: str) -> tuple:
+    version = (ctx.host.reg_values(BIGFIX_SERVER_KEY) or {}).get("Version")
+    if not version:
+        return None, "couldn't check: the BigFix server version isn't in the registry"
+    if version_tuple(str(version)) >= version_tuple(target):
+        return True, f"the BigFix server reports {version}"
+    return False, f"the BigFix server still reports {version}, not {target} or later"
+
+
+VERIFIERS = {
+    "verify_mssql": _verify_mssql,
+    "verify_service_pack": _verify_service_pack,
+    "verify_windows": _verify_windows,
+    "verify_bigfix": _verify_bigfix,
+}
+
+
+def verify_step(ctx, step: Step) -> List[tuple]:
+    """Run a step's checks: (passed, message), passed None when unknown."""
+    results = []
+    for check in step.verify:
+        name, _sep, argument = check.partition(":")
+        try:
+            results.append(VERIFIERS[name](ctx, argument))
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            results.append((None, f"couldn't check: {err}"))
+    return results
+
+
+def _what_to_do(step: Step, manual: bool) -> str:
+    """The operator's part of a step, said just before asking."""
+    if manual:
+        return (
+            f"YOUR TURN: {step.todo or step.instructions}\n"
+            "When you've finished, type done. skip leaves this step out, quit stops"
+            " here and keeps your place."
+        )
+    return (
+        "Nothing for you to change in this step: review the output above, then"
+        " type next. skip leaves it out, quit stops here and keeps your place."
+    )
+
+
+def _confirm_step(step: Step, ctx, ask, dry_run: bool) -> Optional[str]:
+    """Ask until the step is answered: done, next or skip, or None to stop.
+
+    done is checked against the step's checks, and a very quick done is asked
+    about first.
+    """
+    manual = step.manual or bool(getattr(ctx, "manual_needed", False))
+    print(_what_to_do(step, manual))
+    choices = ["done", "skip", "quit"] if manual else ["next", "skip", "quit"]
+    prompt = "Have you finished this step?" if manual else "Go on to the next step?"
+    failures = 0
+    while True:
+        asked = _monotonic()
+        answer = ask(prompt, choices)
+        if answer == "quit":
+            return None
+        if answer != "done" or dry_run:
+            return answer
+        if (
+            FAST_DONE_SECONDS
+            and _monotonic() - asked < FAST_DONE_SECONDS
+            and ask(
+                f"That was quick: have you really finished {step.title}?",
+                ["yes", "no"],
+                "yes",
+            )
+            == "no"
+        ):
+            continue
+        results = verify_step(ctx, step)
+        for passed, message in results:
+            print(
+                ("OK, " if passed else "NOTE: " if passed is None else "NOT YET: ")
+                + message
+            )
+        if not any(passed is False for passed, _ in results):
+            return answer
+        failures += 1
+        if failures >= MAX_VERIFY_TRIES:
+            print(
+                f"Stopping: {step.title} still doesn't check out. Finish it, then"
+                " rerun this script to continue at this step."
+            )
+            return "stop"
+        print(f"It doesn't look finished yet. {step.todo or step.instructions}")
+
+
 def _walk_steps(
     args, steps: List[Step], state: dict, ctx, ask, session, persist
 ) -> int:
@@ -3574,6 +4060,8 @@ def _walk_steps(
         if session:
             session.wait_if_halted()
         print(f"\n===== {step.id}: {step.title} =====\n{step.instructions}\n")
+        # an action sets it when the operator has to do the step after all:
+        ctx.manual_needed = False
         for action in step.actions:
             if session:
                 # a halt waits here, never in the middle of an action:
@@ -3586,9 +4074,11 @@ def _walk_steps(
             else:
                 ACTIONS[name](ctx)
         persist()
-        answer = ask("Is this step complete?", ["done", "skip", "quit"])
-        if answer == "quit":
+        answer = _confirm_step(step, ctx, ask, bool(args.dry_run))
+        if answer is None:
             return 0
+        if answer == "stop":
+            return 1
         mark_step_done(state, step.id)
         if answer == "skip":
             state.setdefault("skipped", []).append(step.id)
@@ -3677,6 +4167,11 @@ def build_hyperv_steps(plan: dict) -> List[Step]:
                     " same edition and Desktop Experience. The Hyper-V role and VMs"
                     " stay. Rerun this script after the reboots. Never run"
                     " Update-VMVersion as part of this, it's one-way.",
+                    manual=True,
+                    todo=f"Run Windows Server {version} setup.exe on this host, keep"
+                    " files and apps, and let it reboot. Then rerun this script here"
+                    " and answer done.",
+                    verify=[f"verify_windows:{version}"],
                 )
             )
         steps.append(
@@ -5986,7 +6481,9 @@ def run_node_diagnostics(
     return {name: _probe(func) for name, func in checks.items()}
 
 
-def run_node_action(host, roles: List[str], action: str, params: dict) -> dict:
+def run_node_action(
+    host, roles: List[str], action: str, params: dict, share_folder=None
+) -> dict:
     """An action another node asked this one for, like a Hyper-V checkpoint.
 
     Checkpoints are only ever made, never deleted, by this script.
@@ -6016,6 +6513,8 @@ def run_node_action(host, roles: List[str], action: str, params: dict) -> dict:
                 }
             host.run(_powershell(script))
             return {"ok": True, "vm": vm, "checkpoint": name}
+        if action == "verify_backup" and "share_owner" in roles and share_folder:
+            return share_host_backup_check(share_folder, params)
         if action == "host_version" and "hyperv" in roles:
             windows = windows_server_version(_get(_windows_info(host), "ProductName"))
             return {"ok": bool(windows), "windows": windows}
@@ -6279,9 +6778,12 @@ class ShareSessionCoordinator:
         log_store=None,
         halted=None,
         on_halt=None,
+        share_folder=None,
     ):
         # pylint: disable=too-many-arguments
         self.share = share
+        # the share's folder, when it is on this computer's own disk:
+        self.share_folder = share_folder
         self._print = output
         # each node's log lines, and this coordinator's own as `coordinator`:
         self.log_store = log_store
@@ -6706,6 +7208,22 @@ class ShareSessionCoordinator:
 
     async def _on_action_request(self, name: str, message: dict) -> None:
         role = str(message.get("role", ""))
+        if role == "share_host":
+            if self.share_folder:
+                # the share is on this disk: checked here, not through SMB
+                self.output(
+                    f"{name} asked this coordinator for {message.get('action')}"
+                )
+                await self._send(
+                    name,
+                    {
+                        "type": "action_result",
+                        "id": message.get("id"),
+                        **await self._share_host_action(message),
+                    },
+                )
+                return
+            role = "share_owner"
         target = next(
             (n for n, node in self.nodes.items() if role in node["roles"]), None
         )
@@ -6731,6 +7249,19 @@ class ShareSessionCoordinator:
                 "params": message.get("params") or {},
                 "from": name,
             },
+        )
+
+    async def _share_host_action(self, message: dict) -> dict:
+        if message.get("action") != "verify_backup":
+            return {
+                "ok": False,
+                "error": f"{message.get('action')} isn't a share action",
+            }
+        return await asyncio.get_running_loop().run_in_executor(
+            None,
+            share_host_backup_check,
+            self.share_folder,
+            message.get("params") or {},
         )
 
     def _interactive(self, source: str) -> bool:
@@ -6985,7 +7516,18 @@ class ShareSessionCoordinator:
                 if revoked
                 else f"{target} has no resume token"
             )
-        elif command in ("done", "end"):
+        elif command in ("done", "next"):
+            # not an answer to any waiting question, and never ends the session:
+            waiting = "; ".join(
+                f"{q['node']}: {'/'.join(q['choices'])}"
+                for q in self.questions.values()
+            )
+            self.output(
+                f"{command} doesn't answer anything waiting"
+                + (f" ({waiting})" if waiting else "")
+                + ". To finish the whole session, type end"
+            )
+        elif command == "end":
             await self._wait(lambda: not any(self.pending.values()), timeout=120)
             for name in list(self.nodes):
                 await self._send(name, {"type": "bye"})
@@ -7388,6 +7930,7 @@ class ShareSessionNode:
                 self.roles,
                 str(message.get("action", "")),
                 message.get("params") or {},
+                (self.share_offer or {}).get("folder"),
             )
             self.output(f"{message.get('action')} for {message.get('from')}: {result}")
             await channel.send(
@@ -7803,7 +8346,12 @@ def run_share_session(args, bes_conn, host) -> int:
             )
             plan, share = _prepare_share(args, host, state, root_ip, None, ask=ask)
             save_state(args.state_file, state)
-            return {"unc": plan["unc"] if plan else args.share_unc, **share}
+            return {
+                "unc": plan["unc"] if plan else args.share_unc,
+                # kept here to check backups locally, the coordinator ignores it:
+                "folder": plan["folder"] if plan else None,
+                **share,
+            }
 
         share_setup = setup_owned_share
 
@@ -8165,6 +8713,7 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             log_store=NodeLogStore(args.log_dir),
             halted=state.get("session_halted"),
             on_halt=save_halt,
+            share_folder=plan["folder"] if plan else None,
         )
         server = await coordinator.start(listen_host, listen_port)
         discovery = None

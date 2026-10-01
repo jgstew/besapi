@@ -1005,6 +1005,7 @@ def test_build_steps_from_path(upgrade, compat):
         "sql_backup",
         "server_keys",
         "restore_notes",
+        "verify_backup",
     ]
     assert "remote_processes" in steps[1].actions
 
@@ -1972,7 +1973,7 @@ def test_share_session_end_to_end(upgrade):
     host = client_host(upgrade)
 
     async def scenario():
-        return await run_session(upgrade, ["retry", "done"], {"bigfix": host})
+        return await run_session(upgrade, ["retry", "end"], {"bigfix": host})
 
     coordinator, output = asyncio.run(scenario())
 
@@ -1996,7 +1997,7 @@ def test_share_session_console_drives(upgrade):
 
     async def scenario():
         return await run_session(
-            upgrade, [], {"bigfix": host}, console_commands=["status", "retry", "done"]
+            upgrade, [], {"bigfix": host}, console_commands=["status", "retry", "end"]
         )
 
     coordinator, output = asyncio.run(scenario())
@@ -2079,7 +2080,7 @@ def test_share_session_duplicate_names(upgrade):
         tasks = [asyncio.create_task(n.run("127.0.0.1", port)) for n in nodes]
         await coordinator.wait_for_nodes(2, timeout=5)
         names = sorted(coordinator.nodes)
-        await coordinator.handle_command("done", source="coordinator")
+        await coordinator.handle_command("end", source="coordinator")
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
         server.close()
         return names
@@ -2375,7 +2376,7 @@ def test_share_session_credentials_only_to_peers(upgrade):
         )
         tasks = [asyncio.create_task(n.run("127.0.0.1", port)) for n in (peer, console)]
         await coordinator.wait_for_nodes(2, timeout=5)
-        await coordinator.handle_command("done", source="coordinator")
+        await coordinator.handle_command("end", source="coordinator")
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
         server.close()
         return peer.share, console.share
@@ -3289,7 +3290,7 @@ class ResumeRig:
         return task, key
 
     async def finish(self, *tasks):
-        await self.coordinator.handle_command("done", source="coordinator")
+        await self.coordinator.handle_command("end", source="coordinator")
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
         self.server.close()
 
@@ -3648,7 +3649,7 @@ class LogRig:
         await self.until(lambda: name not in self.coordinator.nodes)
 
     async def finish(self, *tasks):
-        await self.coordinator.handle_command("done", source="coordinator")
+        await self.coordinator.handle_command("end", source="coordinator")
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
         self.server.close()
 
@@ -4232,7 +4233,9 @@ def test_walkthrough_runs_through_session(upgrade, tmp_path, monkeypatch):
     # a dry run answers itself, even in a session, and says what it answered:
     assert session.prompts == []
     saved = (tmp_path / "dryrun.txt").read_text(encoding="utf-8")
-    assert "Is this step complete? [done/skip/quit]: done (dry run)" in saved
+    # steps the script does go on with next, steps people do with done:
+    assert "Go on to the next step? [next/skip/quit]: next (dry run)" in saved
+    assert "Have you finished this step? [done/skip/quit]: done (dry run)" in saved
 
 
 def test_checkpoint_action_through_session(upgrade, tmp_path, capsys):
@@ -7346,3 +7349,558 @@ def test_redoing_backup_step_starts_a_new_folder(upgrade):
     upgrade.restart_from_step(state, ids, "snapshot_1")
 
     assert state["backup_run_dir"] == "\\\\h\\s\\bigfix_old"
+
+
+def _finished_backup(upgrade, tmp_path):
+    """A backup folder and state as the backup step leaves them."""
+    run_dir = tmp_path / "share" / "bigfix_20261001_033500Z"
+    (run_dir / "key_files").mkdir(parents=True)
+    (run_dir / "client_data").mkdir()
+    files = run_dir / "server_files" / "BESReportsData"
+    files.mkdir(parents=True)
+    (files / "a.dat").write_bytes(b"a" * 10)
+    (files / "b.dat").write_bytes(b"b" * 20)
+    bak = run_dir / "BFEnterprise_20261001.bak"
+    bak.write_bytes(b"backup" * 100)
+    (run_dir / "BESReporting_20261001.bak").write_bytes(b"report" * 10)
+    (run_dir / "key_files" / "masthead.afxm").write_bytes(b"masthead")
+    (run_dir / "key_files" / "license.pvk").write_bytes(b"pvk")
+    (run_dir / "bigfix_registry.reg").write_text("registry")
+    (run_dir / "client_data" / "ComputerID.txt").write_text("12345")
+    (run_dir / "db_info.json").write_text('{"DBINFO": []}')
+    (run_dir / "RESTORE_NOTES.txt").write_text("notes")
+    state = {
+        "backup_run_dir": str(run_dir),
+        "backups": [
+            # from an earlier backup on another share, not this one's:
+            {
+                "file": "\\\\old\\share\\BFEnterprise_old.bak",
+                "database": "BFEnterprise",
+            },
+            {
+                "file": str(bak),
+                "sha256": upgrade.sha256_file(str(bak)),
+                "database": "BFEnterprise",
+            },
+            {
+                "file": str(run_dir / "BESReporting_20261001.bak"),
+                "database": "BESReporting",
+            },
+        ],
+        "server_files": {
+            "BESReportsData": {"files": 2, "bytes": 30, "copied_to": str(files)},
+            "wwwrootbes": {"skipped": True, "files": 9, "bytes": 99},
+        },
+        "masthead_copy": {"to": str(run_dir / "key_files" / "masthead.afxm")},
+        "key_file_copies": {
+            str(run_dir / "key_files" / "license.pvk"): "C:\\license.pvk"
+        },
+    }
+    return run_dir, state
+
+
+def _check(upgrade, run_dir, state):
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise", "BESReporting"])
+    return upgrade.check_backup_folder(str(run_dir))
+
+
+def test_backup_manifest_is_relative_and_this_runs_only(upgrade, tmp_path):
+    """Test the manifest in the backup folder only names this run's files, by
+    paths inside the folder, so the share's host can check it locally.
+    """
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise", "BESReporting"])
+    text = (run_dir / upgrade.BACKUP_MANIFEST).read_text()
+    manifest = json.loads(text)
+
+    assert "BFEnterprise_old" not in text
+    assert str(tmp_path) not in text
+    assert manifest["databases"][0]["file"] == "BFEnterprise_20261001.bak"
+    assert manifest["server_files"]["BESReportsData"]["path"] == (
+        "server_files/BESReportsData"
+    )
+
+
+def test_backup_check_passes_a_complete_backup(upgrade, tmp_path):
+    """Test a complete backup has no problems."""
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+
+    results = _check(upgrade, run_dir, state)
+
+    assert [r for r in results if r[0] == "FAIL"] == []
+    text = "\n".join(message for _, message in results)
+    assert "BFEnterprise" in text and "SHA-256 matches" in text
+    assert "wwwrootbes" in text  # said to be left out, not a problem
+
+
+def test_backup_check_finds_a_changed_bak(upgrade, tmp_path):
+    """Test a .bak whose copy no longer matches its hash fails."""
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise", "BESReporting"])
+    (run_dir / "BFEnterprise_20261001.bak").write_bytes(b"corrupt")
+
+    results = upgrade.check_backup_folder(str(run_dir))
+
+    assert any(
+        level == "FAIL" and "BFEnterprise" in message for level, message in results
+    )
+
+
+def test_backup_check_finds_missing_pieces(upgrade, tmp_path):
+    """Test a missing database backup, missing server files, a missing
+    masthead and an unreadable db_info.json are each reported.
+    """
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise", "BESReporting"])
+    (run_dir / "BESReporting_20261001.bak").unlink()
+    (run_dir / "server_files" / "BESReportsData" / "b.dat").unlink()
+    (run_dir / "key_files" / "masthead.afxm").unlink()
+    (run_dir / "db_info.json").write_text("not json")
+
+    results = upgrade.check_backup_folder(str(run_dir))
+    failed = "\n".join(message for level, message in results if level == "FAIL")
+
+    assert "BESReporting" in failed
+    assert "BESReportsData" in failed
+    assert "masthead" in failed
+    assert "db_info.json" in failed
+
+
+@pytest.mark.parametrize(
+    "bad", ["../outside.bak", "/etc/passwd", "C:\\x.bak", "a/../../b"]
+)
+def test_backup_check_stays_inside_the_folder(upgrade, tmp_path, bad):
+    """Test a manifest path that leaves the backup folder is refused, not read."""
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise"])
+    manifest = json.loads((run_dir / upgrade.BACKUP_MANIFEST).read_text())
+    manifest["databases"][0]["file"] = bad
+    (run_dir / upgrade.BACKUP_MANIFEST).write_text(json.dumps(manifest))
+    read = []
+
+    results = upgrade.check_backup_folder(
+        str(run_dir), hash_fn=lambda path: read.append(path) or ""
+    )
+
+    assert any(level == "FAIL" and "outside" in m for level, m in results)
+    assert read == []
+
+
+def test_backup_check_without_manifest(upgrade, tmp_path):
+    """Test a folder without a manifest fails clearly."""
+    results = upgrade.check_backup_folder(str(tmp_path))
+
+    assert results[0][0] == "FAIL" and upgrade.BACKUP_MANIFEST in results[0][1]
+
+
+@pytest.mark.parametrize("name", ["..", "a/b", "a\\b", "", "C:", "x;y"])
+def test_share_host_check_refuses_other_folders(upgrade, tmp_path, name):
+    """Test the share's host only checks a plain folder name in its share."""
+    result = upgrade.share_host_backup_check(str(tmp_path), {"folder": name})
+
+    assert result["ok"] is False
+
+
+def test_verify_backup_checked_by_coordinator_hosting_the_share(upgrade, tmp_path):
+    """Test the root asks the share's host to check the backup, and the
+    coordinator, with the share on its own disk, checks the local folder.
+    """
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise", "BESReporting"])
+    results = []
+
+    def walkthrough(bridge):
+        results.append(
+            bridge.remote_action(
+                "share_host", "verify_backup", {"folder": run_dir.name}
+            )
+        )
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        rig.coordinator.share_folder = str(tmp_path / "share")
+        await rig.start()
+        await rig.until(lambda: results)
+        await rig.finish()
+
+    asyncio.run(scenario())
+    assert results[0]["ok"] is True
+    assert not [r for r in results[0]["results"] if r[0] == "FAIL"]
+
+
+def test_verify_backup_forwarded_to_share_owner(upgrade, tmp_path):
+    """Test without the share on the coordinator's disk, the share owner node
+    checks the backup in its own folder.
+    """
+    run_dir, state = _finished_backup(upgrade, tmp_path)
+    upgrade.write_backup_manifest(state, str(run_dir), ["BFEnterprise", "BESReporting"])
+    results = []
+
+    def walkthrough(bridge):
+        # the share owner joins after the root, so ask until it's there:
+        for _ in range(100):
+            reply = bridge.remote_action(
+                "share_host", "verify_backup", {"folder": run_dir.name}
+            )
+            if "no share_owner node" not in str(reply.get("error")):
+                break
+            time.sleep(0.05)
+        results.append(reply)
+
+    async def scenario():
+        rig = WalkRig(upgrade, walkthrough)
+        await rig.start()
+        rig.add(
+            "hyperv",
+            ["hyperv", "share_owner"],
+            hyperv_host(upgrade),
+            share_offer={
+                "unc": SHARE_UNC,
+                "user": None,
+                "password": None,
+                "folder": str(tmp_path / "share"),
+            },
+        )
+        await rig.coordinator.wait_for_nodes(2, timeout=5)
+        await rig.until(lambda: results)
+        await rig.finish()
+
+    asyncio.run(scenario())
+    assert results[0]["ok"] is True, results
+
+
+def test_backup_check_runs_last_in_the_backup_step(upgrade, compat):
+    """Test the backup step checks its own backup after writing everything."""
+    path = upgrade.find_upgrade_path(
+        compat,
+        {"bigfix": "10.0.7.52", "windows": "2012 R2", "mssql": "2008 R2"},
+        {"windows": "2025", "mssql": "2025"},
+    )
+    steps = upgrade.build_steps(path, local_sql=True)
+    backup = next(s for s in steps if s.id == "backup")
+
+    assert backup.actions[-1] == "verify_backup"
+    assert "verify_backup" in upgrade.ACTIONS
+
+
+def test_verify_backup_uses_the_share_hosts_check(upgrade, tmp_path, capsys):
+    """Test the root writes the manifest, shows the share host's results, and
+    doesn't read the backup over the network itself.
+    """
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.state["local_sql"] = True
+    reply = {
+        "ok": True,
+        "checked_by": "GAMING-JAMES",
+        "folder": "D:\\_bigfix_backup\\bigfix_x",
+        "results": [["ok", "BFEnterprise: 9.0 GB, SHA-256 matches the copy taken"]],
+    }
+    ctx.session = FakeSession(action_result=reply)
+    ctx.session.ask = lambda *a, **k: "yes"
+    read = []
+    original = upgrade.check_backup_folder
+    upgrade.check_backup_folder = lambda *a, **k: read.append(a) or original(*a, **k)
+    try:
+        upgrade.ACTIONS["verify_backup"](ctx)
+    finally:
+        upgrade.check_backup_folder = original
+
+    out = capsys.readouterr().out
+    assert ctx.session.actions[0][:2] == ("share_host", "verify_backup")
+    assert ctx.session.actions[0][2]["folder"] == os.path.basename(ctx.backup_dir())
+    assert "on GAMING-JAMES" in out and "SHA-256 matches" in out
+    assert read == []
+    assert os.path.isfile(os.path.join(ctx.backup_dir(), upgrade.BACKUP_MANIFEST))
+
+
+def test_verify_backup_checks_from_here_without_share_host(upgrade, tmp_path, capsys):
+    """Test that when no share host answers, the root checks the folder itself
+    and says why.
+    """
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.session = FakeSession(
+        action_result={"ok": False, "error": "no share_owner node is connected"}
+    )
+
+    upgrade.ACTIONS["verify_backup"](ctx)
+
+    out = capsys.readouterr().out
+    assert "no share_owner node is connected, checking it from here" in out
+    # checked from here: this empty backup is missing its restore notes
+    assert "[FAIL] restore notes is missing" in out
+    assert ctx.state["backup_check"]["checked_on"] == ctx.backup_dir()
+
+
+class StepLoop:
+    """Runs _walk_steps on given steps, with scripted answers."""
+
+    def __init__(self, upgrade, steps, answers, host=None):
+        self.upgrade = upgrade
+        self.steps = steps
+        self.answers = list(answers)
+        self.asked = []
+        self.host = host or local_host(upgrade)
+        self.state = {"done": [], "reports": {}}
+        self.ctx = types.SimpleNamespace(
+            host=self.host,
+            state=self.state,
+            dry_run=False,
+            session=None,
+            sql_server=lambda: "localhost",
+            manual_needed=False,
+        )
+
+    def ask(self, prompt, choices, default=None):
+        self.asked.append((prompt, list(choices)))
+        if not self.answers:
+            return "quit"
+        answer = self.answers.pop(0)
+        assert answer in choices, (answer, choices)
+        return answer
+
+    def run(self):
+        args = types.SimpleNamespace(dry_run=False)
+        return self.upgrade._walk_steps(
+            args, self.steps, self.state, self.ctx, self.ask, None, lambda: None
+        )
+
+
+def test_automatic_step_asks_for_next(upgrade, capsys):
+    """Test a step the script did itself asks to go on with next, not done,
+    and says there's nothing to change.
+    """
+    loop = StepLoop(upgrade, [upgrade.Step("stop", "Stop", "Stopped.")], ["next"])
+
+    assert loop.run() == 0
+
+    prompt, choices = loop.asked[0]
+    assert choices == ["next", "skip", "quit"]
+    assert "nothing for you to change" in capsys.readouterr().out.lower()
+    assert loop.state["done"] == ["stop"]
+
+
+def test_manual_step_asks_for_done_with_what_to_do(upgrade, monkeypatch, capsys):
+    """Test a step a person has to carry out says what to do, and asks for
+    done once it's finished.
+    """
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 0)
+    step = upgrade.Step(
+        "sp", "Apply SP3", "Install SP3.", manual=True, todo="Install SP3 with setup."
+    )
+    loop = StepLoop(upgrade, [step], ["done"])
+
+    assert loop.run() == 0
+
+    prompt, choices = loop.asked[0]
+    assert choices == ["done", "skip", "quit"]
+    out = capsys.readouterr().out
+    assert "YOUR TURN" in out and "Install SP3 with setup." in out
+    assert "type done" in out
+
+
+def test_build_steps_marks_the_steps_people_do(upgrade, compat):
+    """Test service packs, upgrades and cleanup are steps people carry out,
+    while backups, services and validation are done by the script.
+    """
+    path = upgrade.find_upgrade_path(
+        compat,
+        {"bigfix": "10.0.7.52", "windows": "2012 R2", "mssql": "2008 R2"},
+        {"windows": "2025", "mssql": "2025"},
+    )
+    steps = {s.id: s for s in upgrade.build_steps(path, local_sql=True)}
+
+    assert steps["service_pack_1"].manual
+    assert steps["upgrade_1_mssql_2017"].manual
+    assert steps["upgrade_2_windows_2019"].manual
+    assert steps["cleanup"].manual
+    for automatic in ("preflight", "backup", "stop_services_0", "start_services_1"):
+        assert not steps[automatic].manual
+    assert steps["upgrade_1_mssql_2017"].verify == ["verify_mssql:2017"]
+    assert steps["service_pack_1"].verify == ["verify_service_pack:SP3"]
+    assert steps["upgrade_2_windows_2019"].verify == ["verify_windows:2019"]
+
+
+def test_done_is_checked_and_asked_again_when_not_upgraded(
+    upgrade, monkeypatch, capsys
+):
+    """Test done on a SQL Server upgrade is checked: still 2008 R2 means it's
+    asked again, and once 2017 reports, it's accepted.
+    """
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 0)
+    host = local_host(upgrade)
+    versions = [[["10.50.6000.34", "SP3"]], [["14.0.1000.169", "RTM"]]]
+    host.sql_handler = lambda server, query: versions.pop(0)
+    step = upgrade.Step(
+        "upgrade_1_mssql_2017",
+        "Upgrade mssql to 2017",
+        "Run setup.",
+        manual=True,
+        verify=["verify_mssql:2017"],
+    )
+    loop = StepLoop(upgrade, [step], ["done", "done"], host=host)
+
+    assert loop.run() == 0
+
+    out = capsys.readouterr().out
+    assert "still reports 10.50.6000.34 (2008 R2), not 2017" in out
+    assert len(loop.asked) == 2
+    assert loop.state["done"] == ["upgrade_1_mssql_2017"]
+
+
+def test_done_never_checks_out_stops_after_three_tries(upgrade, monkeypatch, capsys):
+    """Test a step whose check keeps failing stops after three tries, not
+    marked done, with what to do next.
+    """
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 0)
+    host = local_host(upgrade)
+    host.sql_handler = lambda server, query: [["10.50.6000.34", "SP3"]]
+    step = upgrade.Step(
+        "upgrade_1_mssql_2017",
+        "Upgrade mssql to 2017",
+        "Run setup.",
+        manual=True,
+        verify=["verify_mssql:2017"],
+    )
+    loop = StepLoop(upgrade, [step], ["done", "done", "done"], host=host)
+
+    assert loop.run() == 1
+
+    assert loop.state["done"] == []
+    assert "rerun" in capsys.readouterr().out.lower()
+
+
+def test_done_accepted_with_a_warning_when_it_cant_be_checked(
+    upgrade, monkeypatch, capsys
+):
+    """Test that when the version can't be read, done is taken with a warning."""
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 0)
+    host = local_host(upgrade)
+
+    def broken(server, query):
+        raise OSError("sqlcmd not found")
+
+    host.sql_handler = broken
+    step = upgrade.Step(
+        "x", "Upgrade", "Run setup.", manual=True, verify=["verify_mssql:2017"]
+    )
+    loop = StepLoop(upgrade, [step], ["done"], host=host)
+
+    assert loop.run() == 0
+
+    assert "couldn't check" in capsys.readouterr().out
+    assert loop.state["done"] == ["x"]
+
+
+def test_quick_done_on_a_manual_step_is_confirmed(upgrade, monkeypatch):
+    """Test done right after a manual step starts asks if it's really finished,
+    and no goes back to the step's question.
+    """
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 60)
+    step = upgrade.Step("sp", "Apply SP3", "Install SP3.", manual=True)
+    loop = StepLoop(upgrade, [step], ["done", "no", "done", "yes"])
+
+    assert loop.run() == 0
+
+    prompts = [prompt for prompt, _ in loop.asked]
+    assert "really finished" in prompts[1]
+    assert loop.state["done"] == ["sp"]
+
+
+def test_quick_next_on_an_automatic_step_isnt_questioned(upgrade, monkeypatch):
+    """Test going on quickly from a step the script did isn't questioned."""
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 60)
+    loop = StepLoop(upgrade, [upgrade.Step("stop", "Stop", "Stopped.")], ["next"])
+
+    assert loop.run() == 0
+    assert len(loop.asked) == 1
+
+
+def test_snapshot_taken_by_hand_asks_for_done(upgrade, monkeypatch):
+    """Test a snapshot step asks for done when the operator has to take it,
+    and next when the Hyper-V node took it.
+    """
+    monkeypatch.setattr(upgrade, "FAST_DONE_SECONDS", 0)
+
+    def by_hand(ctx):
+        ctx.manual_needed = True
+
+    monkeypatch.setitem(upgrade.ACTIONS, "fake_checkpoint", by_hand)
+    monkeypatch.setitem(upgrade.ACTIONS, "fake_taken", lambda ctx: None)
+    steps = [
+        upgrade.Step("snapshot_1", "Snapshot", "Snap.", ["fake_checkpoint"]),
+        upgrade.Step("snapshot_2", "Snapshot", "Snap.", ["fake_taken"]),
+    ]
+    loop = StepLoop(upgrade, steps, ["done", "next"])
+
+    assert loop.run() == 0
+    assert [choices[0] for _, choices in loop.asked] == ["done", "next"]
+
+
+def test_compat_level_not_raised_past_what_sql_server_supports(upgrade, tmp_path):
+    """Test raising to 120 on SQL Server 2008 R2 stops with what to do, without
+    running ALTER DATABASE.
+    """
+    host = local_host(upgrade)
+    host.sql[upgrade.SQL_COMPAT_LEVELS] = [
+        ["BFEnterprise", "100"],
+        ["BESReporting", "100"],
+    ]
+    host.sql[upgrade.SQL_PRODUCT_VERSION] = [["10.50.6000.34", "SP3"]]
+    ctx = walkthrough_ctx(upgrade, tmp_path, host)
+    ctx.args.db_compat_level = None
+
+    with pytest.raises(SystemExit) as stopped:
+        upgrade.ACTIONS["raise_compat"](ctx, "120")
+
+    message = str(stopped.value)
+    assert "2008 R2" in message and "100" in message and "--step" in message
+    assert not any("ALTER DATABASE" in query for query in host.sql_ran)
+
+
+def test_prerequisite_says_when_the_level_was_read(upgrade, compat):
+    """Test the service pack prerequisite says the level is from the plan,
+    not the current one, since the step checks it live.
+    """
+    path = upgrade.find_upgrade_path(
+        compat,
+        {
+            "bigfix": "10.0.7.52",
+            "windows": "2012 R2",
+            "mssql": "2008 R2",
+            "mssql_level": "SP1",
+        },
+        {"windows": "2025", "mssql": "2025"},
+    )
+    text = "\n".join(path["steps"][0]["prerequisites"])
+
+    assert "currently" not in text
+    assert "when this plan was made" in text
+
+
+def test_stray_done_doesnt_end_the_session(upgrade):
+    """Test done typed when no question takes it explains, and leaves the
+    session and its resume tokens alone: only end finishes it.
+    """
+    output = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        **coordinator_options(upgrade),
+    )
+    coordinator.tokens["abc"] = {"node": "root", "secret": "x", "expires": 9e9}
+    coordinator.questions["root"] = {
+        "id": "q1",
+        "node": "root",
+        "prompt": "Go on to the next step?",
+        "choices": ["next", "skip", "quit"],
+    }
+
+    async def scenario():
+        await coordinator.handle_command("done", source="coordinator")
+        stray_done = coordinator.done.is_set()
+        await coordinator.handle_command("end", source="coordinator")
+        return stray_done, coordinator.done.is_set()
+
+    assert asyncio.run(scenario()) == (False, True)
+    assert any("next" in line and "end" in line for line in output)
