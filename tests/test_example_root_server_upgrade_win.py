@@ -6781,8 +6781,18 @@ def validate_ctx(upgrade, tmp_path, monkeypatch, answers, rest_wait=600):
 def test_validate_waits_for_rest(upgrade, tmp_path, monkeypatch, capsys):
     """Test validate tries REST every 30 seconds until the root server answers."""
     down = {"skipped": "no BigFix REST connection"}
-    up = {"serverinfo": {"version": "11.0.6.1"}}
-    ctx, sleeps = validate_ctx(upgrade, tmp_path, monkeypatch, [down, down, up])
+    # serverinfo answers while the root server still waits for its database:
+    waiting = {
+        "serverinfo": {"version": "11.0.6.1"},
+        "masthead": {"error": "JSONDecodeError: Expecting value"},
+        "root_server": {"error": "JSONDecodeError: Expecting value"},
+    }
+    up = {
+        "serverinfo": {"version": "11.0.6.1"},
+        "masthead": {"name": "x"},
+        "root_server": {"properties": {}},
+    }
+    ctx, sleeps = validate_ctx(upgrade, tmp_path, monkeypatch, [down, waiting, up])
 
     upgrade.ACTIONS["validate"](ctx)
 
@@ -8147,3 +8157,35 @@ def test_web_reports_checked_after_bigfix_upgrade(upgrade, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "WARNING" in out and "BESWebReportsServer" in out
     assert "log in to Web Reports" in out
+
+
+def test_rest_isnt_ready_while_only_serverinfo_answers(upgrade):
+    """Test REST counts as answering only when the masthead and root server
+    queries answer too: while the root server waits for its database, they.
+
+    fail although serverinfo answers.
+    """
+    ready = {
+        "serverinfo": {"version": "10.0.7.52"},
+        "masthead": {"name": "x"},
+        "root_server": {"properties": {}},
+    }
+    assert upgrade._rest_answers(ready) is True
+    for probe in ("masthead", "root_server", "serverinfo"):
+        waiting = dict(ready)
+        waiting[probe] = {"error": "JSONDecodeError: Expecting value: line 1 column 1"}
+        assert upgrade._rest_answers(waiting) is False, probe
+    assert upgrade._rest_answers({"skipped": "no BigFix REST connection"}) is False
+
+
+@pytest.mark.parametrize(
+    "error, text",
+    [
+        (asyncio.TimeoutError(), "timed out"),
+        (ConnectionRefusedError(), "ConnectionRefusedError"),
+        (OSError("No route to host"), "No route to host"),
+    ],
+)
+def test_unreachable_coordinator_says_why(upgrade, error, text):
+    """Test the reason is never blank, as with a timeout, whose text is empty."""
+    assert upgrade.reach_error_text(error) == text

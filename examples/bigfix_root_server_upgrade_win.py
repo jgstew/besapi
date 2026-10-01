@@ -137,7 +137,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.35"
+__version__ = "0.2.36"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -3955,7 +3955,15 @@ DEFAULT_REST_WAIT = 600
 
 
 def _rest_answers(rest: dict) -> bool:
-    return "skipped" not in rest and "error" not in (rest.get("serverinfo") or {})
+    """Whether REST really answers: while the root server waits for its
+    database, serverinfo answers but the masthead and root server don't.
+    """
+    if "skipped" in rest:
+        return False
+    return all(
+        isinstance(rest.get(probe), dict) and "error" not in rest[probe]
+        for probe in ("serverinfo", "masthead", "root_server")
+    )
 
 
 def wait_for_rest(ctx: WalkthroughContext) -> dict:
@@ -7831,6 +7839,13 @@ class ShareSessionCoordinator:
         await self._wait(lambda: len(self.nodes) >= count, timeout)
 
 
+def reach_error_text(err: BaseException) -> str:
+    """Why a connection failed, never blank: a timeout's own text is empty."""
+    if isinstance(err, asyncio.TimeoutError):
+        return "timed out"
+    return str(err) or type(err).__name__
+
+
 class ShareSessionNode:
     """A node connecting to the coordinator: checks the share and reports back.
 
@@ -8366,7 +8381,10 @@ class ShareSessionNode:
             except (OSError, asyncio.TimeoutError) as err:
                 if attempt == attempts:
                     raise
-                self.output(f"coordinator not reachable ({err}), retrying in {delay}s")
+                self.output(
+                    f"coordinator not reachable ({reach_error_text(err)}),"
+                    f" retrying in {delay}s"
+                )
                 await asyncio.sleep(delay)
         raise ConnectionError(f"coordinator {host}:{port} not reachable")
 
