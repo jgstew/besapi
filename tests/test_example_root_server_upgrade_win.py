@@ -7304,3 +7304,45 @@ def test_hyperv_export_progress_without_job(upgrade, tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert "export of bigfix-root: still running," in out
     assert "(100%)" not in out
+
+
+def test_backup_dir_new_folder_when_share_changes(upgrade, tmp_path):
+    """Test a saved backup folder on another share isn't reused: a walkthrough
+    resumed with a new backup share starts a new folder there.
+    """
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    ctx.state["backup_run_dir"] = "\\\\192.168.5.39\\_tmp_backup\\bigfix_old"
+
+    run_dir = ctx.backup_dir()
+
+    assert run_dir.startswith(str(tmp_path / "share"))
+    assert ctx.state["backup_run_dir"] == run_dir
+
+
+def test_backup_dir_kept_on_same_share(upgrade, tmp_path):
+    """Test a resumed walkthrough keeps the folder it saved on the same share."""
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    saved = os.path.join(str(tmp_path / "share"), "bigfix_saved")
+    ctx.state["backup_run_dir"] = saved
+
+    assert ctx.backup_dir() == saved
+
+
+def test_redoing_backup_step_starts_a_new_folder(upgrade):
+    """Test --step at or before the backup forgets the saved backup folder, so
+    the new backup doesn't mix with or overwrite the old one, and a later.
+
+    step keeps it.
+    """
+    ids = ["preflight", "stop_services_0", "backup", "snapshot_1"]
+    state = {"done": list(ids), "backup_run_dir": "\\\\h\\s\\bigfix_old"}
+
+    upgrade.restart_from_step(state, ids, "backup")
+
+    assert state["done"] == ["preflight", "stop_services_0"]
+    assert "backup_run_dir" not in state
+
+    state = {"done": list(ids), "backup_run_dir": "\\\\h\\s\\bigfix_old"}
+    upgrade.restart_from_step(state, ids, "snapshot_1")
+
+    assert state["backup_run_dir"] == "\\\\h\\s\\bigfix_old"

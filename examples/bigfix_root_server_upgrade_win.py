@@ -135,7 +135,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.29"
+__version__ = "0.2.30"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2598,6 +2598,12 @@ class WalkthroughContext:
                 connect_backup_share(self)
             self.share_connected = True
         run_dir = self.state.get("backup_run_dir")
+        if run_dir and not _is_under(run_dir, self.args.backup_dir):
+            # saved on another share or folder: a new backup goes where asked
+            print(
+                f"NOTE: not reusing {run_dir}, backing up under {self.args.backup_dir}"
+            )
+            run_dir = None
         if not run_dir:
             run_dir = backup_run_folder(
                 self.args.backup_dir, socket.gethostname(), utc_now()
@@ -3439,6 +3445,28 @@ class _Tee(io.TextIOBase):
             stream.flush()
 
 
+def _is_under(path: str, folder: str) -> bool:
+    """Whether path is folder or inside it, for local and UNC paths alike."""
+
+    def norm(value: str) -> str:
+        return value.replace("/", "\\").rstrip("\\").lower()
+
+    return norm(path) == norm(folder) or norm(path).startswith(norm(folder) + "\\")
+
+
+def restart_from_step(state: dict, ids: List[str], step: str) -> None:
+    """--step: redo `step` and every later one.
+
+    Redoing the backup forgets its saved folder, so the new backup gets its
+    own folder instead of mixing with the old one.
+    """
+    if step not in ids:
+        raise SystemExit(f"unknown step {step}, one of: {', '.join(ids)}")
+    state["done"] = ids[: ids.index(step)]
+    if "backup" in ids and ids.index(step) <= ids.index("backup"):
+        state.pop("backup_run_dir", None)
+
+
 def run_walkthrough(args, bes_conn, host, compat: dict, session=None) -> int:
     """Guide the upgrade one step at a time, resuming from the state file.
 
@@ -3499,10 +3527,7 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> i
 
     steps = build_steps(state["plan"], local_sql=state.get("local_sql", True))
     if args.step:
-        ids = [step.id for step in steps]
-        if args.step not in ids:
-            raise SystemExit(f"unknown step {args.step}, one of: {', '.join(ids)}")
-        state["done"] = ids[: ids.index(args.step)]
+        restart_from_step(state, [step.id for step in steps], args.step)
 
     ctx = WalkthroughContext(
         args,
