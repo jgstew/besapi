@@ -8189,3 +8189,184 @@ def test_rest_isnt_ready_while_only_serverinfo_answers(upgrade):
 def test_unreachable_coordinator_says_why(upgrade, error, text):
     """Test the reason is never blank, as with a timeout, whose text is empty."""
     assert upgrade.reach_error_text(error) == text
+
+
+# ---- refused addresses, allow at run time, the share without prompts
+
+
+def test_refused_node_is_told_why(upgrade):
+    """Test a node whose address isn't allowed hears why, with the command
+    to allow it, instead of a dropped connection.
+    """
+    output = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        **coordinator_options(upgrade, allow=["10.9.9.9"]),
+    )
+    node = upgrade.ShareSessionNode(
+        "hyperv", ["hyperv"], None, output=lambda line: None, **session_options(upgrade)
+    )
+
+    async def scenario():
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            await node.connect("127.0.0.1", port)
+        finally:
+            server.close()
+
+    with pytest.raises(upgrade.NotAllowed) as refused:
+        asyncio.run(scenario())
+    assert "allow 127.0.0.1" in str(refused.value)
+    assert any("refused 127.0.0.1" in line for line in output)
+
+
+def test_refused_node_keeps_retrying_until_allowed(upgrade):
+    """Test a refused node retries, and joins once the coordinator's operator
+    types allow with its address.
+    """
+    output, node_output = [], []
+    saved = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        on_allow=lambda entries: saved.append(list(entries)),
+        **coordinator_options(upgrade, allow=["10.9.9.9"]),
+    )
+    node = upgrade.ShareSessionNode(
+        "hyperv",
+        ["hyperv"],
+        None,
+        output=node_output.append,
+        **session_options(upgrade),
+    )
+
+    async def scenario():
+        server = await coordinator.start("127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        joining = asyncio.create_task(
+            node.connect("127.0.0.1", port, attempts=50, delay=0.05)
+        )
+        await asyncio.sleep(0.2)
+        await coordinator.handle_command("allow 127.0.0.1", source="coordinator")
+        channel = await asyncio.wait_for(joining, 5)
+        channel.close()
+        server.close()
+
+    asyncio.run(scenario())
+    assert any("allow 127.0.0.1" in line for line in node_output)
+    assert "127.0.0.1" in coordinator.allow
+    assert saved == [["10.9.9.9", "127.0.0.1"]]
+
+
+def test_allow_only_from_the_coordinators_own_terminal(upgrade):
+    """Test a node can't widen who may connect: allow works only where the
+    coordinator runs.
+    """
+    output = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        **coordinator_options(upgrade, allow=["10.9.9.9"]),
+    )
+
+    asyncio.run(coordinator.handle_command("allow 0.0.0.0/0", source="BIGFIX"))
+
+    assert coordinator.allow == ["10.9.9.9"]
+    assert any("only" in line and "coordinator" in line for line in output)
+
+
+@pytest.mark.parametrize("entry", ["not-an-ip", "300.1.1.1", "1.2.3.4; rm", ""])
+def test_allow_rejects_bad_addresses(upgrade, entry):
+    """Test allow only takes an address or a network."""
+    output = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        **coordinator_options(upgrade, allow=["10.9.9.9"]),
+    )
+
+    asyncio.run(coordinator.handle_command(f"allow {entry}", source="coordinator"))
+
+    assert coordinator.allow == ["10.9.9.9"]
+
+
+def test_firewall_allow_update_command(upgrade):
+    """Test the firewall rule this tool made is updated to the new addresses,
+    or made when missing.
+    """
+    command = upgrade.firewall_allow_update_command(
+        "20260927120000Z", 445, ["192.168.5.40", "192.168.5.225"], "SMB"
+    )
+    script = command[-1]
+
+    assert "Set-NetFirewallRule" in script and "New-NetFirewallRule" in script
+    assert "192.168.5.40,192.168.5.225" in script
+    assert "'BigFix upgrade 20260927120000Z SMB'" in script
+    with pytest.raises(ValueError):
+        upgrade.firewall_allow_update_command("x;y", 445, ["1.2.3.4"], "SMB")
+    with pytest.raises(ValueError):
+        upgrade.firewall_allow_update_command(
+            "20260927120000Z", 445, ["1.2.3.4; Remove-Item x"], "SMB"
+        )
+
+
+def test_share_setup_doesnt_ask_by_default(upgrade, capsys):
+    """Test setting up the share goes ahead without yes prompts, saying what
+    it does, unless --share-confirm asks for them.
+    """
+    args = types.SimpleNamespace(share_confirm=False)
+    confirm = upgrade.share_setup_confirm(args, ask=lambda *a, **k: "no")
+
+    assert confirm("Set a new random password for the temporary account x?") is True
+    assert "Set a new random password" in capsys.readouterr().out
+
+    args.share_confirm = True
+    confirm = upgrade.share_setup_confirm(args, ask=lambda *a, **k: "no")
+    assert confirm("Fix the share?") is False
+
+
+def test_default_allow_is_the_coordinators_subnets(upgrade):
+    """Test that without --allow, nodes are allowed from the coordinator's own
+    subnets, not loopback or link-local, since the pairing code still guards.
+
+    joining.
+    """
+    host_ips = [
+        {"IPAddress": "192.168.4.182", "PrefixLength": 24},
+        {"IPAddress": "127.0.0.1", "PrefixLength": 8},
+        {"IPAddress": "169.254.10.5", "PrefixLength": 16},
+        {"IPAddress": "10.20.30.40", "PrefixLength": 22},
+    ]
+
+    assert upgrade.local_subnets(host_ips) == ["192.168.4.0/24", "10.20.28.0/22"]
+
+
+@pytest.mark.parametrize(
+    "given, saved, expected",
+    [
+        # default: own subnets, the root server, and what allow added
+        ([], ["192.168.5.0/24"], ["192.168.4.0/24", "192.168.5.40", "192.168.5.0/24"]),
+        # --allow narrows: only those, and what allow added
+        (["192.168.4.189"], ["192.168.5.225"], ["192.168.4.189", "192.168.5.225"]),
+    ],
+)
+def test_coordinator_allow_list(upgrade, given, saved, expected):
+    """Test the coordinator's allow list with and without --allow."""
+    host_ips = [{"IPAddress": "192.168.4.182", "PrefixLength": 24}]
+
+    assert upgrade.coordinator_allow(given, host_ips, "192.168.5.40", saved) == expected
+
+
+def test_firewall_peers_include_networks(upgrade):
+    """Test the SMB firewall rule opens to allowed networks too, not only to
+    single addresses.
+    """
+    assert upgrade.share_firewall_peers(
+        "192.168.5.40", ["192.168.4.0/24", "192.168.5.225"]
+    ) == [
+        "192.168.5.40",
+        "192.168.4.0/24",
+        "192.168.5.225",
+    ]

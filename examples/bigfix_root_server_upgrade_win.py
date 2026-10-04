@@ -137,7 +137,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.36"
+__version__ = "0.2.38"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -4984,6 +4984,21 @@ def firewall_rule_command(
     )
 
 
+def firewall_allow_update_command(
+    run_id: str, port: int, peers: List[str], label: str, protocol: str = "TCP"
+) -> List[str]:
+    """Set the remote addresses of a rule this tool made, or make it."""
+    group = firewall_group(run_id)
+    addresses = ",".join(_check_addresses(peers))
+    name = _ps_quote(f"{group} {label}")
+    create = firewall_rule_command(run_id, port, peers, label, protocol)[-1]
+    return _powershell(
+        f"if (Get-NetFirewallRule -DisplayName {name} -ErrorAction SilentlyContinue)"
+        f" {{ Set-NetFirewallRule -DisplayName {name} -RemoteAddress {addresses} }}"
+        f" else {{ {create} }}"
+    )
+
+
 def new_share_command(name: str, folder: str, account: str) -> List[str]:
     """Create an SMB share: Change for the account, Full for Administrators."""
     return _powershell(
@@ -5777,6 +5792,10 @@ class WrongCode(HandshakeError):
     """The other node has a different pairing code or PSK."""
 
 
+class NotAllowed(HandshakeError):
+    """The coordinator refuses this computer's address: not in its --allow."""
+
+
 class ChannelError(Exception):
     """A frame was invalid: tampered with, replayed, or too large."""
 
@@ -6030,6 +6049,13 @@ def _session_key(key: bytes, client_nonce: str, server_nonce: str, label: str) -
 
 
 def _check_peer_hello(peer: dict, own: dict) -> None:
+    if isinstance(peer, dict) and peer.get("type") == "refused":
+        # only said before any key exchange, it changes nothing but the message:
+        address = clean_log_text(peer.get("address", "this computer's address"), 64)
+        raise NotAllowed(
+            f"the coordinator refuses this computer's address {address}: on the"
+            f" coordinator, type allow {address}"
+        )
     if not isinstance(peer, dict) or peer.get("protocol") != PROTOCOL:
         protocol = peer.get("protocol") if isinstance(peer, dict) else peer
         raise HandshakeError(
@@ -6319,7 +6345,8 @@ SESSION_COMMANDS = (
     " dryrun <node>, suggest <node> <command>, and typed at a node:"
     " walkthrough, localcmd <command>, send <file>,"
     " log <node> [lines],"
-    " halt [reason], continue, answer <choice>, revoke <node>, end"
+    " halt [reason], continue, answer <choice>, revoke <node>, end,"
+    " and on the coordinator: allow <address>"
 )
 
 
@@ -7044,6 +7071,28 @@ def resolve_masthead_serial(override, bes_conn, masthead_paths: List[str]) -> st
     return serial
 
 
+async def _refuse(reader, writer, peer_ip: str) -> None:
+    """Tell a node its address isn't allowed, then close.
+
+    Its hello is read first so the notice isn't lost to a reset. Nothing is
+    exchanged beyond this notice, so it reveals no more than the refusal.
+    """
+    try:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(_read_frame(reader), HANDSHAKE_TIMEOUT)
+        notice = {
+            "protocol": PROTOCOL,
+            "type": "refused",
+            "reason": "not_allowed",
+            "address": peer_ip,
+        }
+        with contextlib.suppress(Exception):
+            writer.write(_frame(json.dumps(notice).encode()))
+            await writer.drain()
+    finally:
+        writer.close()
+
+
 class ShareSessionCoordinator:
     """The share owner's side: hands out the share and collects each node's checks.
 
@@ -7067,9 +7116,12 @@ class ShareSessionCoordinator:
         halted=None,
         on_halt=None,
         share_folder=None,
+        on_allow=None,
     ):
         # pylint: disable=too-many-arguments
         self.share = share
+        # saves the allowed addresses after `allow`, and updates the firewall:
+        self.on_allow = on_allow
         # the share's folder, when it is on this computer's own disk:
         self.share_folder = share_folder
         self._print = output
@@ -7248,8 +7300,11 @@ class ShareSessionCoordinator:
             return
         try:
             if not peer_allowed(peer_ip, self.allow):
-                self.output(f"refused {peer_ip}: not in --allow")
-                writer.close()
+                self.output(
+                    f"refused {peer_ip}: not in --allow, type allow {peer_ip} here to"
+                    " let it in"
+                )
+                await _refuse(reader, writer, peer_ip)
                 return
             channel, peer = await accept_channel(
                 reader, writer, self._password_for, self._hello_for
@@ -7552,6 +7607,40 @@ class ShareSessionCoordinator:
             message.get("params") or {},
         )
 
+    async def _allow(self, entry: str, source: str) -> None:
+        """`allow <address or network>`, typed on the coordinator itself only:
+        it widens who may connect, so no node can do it.
+        """
+        if source != "coordinator":
+            self.output(
+                f"allow from {source} refused: it only works typed on the"
+                " coordinator itself"
+            )
+            return
+        entry = entry.strip()
+        try:
+            if not re.fullmatch(r"[0-9A-Fa-f:./]+", entry):
+                raise ValueError(entry)
+            allowed = (
+                str(ipaddress.ip_network(entry, strict=False))
+                if "/" in entry
+                else str(ipaddress.ip_address(entry))
+            )
+        except ValueError:
+            self.output(f"allow {entry!r}: not an address or network, like 192.168.5.7")
+            return
+        if allowed in self.allow:
+            self.output(f"{allowed} is already allowed")
+            return
+        self.allow.append(allowed)
+        self.output(f"allowed {allowed}, it can connect now")
+        if self.on_allow:
+            message = await asyncio.get_running_loop().run_in_executor(
+                None, self.on_allow, list(self.allow)
+            )
+            if message:
+                self.output(str(message))
+
     def _interactive(self, source: str) -> bool:
         """A person typing: here, or a console that isn't a one-shot command."""
         if source == "coordinator":
@@ -7744,6 +7833,8 @@ class ShareSessionCoordinator:
             return
         if words[0] == "answer":
             await self._answer(words[1:], source)
+        elif words[0] == "allow":
+            await self._allow(text.split(None, 1)[1] if len(words) > 1 else "", source)
         elif len(words) == 1 and any(
             words[0] in q["choices"] for q in self.questions.values()
         ):
@@ -8378,6 +8469,11 @@ class ShareSessionNode:
                         raise
                     self.password = self.prompt_code()
                     return await self._open(host, port)
+            except NotAllowed as err:
+                if attempt == attempts:
+                    raise
+                self.output(f"{err}, retrying in {delay}s")
+                await asyncio.sleep(delay)
             except (OSError, asyncio.TimeoutError) as err:
                 if attempt == attempts:
                     raise
@@ -8867,6 +8963,53 @@ def _root_ip_from_rest(bes_conn) -> Optional[str]:
     return str(addresses[0]) if addresses else None
 
 
+def local_subnets(host_ips: Any) -> List[str]:
+    """This computer's own IPv4 subnets, without loopback or link-local."""
+    subnets = []
+    for network in _host_networks(host_ips):
+        if network.is_loopback or network.is_link_local:
+            continue
+        subnets.append(str(network))
+    return list(dict.fromkeys(subnets))
+
+
+def coordinator_allow(
+    given: List[str], host_ips: Any, root_ip: Optional[str], saved: List[str]
+) -> List[str]:
+    """Who may connect: --allow if given, else this computer's own subnets and
+    the root server, plus what `allow` added.
+
+    The pairing code still guards
+    joining, this only narrows who can try.
+    """
+    if given:
+        base = list(given)
+    else:
+        base = local_subnets(host_ips) + ([root_ip] if root_ip else [])
+    return list(dict.fromkeys(base + list(saved or [])))
+
+
+def share_firewall_peers(root_ip: Optional[str], allow: List[str]) -> List[str]:
+    """Who the share's SMB firewall rule opens to: the root server and every
+    allowed address or network.
+    """
+    return list(dict.fromkeys(([root_ip] if root_ip else []) + list(allow)))
+
+
+def share_setup_confirm(args, ask=None):
+    """How the share's setup steps are agreed: done without asking, each said
+    as it's done, unless --share-confirm asks for them one by one.
+    """
+    if getattr(args, "share_confirm", False):
+        return lambda prompt: (ask or _ask)(prompt, ["yes", "no"], "yes") == "yes"
+
+    def go_ahead(prompt: str) -> bool:
+        print(f"{prompt} yes (give --share-confirm to be asked)")
+        return True
+
+    return go_ahead
+
+
 def _prepare_share(args, host, state: dict, root_ip, listen_port, ask=None) -> tuple:
     """Plan the backup share, and set it up if it's on this computer.
 
@@ -8895,12 +9038,7 @@ def _prepare_share(args, host, state: dict, root_ip, listen_port, ask=None) -> t
         + (f" ({plan['folder']})" if plan["folder"] else "")
     )
 
-    peers = list(
-        dict.fromkeys(
-            [ip for ip in [root_ip] if ip]
-            + [entry for entry in args.allow or [] if "/" not in entry]
-        )
-    )
+    peers = share_firewall_peers(root_ip, args.allow or [])
     share: Dict[str, Optional[str]] = {"user": None, "password": None}
     if plan["folder"]:
         if not host.is_admin():
@@ -8919,7 +9057,7 @@ def _prepare_share(args, host, state: dict, root_ip, listen_port, ask=None) -> t
             spec,
             state,
             state["run_id"],
-            lambda prompt: (ask or _ask)(prompt, ["yes", "no"], "yes") == "yes",
+            share_setup_confirm(args, ask),
             args.dry_run,
             socket.gethostname(),
         )
@@ -8971,6 +9109,23 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
     )
     root_ip = _root_ip_from_rest(bes_conn) or discover_root_ip(CLIENT_MASTHEAD_PATHS)
     print(f"root server: {root_ip or 'not found, give --allow with its address'}")
+    host_ips = _probe(host.powershell_json, PS_HOST_IPS) if host.is_windows() else []
+    given_allow = list(args.allow or [])
+    args.allow = coordinator_allow(
+        given_allow, host_ips, root_ip, state.get("session_allow", [])
+    )
+    if args.allow:
+        print(
+            "nodes may connect from: "
+            + ", ".join(args.allow)
+            + ("" if given_allow else " (this computer's subnets, --allow narrows it)")
+            + ". Add more while running with: allow <address or network>"
+        )
+    else:
+        print(
+            "nodes may connect from anywhere: this computer's subnets couldn't be"
+            " read. The pairing code still guards joining, --allow narrows it"
+        )
     plan, share = _prepare_share(args, host, state, root_ip, listen_port)
     if not host.is_windows():
         _explain_reachability(root_ip, listen_port)
@@ -8998,6 +9153,27 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             f" {state['session_halted'].get('reason')}, use continue to resume"
         )
 
+    def save_allow(entries: List[str]) -> Optional[str]:
+        # kept, so a restart still lets them in:
+        state["session_allow"] = list(entries)
+        save_state(args.state_file, state)
+        if not (plan and plan.get("folder") and host.is_windows()) or args.dry_run:
+            return None
+        smb = share_firewall_peers(root_ip, entries)
+        try:
+            host.run(firewall_allow_update_command(state["run_id"], 445, smb, "SMB"))
+            host.run(
+                firewall_allow_update_command(
+                    state["run_id"],
+                    listen_port,
+                    ["LocalSubnet"] + entries,
+                    "coordinator",
+                )
+            )
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            return f"WARNING: the firewall rules weren't updated: {err}"
+        return "firewall rules updated for SMB 445 and the coordinator's port"
+
     async def serve():
         coordinator = ShareSessionCoordinator(
             share=share,
@@ -9005,13 +9181,15 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             password=password,
             serial=serial,
             share_unc=plan["unc"] if plan else None,
-            allow=args.allow or [],
+            # worked out above, with what `allow` added before a restart:
+            allow=list(args.allow or []),
             tokens=tokens,
             on_tokens=lambda _tokens: save_state(args.state_file, state),
             log_store=NodeLogStore(args.log_dir),
             halted=state.get("session_halted"),
             on_halt=save_halt,
             share_folder=plan["folder"] if plan else None,
+            on_allow=save_allow,
         )
         server = await coordinator.start(listen_host, listen_port)
         discovery = None
@@ -9416,8 +9594,9 @@ def build_parser():
     session.add_argument(
         "--allow",
         action="append",
-        help="coordinator: peer address or network allowed to connect, repeatable,"
-        " also used for the firewall rules",
+        help="coordinator: narrow who may connect to these addresses or networks,"
+        " repeatable, also used for the firewall rules. Default: this computer's"
+        " own subnets and the root server, the pairing code still guards joining",
     )
     session.add_argument(
         "--share-unc", help=r"coordinator: the backup share, like \\server\share"
@@ -9426,6 +9605,12 @@ def build_parser():
         "--share-folder",
         help="coordinator: the local folder of the share, when it is on this host,"
         " to check and set it up",
+    )
+    session.add_argument(
+        "--share-confirm",
+        action="store_true",
+        help="coordinator or share owner: ask before each share setup step, like"
+        " the temporary account's new random password, instead of going ahead",
     )
     session.add_argument(
         "--share-account",
