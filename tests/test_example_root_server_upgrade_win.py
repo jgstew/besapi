@@ -6065,6 +6065,32 @@ def test_dryrun_command_starts_node_dry_run(upgrade):
     assert "dry run started on BIGFIX" in rig.text("mac")
 
 
+def test_backup_bigfix_command_reaches_root_node(upgrade):
+    """Test `backup_bigfix` from a console goes over a real session to the
+    root node, which starts its backup and says so.
+    """
+    runs = []
+
+    def backup(bridge):
+        runs.append("started")
+
+    async def scenario():
+        rig = WalkRig(upgrade, None)
+        rig.server = await rig.coordinator.start("127.0.0.1", 0)
+        rig.port = rig.server.sockets[0].getsockname()[1]
+        rig.add("BIGFIX", ["root"], client_host(upgrade), backup_fn=backup)
+        await rig.coordinator.wait_for_nodes(1, timeout=5)
+        await rig.console("mac", ["backup_bigfix"])
+        await rig.until(lambda: runs)
+        await rig.until(lambda: "backup started on BIGFIX" in rig.text("mac"))
+        await rig.finish()
+        return rig
+
+    rig = asyncio.run(scenario())
+    assert runs == ["started"]
+    assert "backup started on BIGFIX" in rig.text("mac")
+
+
 def test_dryrun_command_on_node_without_walkthrough(upgrade):
     """Test a node that has no walkthrough, like a peer, says so."""
 
