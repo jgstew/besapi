@@ -1168,6 +1168,93 @@ def test_report_warnings_backup_space(upgrade):
     assert "not enough free space on C: for a full backup" in text
 
 
+BIGFIX_PRODUCT_KEY = (
+    r"SOFTWARE\Classes\Installer\Products\FA64E94D3EC6D4947A7678A17DC0A9B4"
+)
+MISSING_MST = (
+    r"C:\Users\Administrator\AppData\Local\Temp\2"
+    r"\{721436A9-54C7-48BB-A10C-40D3DBB46403}\1033.MST"
+)
+
+
+def test_collect_local_info_installer_transforms(upgrade):
+    """Test the BigFix Server MSI's cached transforms are found and checked."""
+    host = local_host(upgrade)
+    host.registry[BIGFIX_PRODUCT_KEY] = {
+        "ProductName": "BigFix Server",
+        "Transforms": "|" + MISSING_MST + ";:embedded.mst",
+    }
+    host.registry[r"SOFTWARE\Classes\Installer\Products\0000OTHER"] = {
+        "ProductName": "Something Else",
+        "Transforms": r"C:\other.mst",
+    }
+
+    info = upgrade.collect_local_info(host)
+
+    assert info["bigfix"]["installer_transforms"] == {
+        "BigFix Server": {MISSING_MST: False}
+    }
+
+
+def test_report_warnings_missing_installer_transform(upgrade):
+    """Test a missing cached 1033.MST is warned about, a present one is not."""
+    host = local_host(upgrade)
+    host.registry[BIGFIX_PRODUCT_KEY] = {
+        "ProductName": "BigFix Server",
+        "Transforms": "|" + MISSING_MST,
+    }
+    text = "\n".join(
+        upgrade.report_warnings(upgrade.collect_local_info(host), now=REPORT_NOW)
+    )
+    assert MISSING_MST in text and "transform" in text
+
+    host.files.add(MISSING_MST)
+    text = "\n".join(
+        upgrade.report_warnings(upgrade.collect_local_info(host), now=REPORT_NOW)
+    )
+    assert "1033.MST" not in text
+
+
+SUPERSOCKET_KEY = (
+    r"SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL10_50.MSSQLSERVER"
+    r"\MSSQLServer\SuperSocketNetLib"
+)
+
+
+@pytest.mark.parametrize(
+    ("certificate", "bigfix_version", "warned"),
+    [
+        ("", "10.0.7.52", True),
+        ("0123456789abcdef0123456789abcdef01234567", "10.0.7.52", False),
+        ("", "11.0.7.61", False),
+    ],
+)
+def test_report_warnings_sql_self_generated_certificate(
+    upgrade, certificate, bigfix_version, warned
+):
+    """Test SQL Server without a configured certificate warns, ODBC Driver 18 rejects
+    it.
+    """
+    host = local_host(upgrade)
+    host.registry[SUPERSOCKET_KEY] = {"Certificate": certificate, "ForceEncryption": 0}
+    host.registry[ES_KEY] = dict(host.registry[ES_KEY], Version=bigfix_version)
+
+    local = upgrade.collect_local_info(host)
+    text = "\n".join(upgrade.report_warnings(local, now=REPORT_NOW))
+
+    assert local["sql"]["instances"]["MSSQLSERVER"]["Certificate"] == certificate
+    assert ("ODBC Driver 18" in text) is warned
+
+
+def test_report_warnings_no_certificate_info(upgrade):
+    """Test no certificate warning when the SQL network settings weren't read."""
+    local = upgrade.collect_local_info(local_host(upgrade))
+
+    assert "ODBC Driver 18" not in "\n".join(
+        upgrade.report_warnings(local, now=REPORT_NOW)
+    )
+
+
 def test_masthead_parameters_parsed(upgrade):
     """Test masthead parameters are parsed, booleans as booleans."""
     conn = FakeConnection(
@@ -8370,3 +8457,270 @@ def test_firewall_peers_include_networks(upgrade):
         "192.168.4.0/24",
         "192.168.5.225",
     ]
+
+
+# ---- sliding resume expiry
+
+
+def _coordinator_at(upgrade, clock, **changes):
+    return upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=lambda line: None,
+        now=lambda: clock[0],
+        **coordinator_options(upgrade, **changes),
+    )
+
+
+def test_resume_token_slides_on_each_use(upgrade):
+    """Test a node's token gets a fresh 24 hours each time it's used, so a
+    session in use never expires under it.
+    """
+    clock = [1000.0]
+    activity = []
+    coordinator = _coordinator_at(
+        upgrade, clock, on_activity=lambda: activity.append(1)
+    )
+    token = coordinator._issue_token("HYPERV")
+    resume_id = token["id"]
+
+    clock[0] += 20 * 3600
+    coordinator._slide_token(coordinator.tokens[resume_id])
+
+    assert coordinator.tokens[resume_id]["expires"] == clock[0] + 24 * 3600
+    assert activity  # the pairing code's window slides too
+    clock[0] += 23 * 3600
+    assert coordinator._token(resume_id) is not None
+
+
+def test_stopping_the_coordinator_slides_every_token(upgrade):
+    """Test stopping the coordinator gives every token a fresh 24 hours, so
+    the nodes rejoin without the code when it's back.
+    """
+    clock = [1000.0]
+    coordinator = _coordinator_at(upgrade, clock)
+    first = coordinator._issue_token("BIGFIX")["id"]
+    second = coordinator._issue_token("HYPERV")["id"]
+
+    clock[0] += 10 * 3600
+    coordinator.slide_all()
+
+    for resume_id in (first, second):
+        assert coordinator.tokens[resume_id]["expires"] == clock[0] + 24 * 3600
+
+
+def test_expired_token_isnt_slid_back_to_life(upgrade):
+    """Test an expired token stays expired: sliding only extends live ones."""
+    clock = [1000.0]
+    coordinator = _coordinator_at(upgrade, clock)
+    resume_id = coordinator._issue_token("HYPERV")["id"]
+
+    clock[0] += 25 * 3600
+    coordinator.slide_all()
+
+    assert coordinator._token(resume_id) is None
+
+
+def test_node_keeps_its_token_expiry_in_step(upgrade, monkeypatch):
+    """Test a node takes the coordinator's new expiry, and slides its own copy
+    when it disconnects.
+    """
+    saved = []
+    node = upgrade.ShareSessionNode(
+        "hyperv",
+        ["hyperv"],
+        None,
+        output=lambda line: None,
+        resume={"id": "r1", "secret": "s", "expires": 5.0},
+        on_resume=saved.append,
+        **session_options(upgrade),
+    )
+
+    node._on_resume_expires({"id": "r1", "expires": 99999.0})
+    assert node.resume["expires"] == 99999.0
+    node._on_resume_expires({"id": "other", "expires": 1.0})
+    assert node.resume["expires"] == 99999.0
+
+    monkeypatch.setattr(upgrade.time, "time", lambda: 50000.0)
+    node._slide_resume()
+    assert node.resume["expires"] == 50000.0 + 24 * 3600
+    assert saved[-1]["expires"] == node.resume["expires"]
+
+
+def test_session_pairing_code_window_slides(upgrade):
+    """Test the saved pairing code's expiry gets a fresh 24 hours."""
+    state = {"session": {"pairing_code": "123456", "expires": 10.0}}
+
+    upgrade.slide_session_code(state, now=500.0)
+
+    assert state["session"]["expires"] == 500.0 + 24 * 3600
+    empty = {}
+    upgrade.slide_session_code(empty, now=500.0)
+    assert empty == {}
+
+
+# ---- backup_bigfix on demand
+
+
+class _SentTo:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, message):
+        self.sent.append(message)
+
+    def close(self):
+        pass
+
+
+def test_backup_bigfix_goes_to_the_root_node(upgrade):
+    """Test backup_bigfix from anywhere is sent to whichever node is the root
+    server, by role, not by name.
+    """
+    output = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        **coordinator_options(upgrade),
+    )
+    root, other = _SentTo(), _SentTo()
+    coordinator.nodes = {
+        "MYROOT": {"channel": root, "roles": ["root"], "ip": "x", "script": {}},
+        "HV": {"channel": other, "roles": ["hyperv"], "ip": "y", "script": {}},
+    }
+
+    asyncio.run(coordinator.handle_command("backup_bigfix", source="HV"))
+
+    assert [m["type"] for m in root.sent] == ["backup_request"]
+    assert other.sent == []
+
+
+def test_backup_bigfix_without_a_root_node(upgrade):
+    """Test backup_bigfix says so when no root server node is connected."""
+    output = []
+    coordinator = upgrade.ShareSessionCoordinator(
+        share={"unc": SHARE_UNC, "user": None, "password": None},
+        output=output.append,
+        **coordinator_options(upgrade),
+    )
+
+    asyncio.run(coordinator.handle_command("backup_bigfix", source="coordinator"))
+
+    assert any("no root server node" in line for line in output)
+
+
+def _backup_rig(upgrade, tmp_path, monkeypatch, states, answer):
+    ran = []
+    for name in upgrade.ON_DEMAND_BACKUP_ACTIONS + ["stop_services", "start_services"]:
+        monkeypatch.setitem(
+            upgrade.ACTIONS, name, lambda ctx, name=name: ran.append(name)
+        )
+    services = [
+        {"Name": name, "State": state, "StartMode": "Manual"}
+        for name, state in states.items()
+    ]
+    monkeypatch.setattr(upgrade, "_bigfix_services", lambda ctx: services)
+    started = []
+    monkeypatch.setattr(
+        upgrade,
+        "service_command",
+        lambda verb, name, *rest: started.append((verb, name)) or ["x"],
+    )
+    asked = []
+    session = FakeSession()
+    session.ask = lambda prompt, choices, default=None: asked.append(prompt) or answer
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({"done": [], "reports": {}, "baseline": {}, "backup_run_dir": "old"})
+    )
+    args = types.SimpleNamespace(
+        state_file=str(state_path),
+        dry_run=False,
+        backup_dir=str(tmp_path / "share"),
+        backup_share_user=None,
+        staging_dir=None,
+        sql_instance=None,
+    )
+    host = local_host(upgrade)
+    host.run = lambda command: None
+    return ran, started, asked, session, args, host, state_path
+
+
+def test_backup_bigfix_with_services_stopped_doesnt_ask(upgrade, tmp_path, monkeypatch):
+    """Test the on-demand backup runs at once when BigFix is stopped, into a
+    new folder.
+    """
+    ran, started, asked, session, args, host, path = _backup_rig(
+        upgrade, tmp_path, monkeypatch, {"BESRootServer": "Stopped"}, "no"
+    )
+
+    upgrade.run_backup_now(args, None, host, session)
+
+    assert asked == []
+    assert ran == upgrade.ON_DEMAND_BACKUP_ACTIONS
+    assert (
+        "backup_run_dir" not in json.loads(path.read_text())
+        or json.loads(path.read_text())["backup_run_dir"] != "old"
+    )
+
+
+def test_backup_bigfix_asks_before_stopping_services(upgrade, tmp_path, monkeypatch):
+    """Test no is respected: running services aren't stopped, nothing backed up."""
+    ran, started, asked, session, args, host, path = _backup_rig(
+        upgrade, tmp_path, monkeypatch, {"BESRootServer": "Running"}, "no"
+    )
+
+    upgrade.run_backup_now(args, None, host, session)
+
+    assert len(asked) == 1 and "BESRootServer" in asked[0]
+    assert ran == []
+
+
+def test_backup_bigfix_restarts_only_what_was_running(upgrade, tmp_path, monkeypatch):
+    """Test yes stops BigFix, backs up, then starts again only the services that
+    were running, leaving stopped ones like WebUI stopped.
+    """
+    ran, started, asked, session, args, host, path = _backup_rig(
+        upgrade,
+        tmp_path,
+        monkeypatch,
+        {"BESRootServer": "Running", "FillDB": "Running", "BESWebUI": "Stopped"},
+        "yes",
+    )
+
+    upgrade.run_backup_now(args, None, host, session)
+
+    assert ran[0] == "stop_services"
+    assert ran[1:] == upgrade.ON_DEMAND_BACKUP_ACTIONS
+    started_names = [name for verb, name in started if verb == "Start-Service"]
+    assert sorted(started_names) == ["BESRootServer", "FillDB"]
+    assert "BESWebUI" not in started_names
+
+
+def test_root_node_starts_backup_unless_walkthrough_runs(upgrade):
+    """Test the root node starts the backup in the background, and refuses
+    while its walkthrough is running.
+    """
+    started = threading.Event()
+    node = upgrade.ShareSessionNode(
+        "root",
+        ["root"],
+        local_host(upgrade),
+        output=lambda line: None,
+        backup_fn=lambda bridge: started.set(),
+        **session_options(upgrade),
+    )
+    channel = _SentTo()
+
+    async def ask():
+        await node._handle_session_message(
+            channel, {"type": "backup_request", "id": "1"}
+        )
+
+    node._walk_running.set()
+    asyncio.run(ask())
+    assert "walkthrough is running" in channel.sent[-1]["data"]["error"]
+
+    node._walk_running.clear()
+    asyncio.run(ask())
+    assert channel.sent[-1]["data"] == {"started": True}
+    assert started.wait(5)

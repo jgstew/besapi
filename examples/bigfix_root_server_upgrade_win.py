@@ -137,7 +137,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.38"
+__version__ = "0.2.40"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -213,6 +213,14 @@ WINDOWS_VERSION_VALUES = [
 ]
 SQL_INSTANCE_NAMES_KEY = r"SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL"
 SQL_SETUP_VALUES = ["Version", "Edition", "PatchLevel", "SQLDataRoot", "SqlProgramDir"]
+# the TLS certificate SQL Server uses, empty for its self-generated one:
+SQL_NETLIB_VALUES = ["Certificate", "ForceEncryption"]
+# the BigFix 11.0.7 installer connects with ODBC Driver 18, which encrypts and
+# checks the certificate, so a self-generated one fails with "The certificate
+# chain was issued by an authority that is not trusted":
+ODBC18_INSTALLER_VERSION = "11.0.7"
+MSI_PRODUCTS_KEY = r"SOFTWARE\Classes\Installer\Products"
+BIGFIX_MSI_PRODUCT_NAMES = ("BigFix Server", "BES Server")
 ODBC_INI_KEY = r"SOFTWARE\ODBC\ODBC.INI"
 ODBC_INI_WOW_KEY = r"SOFTWARE\Wow6432Node\ODBC\ODBC.INI"
 SESSION_MANAGER_KEY = r"SYSTEM\CurrentControlSet\Control\Session Manager"
@@ -1290,8 +1298,16 @@ def _sql_instances(host) -> dict:
             )
             or {}
         )
+        netlib = (
+            host.reg_values(
+                rf"SOFTWARE\Microsoft\Microsoft SQL Server\{instance_id}"
+                r"\MSSQLServer\SuperSocketNetLib"
+            )
+            or {}
+        )
         instances[name] = {"id": instance_id}
         instances[name].update({k: setup[k] for k in SQL_SETUP_VALUES if k in setup})
+        instances[name].update({k: netlib[k] for k in SQL_NETLIB_VALUES if k in netlib})
     return instances
 
 
@@ -1470,6 +1486,29 @@ def find_key_files(
     }
 
 
+def _installer_transforms(host) -> dict:
+    """The cached MSI transforms of the installed BigFix Server, and if each exists.
+
+    An upgrade first removes the old version, which needs its cached
+    transforms (like `1033.MST` in a temp folder) to still be there.
+    """
+    found: Dict[str, Dict[str, bool]] = {}
+    for key in host.reg_subkeys(MSI_PRODUCTS_KEY) or []:
+        values = host.reg_values(MSI_PRODUCTS_KEY + "\\" + key) or {}
+        product = str(values.get("ProductName") or "")
+        if not product.startswith(BIGFIX_MSI_PRODUCT_NAMES):
+            continue
+        transforms = found.setdefault(product, {})
+        for transform in str(values.get("Transforms") or "").split(";"):
+            # `|` marks a secure path, `:` a transform embedded in the package:
+            transform = transform.strip()
+            if not transform or transform.startswith(":"):
+                continue
+            path = transform.lstrip("|@")
+            transforms[path] = host.file_exists(path)
+    return found
+
+
 def _bigfix_info(host, services: list) -> dict:
     bigfix_services = [s for s in services if _is_bigfix_service(s)]
     install_folder = None
@@ -1484,6 +1523,7 @@ def _bigfix_info(host, services: list) -> dict:
         "services": bigfix_services,
         "ports": _probe(_bigfix_ports, host),
         "registry": _probe(_reg_tree, host, BIGFIX_SERVER_KEY),
+        "installer_transforms": _probe(_installer_transforms, host),
         # paths only, never contents:
         "key_files": _probe(
             find_key_files,
@@ -1769,6 +1809,35 @@ def report_warnings(local: dict, now: Optional[datetime.datetime] = None) -> Lis
         warnings.append(
             f"BigFix connects with SQL Server Native Client ({', '.join(drivers)}),"
             " per HCL BigFix 11 Patch 8 and later need Microsoft ODBC Driver 17"
+        )
+
+    transforms = _get(local, "bigfix", "installer_transforms") or {}
+    for product, paths in transforms.items():
+        if not isinstance(paths, dict):
+            continue
+        for path, exists in paths.items():
+            if not exists:
+                warnings.append(
+                    f"the {product} installer's cached transform {path} is missing,"
+                    " so the upgrade can't remove the old version: put back the same"
+                    " file from the installer of the installed version first"
+                )
+
+    version = _get(local, "bigfix", "version")
+    certificate = (_bigfix_sql_instance(local) or {}).get("Certificate")
+    if (
+        certificate is not None
+        and not str(certificate).strip()
+        and (
+            not version
+            or version_tuple(version) < version_tuple(ODBC18_INSTALLER_VERSION)
+        )
+    ):
+        warnings.append(
+            "SQL Server uses its self-generated certificate, which BigFix"
+            f" {ODBC18_INSTALLER_VERSION} setup's ODBC Driver 18 connection doesn't"
+            " trust, so its database upgrade fails: give SQL Server a trusted"
+            " certificate first, or finish the database upgrade with BESAdmin"
         )
 
     disks = _get(local, "hardware", "disks")
@@ -4108,6 +4177,74 @@ def restart_from_step(state: dict, ids: List[str], step: str) -> None:
         state.pop("backup_run_dir", None)
 
 
+# the backup step's actions, run by `backup_bigfix`: all but the optional
+# ServerKeyTool decryption, which needs input typed on the server itself
+ON_DEMAND_BACKUP_ACTIONS = [
+    "registry_export",
+    "key_files",
+    "masthead",
+    "client_data",
+    "folder_backup",
+    "db_info",
+    "sql_backup",
+    "restore_notes",
+    "verify_backup",
+]
+
+
+def run_backup_now(args, bes_conn, host, session) -> None:
+    """`backup_bigfix`: a new BigFix backup now, into a new folder.
+
+    BigFix is stopped first, as HCL's backup procedure needs, only after
+    asking if it's running, and the services that were running are started
+    again afterwards.
+    """
+    # pylint: disable=unused-argument
+    state = load_state(args.state_file)
+    ctx = WalkthroughContext(
+        args,
+        host,
+        state,
+        args.state_file,
+        ask=session.ask if session else None,
+        input_fn=lambda prompt: "",
+        getpass_fn=lambda prompt: "",
+        session=session,
+    )
+    if "baseline" not in state:
+        ACTIONS["collect_baseline"](ctx)
+    running = [s for s in _bigfix_services(ctx) if s.get("State") == "Running"]
+    if running:
+        names = ", ".join(str(s.get("Name")) for s in running)
+        if not ctx.confirm(
+            f"BigFix services {names} are running. Stop them for the backup, and"
+            " start them again afterwards?",
+            default="no",
+        ):
+            print("backup not taken: BigFix is still running")
+            return
+        ACTIONS["stop_services"](ctx)
+    actions = [
+        action
+        for action in ON_DEMAND_BACKUP_ACTIONS
+        if action != "sql_backup" or state.get("local_sql", True)
+    ]
+    try:
+        # a new folder, never mixed with an earlier backup:
+        state.pop("backup_run_dir", None)
+        print("===== backup_bigfix: Back up BigFix now =====")
+        for action in actions:
+            if session:
+                session.wait_if_halted()
+            ACTIONS[action](ctx)
+            save_state(args.state_file, state)
+        print(f"backup_bigfix finished: {state.get('backup_run_dir')}")
+    finally:
+        for name in services_to_start(running):
+            ctx.execute(service_command("Start-Service", name))
+        save_state(args.state_file, state)
+
+
 def run_walkthrough(args, bes_conn, host, compat: dict, session=None) -> int:
     """Guide the upgrade one step at a time, resuming from the state file.
 
@@ -6342,7 +6479,8 @@ MAX_WRONG_CODES = 5
 RESUME_TOKEN_SECONDS = 24 * 60 * 60
 SESSION_COMMANDS = (
     "status, retry, state <node>, diag <node> [check], report <node>,"
-    " dryrun <node>, suggest <node> <command>, and typed at a node:"
+    " dryrun <node>, backup_bigfix, suggest <node> <command>, and typed at a"
+    " node:"
     " walkthrough, localcmd <command>, send <file>,"
     " log <node> [lines],"
     " halt [reason], continue, answer <choice>, revoke <node>, end,"
@@ -6503,6 +6641,15 @@ def decide_pairing_code(given: Optional[str], psk_source: str) -> Optional[str]:
     if given:
         return given
     return generate_pairing_code() if code_required(psk_source) else None
+
+
+def slide_session_code(state: dict, now: Optional[float] = None) -> None:
+    """Give the saved pairing code a fresh RESUME_TOKEN_SECONDS, on activity."""
+    session = state.get("session")
+    if isinstance(session, dict) and session.get("pairing_code"):
+        session["expires"] = (
+            time.time() if now is None else now
+        ) + RESUME_TOKEN_SECONDS
 
 
 def session_pairing_code(
@@ -7117,9 +7264,12 @@ class ShareSessionCoordinator:
         on_halt=None,
         share_folder=None,
         on_allow=None,
+        on_activity=None,
     ):
         # pylint: disable=too-many-arguments
         self.share = share
+        # a node connecting or leaving, to slide the saved pairing code's window:
+        self.on_activity = on_activity
         # saves the allowed addresses after `allow`, and updates the firewall:
         self.on_allow = on_allow
         # the share's folder, when it is on this computer's own disk:
@@ -7232,6 +7382,28 @@ class ShareSessionCoordinator:
     def _tokens_changed(self) -> None:
         if self.on_tokens:
             self.on_tokens(self.tokens)
+
+    def _slide_token(self, token: Optional[dict]) -> None:
+        """A fresh RESUME_TOKEN_SECONDS for a live token, as it's used."""
+        if token and self.now() < float(token.get("expires", 0)):
+            token["expires"] = self.now() + RESUME_TOKEN_SECONDS
+            self._tokens_changed()
+        if self.on_activity:
+            self.on_activity()
+
+    def _node_tokens(self, name: str) -> List[dict]:
+        return [t for t in self.tokens.values() if t.get("node") == name]
+
+    def slide_all(self) -> None:
+        """When the coordinator stops: a fresh window for every live token, so
+        the nodes rejoin without the code when it's back.
+        """
+        for token in self.tokens.values():
+            if self.now() < float(token.get("expires", 0)):
+                token["expires"] = self.now() + RESUME_TOKEN_SECONDS
+        self._tokens_changed()
+        if self.on_activity:
+            self.on_activity()
 
     def _issue_token(self, name: str) -> dict:
         # one token per node, a new one replaces the old:
@@ -7383,6 +7555,15 @@ class ShareSessionCoordinator:
         )
         if not token:
             await channel.send({"type": "resume", **self._issue_token(name)})
+        else:
+            self._slide_token(token)
+            await channel.send(
+                {
+                    "type": "resume_expires",
+                    "id": peer.get("resume_id"),
+                    "expires": token["expires"],
+                }
+            )
         if "console" in roles:
             # a console that joins late still sees what's waiting:
             for waiting in list(self.questions.values()):
@@ -7404,6 +7585,9 @@ class ShareSessionCoordinator:
                 self.pending.pop(name, None)
             self._changed.set()
             channel.close()
+            # leaving counts as use too, the window starts again from now:
+            for left in [token] if token else self._node_tokens(name):
+                self._slide_token(left)
             self.output(f"{name} disconnected")
 
     async def _on_message(self, name: str, message: dict) -> None:
@@ -7442,6 +7626,7 @@ class ShareSessionCoordinator:
             "diag_reply",
             "report_reply",
             "dryrun_reply",
+            "backup_reply",
         ):
             await self._relay_reply(name, message)
         elif message.get("type") == "action_request":
@@ -7512,6 +7697,13 @@ class ShareSessionCoordinator:
                 f"dry run started on {name}, its file comes here when it's done"
                 if data.get("started")
                 else f"no dry run on {name}: {data.get('error')}"
+            )
+        if reply["kind"] == "backup":
+            data = reply["data"] if isinstance(reply["data"], dict) else {}
+            self.output(
+                f"backup started on {name}, answer its question if BigFix is running"
+                if data.get("started")
+                else f"no backup on {name}: {data.get('error')}"
             )
         if requester == "coordinator":
             self.output(f"{reply['kind']} {name}: {json.dumps(reply['data'])}")
@@ -7737,6 +7929,22 @@ class ShareSessionCoordinator:
             message["check"] = words[1] if len(words) > 1 else "all"
         await self._send(node, message)
 
+    async def _backup_bigfix(self, source: str) -> None:
+        """`backup_bigfix` from any terminal: sent to the root server's node,
+        found by its role, which asks before stopping BigFix.
+        """
+        root = next(
+            (name for name, node in self.nodes.items() if "root" in node["roles"]),
+            None,
+        )
+        if not root:
+            self.output("backup_bigfix: no root server node is connected, see status")
+            return
+        request_id = secrets.token_hex(8)
+        self.requests[request_id] = source
+        self.output(f"{source} asked {root} for a BigFix backup")
+        await self._send(root, {"type": "backup_request", "id": request_id})
+
     async def _set_halt(self, halted: Optional[dict]) -> None:
         self.halted = halted
         if self.on_halt:
@@ -7872,6 +8080,8 @@ class ShareSessionCoordinator:
             )
         elif words[0] in ("state", "diag", "report", "dryrun"):
             await self._request(words[0], words[1:], source)
+        elif words[0] == "backup_bigfix":
+            await self._backup_bigfix(source)
         elif command == "status":
             lines = self.status_lines()
             for line in lines:
@@ -7965,6 +8175,7 @@ class ShareSessionNode:
         share_offer=None,
         report_fn=None,
         dry_run_fn=None,
+        backup_fn=None,
         localcmd_timeout=300,
         share_setup_fn=None,
         serial_confirmed=True,
@@ -7995,6 +8206,8 @@ class ShareSessionNode:
         self.walkthrough = walkthrough
         # a dry run of this node's walkthrough, started by `dryrun <node>`:
         self.dry_run_fn = dry_run_fn
+        # a BigFix backup now, started by `backup_bigfix` from any terminal:
+        self.backup_fn = backup_fn
         # a serial only guessed from this computer's client masthead is replaced
         # by the coordinator's, with the password for it:
         self.serial_confirmed = serial_confirmed
@@ -8275,6 +8488,21 @@ class ShareSessionNode:
             self._print(f"SUGGESTED by {by}: {command}")
             self._print(f"to run it, type: localcmd {command}")
             self.log("INFO", f"{by} suggested: {command}")
+        elif kind == "backup_request":
+            backup: dict
+            if not self.backup_fn:
+                backup = {"error": f"{self.name} isn't the root server"}
+            elif self._walk_running.is_set():
+                backup = {
+                    "error": f"a walkthrough is running on {self.name}, use its"
+                    " backup step, or quit it first"
+                }
+            else:
+                self._start_walkthrough(self.backup_fn)
+                backup = {"started": True}
+            await channel.send(
+                {"type": "backup_reply", "id": message.get("id"), "data": backup}
+            )
         elif kind == "dryrun_request":
             if not self.dry_run_fn:
                 data: dict = {"error": f"{self.name} has no walkthrough to dry run"}
@@ -8400,6 +8628,18 @@ class ShareSessionNode:
         self.resume = token
         if self.on_resume:
             self.on_resume(token)
+
+    def _on_resume_expires(self, message: dict) -> None:
+        """The coordinator slid this node's token: keep the same expiry."""
+        if self.resume and message.get("id") == self.resume.get("id"):
+            self._set_resume(dict(self.resume, expires=message.get("expires")))
+
+    def _slide_resume(self) -> None:
+        """On leaving, like the coordinator: a fresh window from now."""
+        if self._resume_token():
+            self._set_resume(
+                dict(self.resume, expires=time.time() + RESUME_TOKEN_SECONDS)
+            )
 
     def _resume_token(self) -> Optional[dict]:
         token = self.resume
@@ -8567,6 +8807,8 @@ class ShareSessionNode:
                         self.output(f"commands: {SESSION_COMMANDS}")
                     for command in self.commands or []:
                         await self.command_queue.put(command)
+                elif kind == "resume_expires":
+                    self._on_resume_expires(message)
                 elif kind == "resume":
                     self._set_resume(
                         {
@@ -8629,6 +8871,7 @@ class ShareSessionNode:
                     return
         except (asyncio.IncompleteReadError, ConnectionError):
             self.output("coordinator disconnected")
+            self._slide_resume()
         finally:
             self._channel = None
             sender.cancel()
@@ -9190,6 +9433,10 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
             on_halt=save_halt,
             share_folder=plan["folder"] if plan else None,
             on_allow=save_allow,
+            on_activity=lambda: (
+                slide_session_code(state),
+                save_state(args.state_file, state),
+            ),
         )
         server = await coordinator.start(listen_host, listen_port)
         discovery = None
@@ -9210,16 +9457,21 @@ def _run_coordinator(args, bes_conn, host, serial, psk, psk_source, given_code) 
         threading.Thread(
             target=_read_stdin_commands, args=(queue.put_nowait, loop), daemon=True
         ).start()
-        while not coordinator.done.is_set():
-            getter = asyncio.create_task(queue.get())
-            finished = asyncio.create_task(coordinator.done.wait())
-            done, _ = await asyncio.wait(
-                {getter, finished}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if getter in done:
-                await coordinator.handle_command(getter.result(), "coordinator")
-            else:
-                getter.cancel()
+        try:
+            while not coordinator.done.is_set():
+                getter = asyncio.create_task(queue.get())
+                finished = asyncio.create_task(coordinator.done.wait())
+                done, _ = await asyncio.wait(
+                    {getter, finished}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if getter in done:
+                    await coordinator.handle_command(getter.result(), "coordinator")
+                else:
+                    getter.cancel()
+        finally:
+            if not coordinator.done.is_set():
+                # stopped, not ended: the nodes rejoin without the code later
+                coordinator.slide_all()
         server.close()
         if discovery:
             discovery.close()
@@ -9311,6 +9563,15 @@ def _run_node(
 
         dry_run_fn = session_dry_run
 
+    backup_fn = None
+    if "root" in roles:
+
+        def session_backup(bridge) -> None:
+            tee.claim()
+            run_backup_now(args, rest.get(), host, bridge)
+
+        backup_fn = session_backup
+
     codes = {"code": given_code, "serial": serial}
 
     def password_for(for_serial: str) -> Optional[bytes]:
@@ -9384,6 +9645,7 @@ def _run_node(
             share_setup_fn=share_setup,
             report_fn=None if node == "console" else node_report,
             dry_run_fn=dry_run_fn,
+            backup_fn=backup_fn,
             walkthrough_fn=real_walkthrough,
             localcmd_timeout=args.localcmd_timeout,
         )
