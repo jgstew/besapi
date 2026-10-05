@@ -31,7 +31,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.4.2"
+__version__ = "4.4.3"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -1090,6 +1090,71 @@ class BESConnection:
         besapi_logger.debug("user creation result:\n%s", user_result)
 
         return self.get_user(new_user_name)
+
+    @staticmethod
+    def _computer_path(computer_id):
+        """Validate a computer id and build its REST API path."""
+        # NOTE: bool is a subclass of int, reject it explicitly
+        if isinstance(computer_id, bool) or not str(computer_id).isdigit():
+            raise ValueError(f"invalid computer id: `{computer_id}`")
+        return f"computer/{int(computer_id)}"
+
+    @classmethod
+    def _computer_setting_path(cls, computer_id, setting_name):
+        """Validate inputs and build a computer setting REST API path."""
+        computer_path = cls._computer_path(computer_id)
+        if (
+            not isinstance(setting_name, str)
+            or not setting_name.strip()
+            or "/" in setting_name
+        ):
+            raise ValueError(f"invalid setting name: `{setting_name}`")
+        return f"{computer_path}/setting/{urllib.parse.quote(setting_name, safe='')}"
+
+    @staticmethod
+    def _settings_to_dict(result):
+        """Convert a ComputerSettings REST result to {name: value}."""
+        root = lxml.etree.fromstring(result.text.encode("utf-8"))
+        return {
+            setting.findtext("Name"): setting.findtext("Value") or ""
+            for setting in root.iterfind("ComputerSettings/Setting")
+        }
+
+    def get_computer_settings(self, computer_id):
+        """Get all client settings of a computer as a dict {name: value}."""
+        path = f"{self._computer_path(computer_id)}/settings"
+        return self._settings_to_dict(self.get(path))
+
+    def get_computer_setting(self, computer_id, setting_name):
+        """Get the value of one client setting of a computer, None if missing."""
+        path = self._computer_setting_path(computer_id, setting_name)
+        try:
+            result = self.get(path)
+        except requests.HTTPError as err:
+            if err.response is not None and err.response.status_code == 404:
+                return None
+            raise
+        if result.request.status_code == 404:
+            return None
+        return self._settings_to_dict(result).get(setting_name)
+
+    def set_computer_setting(self, computer_id, setting_name, value):
+        """Set a client setting on a computer.
+
+        The root server creates an action to apply the setting, the result
+        contains that action.
+        """
+        path = self._computer_setting_path(computer_id, setting_name)
+        root = lxml.etree.Element("BESAPI")
+        settings = lxml.etree.SubElement(root, "ComputerSettings")
+        setting = lxml.etree.SubElement(settings, "Setting")
+        lxml.etree.SubElement(setting, "Name").text = setting_name
+        lxml.etree.SubElement(setting, "Value").text = str(value)
+        data = lxml.etree.tostring(root, encoding="utf-8", xml_declaration=True)
+        besapi_logger.info(
+            "Setting `%s` on computer `%s` to `%s`", setting_name, computer_id, value
+        )
+        return self.post(path, data)
 
     def get_computergroup(self, group_name, site_path=None):
         """Get computer group resource URI."""
