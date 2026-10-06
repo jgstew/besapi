@@ -1196,6 +1196,32 @@ def test_collect_local_info_installer_transforms(upgrade):
     }
 
 
+@pytest.mark.parametrize(
+    "product",
+    [
+        "BigFix Console",
+        "IBM BigFix WebUI Service",
+        "BigFix WebUI Service",
+        "BES Client",
+    ],
+)
+def test_collect_local_info_installer_transforms_other_bigfix_products(
+    upgrade, product
+):
+    """Test the Console, WebUI and Client MSIs' cached transforms are checked
+    too, as each upgrade removes its old version the same way.
+    """
+    host = local_host(upgrade)
+    host.registry[BIGFIX_PRODUCT_KEY] = {
+        "ProductName": product,
+        "Transforms": "|" + MISSING_MST,
+    }
+
+    info = upgrade.collect_local_info(host)
+
+    assert info["bigfix"]["installer_transforms"] == {product: {MISSING_MST: False}}
+
+
 def test_report_warnings_missing_installer_transform(upgrade):
     """Test a missing cached 1033.MST is warned about, a present one is not."""
     host = local_host(upgrade)

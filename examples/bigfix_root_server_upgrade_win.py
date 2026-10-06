@@ -137,7 +137,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.41"
+__version__ = "0.2.42"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -220,7 +220,9 @@ SQL_NETLIB_VALUES = ["Certificate", "ForceEncryption"]
 # chain was issued by an authority that is not trusted":
 ODBC18_INSTALLER_VERSION = "11.0.7"
 MSI_PRODUCTS_KEY = r"SOFTWARE\Classes\Installer\Products"
-BIGFIX_MSI_PRODUCT_NAMES = ("BigFix Server", "BES Server")
+# every BigFix MSI: Server, Console, WebUI (once "IBM BigFix WebUI Service")
+# and Client, as each upgrade removes its old version with its cached transforms:
+BIGFIX_MSI_PRODUCT_PATTERN = re.compile(r"\bBigFix\b|^BES ", re.IGNORECASE)
 ODBC_INI_KEY = r"SOFTWARE\ODBC\ODBC.INI"
 ODBC_INI_WOW_KEY = r"SOFTWARE\Wow6432Node\ODBC\ODBC.INI"
 SESSION_MANAGER_KEY = r"SYSTEM\CurrentControlSet\Control\Session Manager"
@@ -1487,7 +1489,7 @@ def find_key_files(
 
 
 def _installer_transforms(host) -> dict:
-    """The cached MSI transforms of the installed BigFix Server, and if each exists.
+    """The cached MSI transforms of the installed BigFix products, and if each exists.
 
     An upgrade first removes the old version, which needs its cached
     transforms (like `1033.MST` in a temp folder) to still be there.
@@ -1496,7 +1498,7 @@ def _installer_transforms(host) -> dict:
     for key in host.reg_subkeys(MSI_PRODUCTS_KEY) or []:
         values = host.reg_values(MSI_PRODUCTS_KEY + "\\" + key) or {}
         product = str(values.get("ProductName") or "")
-        if not product.startswith(BIGFIX_MSI_PRODUCT_NAMES):
+        if not BIGFIX_MSI_PRODUCT_PATTERN.search(product):
             continue
         transforms = found.setdefault(product, {})
         for transform in str(values.get("Transforms") or "").split(";"):
