@@ -29,8 +29,9 @@ Report mode (the default) is read-only and prints a JSON document of all of
 it, including the upgrade assessment, with secrets removed.
 
 Walkthrough mode (`--walkthrough`, on the root server only) guides the
-upgrade one step at a time: backups, stopping services, snapshots, each
-upgrade, and validation against the starting baseline. Progress is saved to a
+upgrade one step at a time: clearing out old data, backups, stopping
+services, snapshots, rebuilding fragmented indexes, each upgrade, and
+validation against the starting baseline. Progress is saved to a
 state file so it resumes after reboots. The upgrades themselves and VM
 snapshots are done by the operator when prompted.
 
@@ -137,7 +138,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO, Tuple, 
 import besapi
 import besapi.plugin_utilities
 
-__version__ = "0.2.42"
+__version__ = "0.2.43"
 
 COMPAT_FILE_NAME = "bigfix_root_server_upgrade_win_compat.yaml"
 
@@ -2031,6 +2032,12 @@ def _upgrade_instructions(step: dict, local_sql: bool) -> str:
             " after the reboots."
         )
     else:
+        if not local_sql:
+            lines.append(
+                "The BigFix database is on a remote SQL server: just before this"
+                " upgrade, rebuild its fragmented indexes there, as a reindex during"
+                " the upgrade's schema changes can make it take far longer."
+            )
         lines.append(
             f"Upgrade the BigFix server from {before} to {target} or later, with the"
             " BigFix server installer or the upgrade Fixlet in BES Support."
@@ -2119,6 +2126,23 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
             ["collect_baseline"],
         ),
         Step(
+            "data_cleanup",
+            "Clear out old data",
+            "Less data makes the backup, the index rebuild and the BigFix"
+            " upgrade's database changes quicker, so while BigFix still runs:\n"
+            "  1. Delete computers that have not reported in a long time: the"
+            " script lists them, and deletes them if you agree.\n"
+            "  2. Run the BESAdmin cleanup options, which also remove the data of"
+            " deleted computers.\n"
+            "  3. Run BESAdmin's Property ID Mapper.\n"
+            "Fragmented indexes are rebuilt just before the BigFix upgrade, after"
+            " this cleanup. In a small or recently cleaned environment, skip this.",
+            ["stale_computers"],
+            manual=True,
+            todo="Run the BESAdmin cleanup options, then BESAdmin's Property ID"
+            " Mapper, and come back here. skip if there's nothing to clear out.",
+        ),
+        Step(
             "stop_services_0",
             "Stop BigFix for the backup",
             "BigFix services are stopped in HCL's order and set to Manual. Close"
@@ -2187,7 +2211,8 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                     " can report success with it left partially upgraded. So first:"
                     " a fresh database backup, then SQL Server's patch level, recent"
                     " crashes, scalar UDF inlining and memory are checked, and"
-                    " CHECKDB is offered.",
+                    " CHECKDB is offered. Last, fragmented indexes are rebuilt, so"
+                    " the upgrade doesn't spend hours reindexing.",
                     [
                         "sql_backup",
                         "check_sql_patch",
@@ -2195,6 +2220,8 @@ def build_steps(path: dict, local_sql: bool = True) -> List[Step]:
                         "check_udf_inlining",
                         "checkdb",
                         "sql_memory_note",
+                        # last, as close to the upgrade as can be:
+                        "reindex",
                     ],
                 )
             )
@@ -2296,6 +2323,21 @@ def mark_step_done(state: dict, step_id: str) -> None:
     """Record a step as complete."""
     if step_id not in state["done"]:
         state["done"].append(step_id)
+
+
+def leave_out_new_steps(steps: List[Step], state: dict) -> None:
+    """Skip steps not done that come before a done one.
+
+    Only a step new in this version of the script can be like that, and it
+    would run out of order, like clearing out data with the services stopped.
+    """
+    done = set(state["done"])
+    last = max((i for i, step in enumerate(steps) if step.id in done), default=0)
+    for step in steps[:last]:
+        if step.id not in done:
+            print(f"NOTE: leaving out {step.id}, new since this walkthrough started")
+            mark_step_done(state, step.id)
+            state.setdefault("skipped", []).append(step.id)
 
 
 def next_step(steps: List[Step], state: dict) -> Optional[Step]:
@@ -2672,6 +2714,8 @@ class WalkthroughContext:
     session: Any = None
     # set by an action when the operator has to do the step after all:
     manual_needed: bool = False
+    # the REST connection, None when there isn't one:
+    bes_conn: Any = None
 
     def confirm(self, prompt: str, default: str = "yes") -> bool:
         """Ask the operator to confirm, yes or no, Enter takes the default."""
@@ -3889,6 +3933,166 @@ def _action_checkdb(ctx: WalkthroughContext) -> None:
     print("CHECKDB finished: any errors are printed above")
 
 
+# indexes smaller than this aren't worth it, as HCL and Microsoft suggest:
+REINDEX_MIN_PAGES = 1000
+REINDEX_MIN_FRAGMENTATION = 5
+# at or above this, rebuild instead of reorganize:
+REBUILD_FRAGMENTATION = 30
+
+
+def _fragmented_indexes(database: str) -> str:
+    """FROM and WHERE for a database's fragmented indexes worth fixing."""
+    # the name is one of BIGFIX_DATABASES; LIMITED only reads the index pages
+    # above the leaf level, so it's quick even on a large database:
+    return (
+        f" FROM sys.dm_db_index_physical_stats(DB_ID('{database}'), NULL, NULL,"
+        " NULL, 'LIMITED') ps"
+        f" JOIN [{database}].sys.indexes i ON i.object_id = ps.object_id"
+        " AND i.index_id = ps.index_id"
+        f" JOIN [{database}].sys.objects o ON o.object_id = ps.object_id"
+        f" JOIN [{database}].sys.schemas s ON s.schema_id = o.schema_id"
+        " WHERE ps.index_id > 0 AND ps.alloc_unit_type_desc = 'IN_ROW_DATA'"
+        f" AND ps.page_count >= {REINDEX_MIN_PAGES}"
+        f" AND ps.avg_fragmentation_in_percent >= {REINDEX_MIN_FRAGMENTATION}"
+        " AND o.is_ms_shipped = 0 AND i.is_disabled = 0"
+    )
+
+
+def fragmented_indexes_query(database: str) -> str:
+    """How many indexes in a database are fragmented, and their 8 KB pages."""
+    return (
+        "SET NOCOUNT ON; SELECT COUNT(*), COALESCE(SUM(ps.page_count), 0)"
+        + _fragmented_indexes(database)
+    )
+
+
+def reindex_query(database: str) -> str:
+    """Rebuild or reorganize a database's fragmented indexes, then update the
+    statistics, printing each statement as it starts.
+    """
+    # REORGANIZE needs page locks, so an index without them is rebuilt:
+    return (
+        "SET NOCOUNT ON; DECLARE @statement nvarchar(max);"
+        " DECLARE fragmented CURSOR LOCAL FAST_FORWARD FOR"
+        f" SELECT N'ALTER INDEX ' + QUOTENAME(i.name) + N' ON [{database}].'"
+        " + QUOTENAME(s.name) + N'.' + QUOTENAME(o.name)"
+        " + CASE WHEN MAX(ps.avg_fragmentation_in_percent) >="
+        f" {REBUILD_FRAGMENTATION} OR i.allow_page_locks = 0"
+        " THEN N' REBUILD' ELSE N' REORGANIZE' END"
+        + _fragmented_indexes(database)
+        + " GROUP BY s.name, o.name, i.name, i.allow_page_locks;"
+        " OPEN fragmented; FETCH NEXT FROM fragmented INTO @statement;"
+        " WHILE @@FETCH_STATUS = 0 BEGIN"
+        " RAISERROR('%s', 0, 1, @statement) WITH NOWAIT; EXEC (@statement);"
+        " FETCH NEXT FROM fragmented INTO @statement; END;"
+        " CLOSE fragmented; DEALLOCATE fragmented;"
+        f" EXEC [{database}].sys.sp_updatestats;"
+    )
+
+
+def _action_reindex(ctx: WalkthroughContext) -> None:
+    """Just before a BigFix upgrade: rebuild fragmented indexes, after asking.
+
+    Otherwise the upgrade can spend hours reindexing as it changes the schema.
+    """
+    fragmented = {}
+    for name in BIGFIX_DATABASES:
+        rows = _probe(ctx.host.sqlcmd, ctx.sql_server(), fragmented_indexes_query(name))
+        try:
+            count, pages = (int(str(v).strip()) for v in rows[0][:2])
+        except (TypeError, ValueError, IndexError, KeyError):
+            print(f"NOTE: couldn't check {name} for fragmented indexes, skipping it")
+            continue
+        if count:
+            fragmented[name] = (count, pages)
+    if not fragmented:
+        print("OK, no fragmented indexes to rebuild")
+        return
+    indexes = sum(count for count, _ in fragmented.values())
+    megabytes = sum(pages for _, pages in fragmented.values()) * 8 // 1024
+    if not ctx.confirm(
+        f"Rebuild or reorganize {indexes} fragmented indexes ({megabytes} MB) in"
+        f" {' and '.join(fragmented)}, then update statistics? It can take a while,"
+        " and the transaction log grows by up to about that much",
+        default="yes",
+    ):
+        print("Index rebuild skipped")
+        return
+    for name in fragmented:
+        ctx.sql(reindex_query(name))
+    print("Indexes rebuilt and statistics updated")
+
+
+DEFAULT_STALE_DAYS = 90
+# shown before asking to delete, the rest are only counted:
+STALE_SHOWN = 10
+
+
+def stale_computers_relevance(days: int) -> str:
+    """Computers, apart from the root server, not reported in `days` days."""
+    return (
+        '(id of it, (name of it | "unknown"), (last report time of it as string'
+        ' | "never")) of bes computers whose (not root server flag of it and'
+        f" (last report time of it < now - {int(days)} * day | false))"
+    )
+
+
+def _stale_days(ctx: WalkthroughContext) -> int:
+    answer = ctx.read(
+        "Delete computers not reported in how many days?" f" [{DEFAULT_STALE_DAYS}]: "
+    )
+    if answer.isdigit() and int(answer) > 0:
+        return int(answer)
+    if answer:
+        print(f"NOTE: {answer!r} isn't a number of days, using {DEFAULT_STALE_DAYS}")
+    return DEFAULT_STALE_DAYS
+
+
+def _action_stale_computers(ctx: WalkthroughContext) -> None:
+    """Find computers not reported in a long time, and delete them if agreed.
+
+    Deleting only marks them deleted in BigFix: BESAdmin's cleanup removes
+    their data afterwards.
+    """
+    if ctx.bes_conn is None:
+        print(
+            "NOTE: no REST connection: delete computers that haven't reported in a"
+            " long time in the console instead"
+        )
+        return
+    days = _stale_days(ctx)
+    rows = _probe(_relevance, ctx.bes_conn, stale_computers_relevance(days))
+    if isinstance(rows, dict):
+        print(f"NOTE: couldn't list stale computers: {rows.get('error')}")
+        return
+    if not rows:
+        print(f"No computers have gone {days} days without reporting")
+        return
+    print(f"{len(rows)} computers haven't reported in {days} days, like:")
+    for computer_id, name, last_report in rows[:STALE_SHOWN]:
+        print(f"  {computer_id} {name}, last report {last_report}")
+    if not ctx.confirm(
+        f"Delete these {len(rows)} computers not reported in {days} days from"
+        " BigFix? A computer that reports again comes back",
+        default="no",
+    ):
+        print("No computers deleted")
+        return
+    if ctx.dry_run:
+        print(f"DRY RUN, would delete {len(rows)} computers")
+        return
+    failed = []
+    for computer_id, _name, _last_report in rows:
+        try:
+            ctx.bes_conn.delete(f"computer/{computer_id}")
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            logging.warning("deleting computer %s failed: %s", computer_id, err)
+            failed.append(str(computer_id))
+    print(f"Deleted {len(rows) - len(failed)} of {len(rows)} computers")
+    if failed:
+        print(f"NOTE: deleting these failed, see the log: {', '.join(failed)}")
+
+
 def _action_sql_memory_note(ctx: WalkthroughContext) -> None:
     """A note when SQL Server's memory cap is far below the computer's."""
     rows = _probe(ctx.host.sqlcmd, ctx.sql_server(), SQL_MEMORY)
@@ -4095,6 +4299,8 @@ ACTIONS: Dict[str, Callable[..., None]] = {
     "check_sql_patch": _action_check_sql_patch,
     "check_sql_health": _action_check_sql_health,
     "checkdb": _action_checkdb,
+    "reindex": _action_reindex,
+    "stale_computers": _action_stale_computers,
     "sql_memory_note": _action_sql_memory_note,
     "check_web_reports": _action_check_web_reports,
     "remote_processes": _action_remote_processes,
@@ -4306,6 +4512,7 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> i
         persist()
 
     steps = build_steps(state["plan"], local_sql=state.get("local_sql", True))
+    leave_out_new_steps(steps, state)
     if args.step:
         restart_from_step(state, [step.id for step in steps], args.step)
 
@@ -4319,6 +4526,7 @@ def _run_walkthrough(args, bes_conn, host, compat: dict, ask, session=None) -> i
         input_fn=(lambda prompt: "") if args.dry_run else None,
         getpass_fn=(lambda prompt: "") if args.dry_run else None,
         session=session,
+        bes_conn=bes_conn,
     )
 
     return _walk_steps(args, steps, state, ctx, ask, session, persist)

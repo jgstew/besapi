@@ -979,17 +979,19 @@ def test_build_steps_from_path(upgrade, compat):
     steps = upgrade.build_steps(path, local_sql=True)
     ids = [step.id for step in steps]
 
-    # BigFix is stopped before the backup, and stays stopped for the first snapshot:
+    # old data is cleared out while BigFix runs, then it's stopped before the
+    # backup, and stays stopped for the first snapshot:
     # with the service pack level unknown, it gets a step and a check too:
-    assert ids[:6] == [
+    assert ids[:7] == [
         "preflight",
+        "data_cleanup",
         "stop_services_0",
         "backup",
         "snapshot_1",
         "service_pack_1",
         "upgrade_1_mssql_2017",
     ]
-    assert ids[6:8] == ["start_services_1", "validate_1"]
+    assert ids[7:9] == ["start_services_1", "validate_1"]
     second = ids.index("upgrade_2_windows_2019")
     assert ids[second - 2 : second] == ["stop_services_2", "snapshot_2"]
     assert ids[-2:] == ["final_validation", "cleanup"]
@@ -1007,7 +1009,7 @@ def test_build_steps_from_path(upgrade, compat):
         "restore_notes",
         "verify_backup",
     ]
-    assert "remote_processes" in steps[1].actions
+    assert "remote_processes" in steps[2].actions
 
 
 def test_build_steps_remote_sql(upgrade, compat):
@@ -3001,12 +3003,12 @@ def test_build_steps_service_pack_step(upgrade, compat):
     steps = upgrade.build_steps(path, local_sql=True)
     ids = [step.id for step in steps]
 
-    assert ids[3:6] == ["snapshot_1", "service_pack_1", "upgrade_1_mssql_2017"]
-    service_pack = steps[4]
+    assert ids[4:7] == ["snapshot_1", "service_pack_1", "upgrade_1_mssql_2017"]
+    service_pack = steps[5]
     assert "SP3" in service_pack.title and "2008 R2" in service_pack.title
-    assert steps[5].actions == ["check_service_pack:SP3"]
+    assert steps[6].actions == ["check_service_pack:SP3"]
     # the later SQL upgrade needs no service pack:
-    assert not any(i.startswith("service_pack_") for i in ids[6:])
+    assert not any(i.startswith("service_pack_") for i in ids[7:])
 
 
 def test_build_steps_no_service_pack_step_when_applied(upgrade, compat):
@@ -8148,6 +8150,7 @@ def test_bigfix_upgrade_gets_checks_before_and_after(upgrade, compat):
         "check_udf_inlining",
         "checkdb",
         "sql_memory_note",
+        "reindex",
     ]
     assert not by_id["pre_upgrade_3"].manual
     assert "verify_bigfix_db" in by_id["upgrade_3_bigfix_11_0_6"].verify
@@ -8265,6 +8268,245 @@ def test_checkdb_is_optional(upgrade, tmp_path):
     upgrade.ACTIONS["checkdb"](ctx)
     ran = [q for q in host.sql_ran if "CHECKDB" in q]
     assert len(ran) == 2 and "[BFEnterprise]" in ran[0] and "[BESReporting]" in ran[1]
+
+
+# ---- clearing out old data, and fragmentation, before the BigFix upgrade
+
+
+def test_data_cleanup_comes_before_the_backup(upgrade, compat):
+    """Test old data is cleared out while BigFix still runs, before the backup:
+    stale computers first, then BESAdmin's cleanup, then its Property ID Mapper.
+    """
+    steps = upgrade.build_steps(real_path(upgrade, compat))
+    ids = [s.id for s in steps]
+    step = steps[ids.index("data_cleanup")]
+
+    assert (
+        ids.index("preflight")
+        < ids.index("data_cleanup")
+        < ids.index("stop_services_0")
+    )
+    assert step.manual and step.actions == ["stale_computers"]
+    text = step.instructions
+    assert (
+        text.index("not reported")
+        < text.index("BESAdmin")
+        < text.index("Property ID Mapper")
+    )
+    assert "BESAdmin" in step.todo and "Property ID Mapper" in step.todo
+
+
+def test_reindex_is_last_before_the_bigfix_upgrade(upgrade, compat):
+    """Test indexes are rebuilt after the checks, just before the upgrade."""
+    steps = {s.id: s for s in upgrade.build_steps(real_path(upgrade, compat))}
+    actions = steps["pre_upgrade_3"].actions
+
+    assert actions[-1] == "reindex"
+    assert "reindex" not in steps["preflight"].actions
+    assert "index" in steps["pre_upgrade_3"].instructions
+
+
+def test_remote_sql_is_told_to_reindex(upgrade, compat):
+    """Test with a remote SQL Server, the operator is told to rebuild indexes
+    there just before the BigFix upgrade.
+    """
+    steps = {
+        s.id: s
+        for s in upgrade.build_steps(real_path(upgrade, compat), local_sql=False)
+    }
+    assert "pre_upgrade_3" not in steps
+    assert "indexes" in steps["upgrade_3_bigfix_11_0_6"].instructions
+
+
+def _reindex_ctx(upgrade, tmp_path, fragmented):
+    """A context where `fragmented` is {database: (indexes, pages)}."""
+    host = local_host(upgrade)
+
+    def answer(server, query):
+        for database, (count, pages) in fragmented.items():
+            if query == upgrade.fragmented_indexes_query(database):
+                if isinstance(count, Exception):
+                    raise count
+                return [[str(count), str(pages)]]
+        return []
+
+    host.sql_handler = answer
+    return walkthrough_ctx(upgrade, tmp_path, host)
+
+
+def test_reindex_rebuilds_fragmented_indexes(upgrade, tmp_path):
+    """Test only the databases with fragmented indexes are reindexed, after
+    asking with how much, and their statistics are updated.
+    """
+    ctx = _reindex_ctx(
+        upgrade, tmp_path, {"BFEnterprise": (12, 256000), "BESReporting": (0, 0)}
+    )
+    asked = []
+    ctx.ask = lambda prompt, choices, default=None: asked.append((prompt, default)) or (
+        default or "yes"
+    )
+
+    upgrade.ACTIONS["reindex"](ctx)
+
+    ran = [q for q in ctx.host.sql_ran if "ALTER INDEX" in q]
+    assert len(ran) == 1 and "[BFEnterprise]" in ran[0]
+    assert "REBUILD" in ran[0] and "REORGANIZE" in ran[0]
+    assert "sp_updatestats" in ran[0]
+    prompt, default = asked[0]
+    assert default == "yes" and "12" in prompt and "2000 MB" in prompt
+
+
+def test_reindex_declined_or_not_needed(upgrade, tmp_path, capsys):
+    """Test nothing is rebuilt when declined, or when nothing is fragmented."""
+    ctx = _reindex_ctx(
+        upgrade,
+        tmp_path / "declined",
+        {"BFEnterprise": (3, 5000), "BESReporting": (0, 0)},
+    )
+    ctx.ask = lambda prompt, choices, default=None: "no"
+    upgrade.ACTIONS["reindex"](ctx)
+    assert not [q for q in ctx.host.sql_ran if "ALTER INDEX" in q]
+
+    ctx = _reindex_ctx(
+        upgrade, tmp_path / "clean", {"BFEnterprise": (0, 0), "BESReporting": (0, 0)}
+    )
+    ctx.ask = lambda *a, **k: pytest.fail("nothing to ask about")
+    upgrade.ACTIONS["reindex"](ctx)
+    assert not [q for q in ctx.host.sql_ran if "ALTER INDEX" in q]
+    assert "no fragmented indexes" in capsys.readouterr().out
+
+
+def test_reindex_check_failing_skips_it(upgrade, tmp_path, capsys):
+    """Test a failing fragmentation check is noted, and doesn't stop the step."""
+    failed = subprocess.CalledProcessError(1, ["sqlcmd"])
+    ctx = _reindex_ctx(
+        upgrade, tmp_path, {"BFEnterprise": (failed, 0), "BESReporting": (0, 0)}
+    )
+    upgrade.ACTIONS["reindex"](ctx)
+    assert not [q for q in ctx.host.sql_ran if "ALTER INDEX" in q]
+    assert "NOTE" in capsys.readouterr().out
+
+
+def test_reindex_dry_run_changes_nothing(upgrade, tmp_path, capsys):
+    """Test a dry run says what it would run, without running it."""
+    ctx = _reindex_ctx(
+        upgrade, tmp_path, {"BFEnterprise": (3, 5000), "BESReporting": (0, 0)}
+    )
+    ctx.args.dry_run = True
+    upgrade.ACTIONS["reindex"](ctx)
+    assert "DRY RUN" in capsys.readouterr().out
+    assert not [q for q in ctx.host.sql_ran if "ALTER INDEX" in q]
+
+
+class DeletingConnection(FakeConnection):
+    """A FakeConnection that records computer deletes, failing for some ids."""
+
+    def __init__(self, answers, fail_ids=()):
+        super().__init__(answers)
+        self.deleted = []
+        self.fail_ids = set(fail_ids)
+
+    def delete(self, path, **kwargs):
+        if path.rsplit("/", 1)[-1] in self.fail_ids:
+            raise PermissionError("403 Forbidden")
+        self.deleted.append(path)
+        return types.SimpleNamespace(text="ok")
+
+
+STALE_ROWS = [
+    ["101", "laptop-1", "Mon, 08 Jan 2024 10:00:00 +0000"],
+    ["102", "old-vm", "Tue, 02 Apr 2024 11:00:00 +0000"],
+]
+
+
+def _stale_ctx(upgrade, tmp_path, answer=None, days="", rows=None, fail_ids=()):
+    ctx = walkthrough_ctx(upgrade, tmp_path, local_host(upgrade))
+    relevance = upgrade.stale_computers_relevance(
+        int(days or upgrade.DEFAULT_STALE_DAYS)
+    )
+    ctx.bes_conn = DeletingConnection(
+        {relevance: STALE_ROWS if rows is None else rows}, fail_ids
+    )
+    ctx.input_fn = lambda prompt: days
+    ctx.ask = lambda prompt, choices, default=None: answer or default
+    return ctx
+
+
+def test_stale_computers_only_deleted_when_agreed(upgrade, tmp_path, capsys):
+    """Test computers not reported in a long time are listed, and deleted only
+    when the operator agrees, which isn't the default.
+    """
+    ctx = _stale_ctx(upgrade, tmp_path / "default")
+    upgrade.ACTIONS["stale_computers"](ctx)
+    out = capsys.readouterr().out
+    assert ctx.bes_conn.deleted == []
+    assert "2 computers" in out and "laptop-1" in out
+    assert f"{upgrade.DEFAULT_STALE_DAYS} days" in out
+
+    ctx = _stale_ctx(upgrade, tmp_path / "agreed", "yes", days="180")
+    upgrade.ACTIONS["stale_computers"](ctx)
+    assert ctx.bes_conn.deleted == ["computer/101", "computer/102"]
+    assert "180 days" in capsys.readouterr().out
+
+
+def test_stale_computer_delete_failures_reported(upgrade, tmp_path, capsys):
+    """Test one failed delete doesn't stop the others, and is reported."""
+    ctx = _stale_ctx(upgrade, tmp_path, "yes", fail_ids=["101"])
+    upgrade.ACTIONS["stale_computers"](ctx)
+    out = capsys.readouterr().out
+    assert ctx.bes_conn.deleted == ["computer/102"]
+    assert "Deleted 1 of 2" in out and "failed" in out and "101" in out
+
+
+def test_stale_computers_dry_run_none_found_or_no_rest(upgrade, tmp_path, capsys):
+    """Test a dry run deletes nothing, nothing is asked when none are stale,
+    and without REST the operator is pointed at the console.
+    """
+    ctx = _stale_ctx(upgrade, tmp_path / "dry", "yes")
+    ctx.args.dry_run = True
+    upgrade.ACTIONS["stale_computers"](ctx)
+    assert ctx.bes_conn.deleted == []
+    assert "DRY RUN" in capsys.readouterr().out
+
+    ctx = _stale_ctx(upgrade, tmp_path / "none", rows=[])
+    ctx.ask = lambda *a, **k: pytest.fail("nothing to ask about")
+    upgrade.ACTIONS["stale_computers"](ctx)
+    assert "No computers" in capsys.readouterr().out
+
+    ctx = _stale_ctx(upgrade, tmp_path / "no_rest")
+    ctx.bes_conn = None
+    upgrade.ACTIONS["stale_computers"](ctx)
+    assert "console" in capsys.readouterr().out
+
+
+def test_stale_days_not_a_number_uses_the_default(upgrade, tmp_path, capsys):
+    """Test a mistyped number of days falls back to the default, said so."""
+    ctx = _stale_ctx(upgrade, tmp_path)
+    ctx.input_fn = lambda prompt: "ninety"
+    upgrade.ACTIONS["stale_computers"](ctx)
+    assert f"{upgrade.DEFAULT_STALE_DAYS} days" in capsys.readouterr().out
+    assert ctx.bes_conn.deleted == []
+
+
+def test_new_steps_before_progress_are_left_out(upgrade, compat, capsys):
+    """Test a step new in this script version, before where a resumed
+    walkthrough is, is left out rather than run out of order.
+    """
+    steps = upgrade.build_steps(real_path(upgrade, compat))
+    state = {"done": ["preflight", "stop_services_0", "backup"]}
+    upgrade.leave_out_new_steps(steps, state)
+    assert upgrade.next_step(steps, state).id == "snapshot_1"
+    assert "data_cleanup" in state["skipped"]
+    assert "data_cleanup" in capsys.readouterr().out
+
+    fresh = {"done": ["preflight"]}
+    upgrade.leave_out_new_steps(steps, fresh)
+    assert upgrade.next_step(steps, fresh).id == "data_cleanup"
+    assert "skipped" not in fresh
+
+    new = {"done": []}
+    upgrade.leave_out_new_steps(steps, new)
+    assert new == {"done": []}
 
 
 def test_low_sql_memory_noted(upgrade, tmp_path, capsys):
