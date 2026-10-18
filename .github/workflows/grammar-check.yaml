@@ -23,4 +23,4 @@ jobs:
         run: harper-cli lint --help
 
       - name: run harper grammar checker
-        run: harper-cli lint src/besapi/besapi.py
+        run: harper-cli lint --user-dict-path .harper-dictionary.txt src/besapi/besapi.py

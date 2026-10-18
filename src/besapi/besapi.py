@@ -31,7 +31,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.4.3"
+__version__ = "4.4.4"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -187,7 +187,7 @@ def get_action_combined_relevance(relevances: list[str]):
 
 
 def get_target_xml(targets=None):
-    """Get target xml based upon input.
+    """Get target XML based upon input.
 
     Input can be a single string:
         - starts with "<AllComputers>" if all computers should be targeted
@@ -295,10 +295,10 @@ def validate_xml_bes_file(file_path):
     """Take a file path as input,
     read as binary data,.
 
-    validate against xml schema
+    validate against XML schema
 
-    returns True for valid xml
-    returns False for invalid xml (or if file is not xml)
+    returns True for valid XML
+    returns False for invalid XML (or if file is not XML)
     """
     with open(file_path, "rb") as file:
         file_data = file.read()
@@ -694,7 +694,7 @@ class BESConnection:
         return self.login()
 
     def url(self, path):
-        """Get absolute url."""
+        """Get absolute URL."""
         if path.startswith(self.rootserver):
             url = path
         else:
@@ -722,7 +722,7 @@ class BESConnection:
         """HTTP POST request."""
         kwargs.setdefault("timeout", self.timeout)
 
-        # if validate_xml is true, data must validate to xml schema
+        # if validate_xml is true, data must validate to XML schema
         # if validate_xml is false, no schema check will be made
         if validate_xml:
             if not validate_xsd(data):
@@ -744,7 +744,7 @@ class BESConnection:
         kwargs.setdefault("timeout", self.timeout)
         self.last_connected = datetime.datetime.now()
 
-        # if validate_xml is true, data must validate to xml schema
+        # if validate_xml is true, data must validate to XML schema
         # if validate_xml is false, no schema check will be made
         if validate_xml:
             if not validate_xsd(data):
@@ -786,7 +786,7 @@ class BESConnection:
     def session_relevance_json(self, relevance, **kwargs):
         """Get Session Relevance Results in JSON.
 
-        This will submit the relevance string as json instead of html form data.
+        This will submit the relevance string as JSON instead of HTML form data.
         """
         session_relevance = urllib.parse.quote(relevance, safe=":+")
         rel_data = {"output": "json", "relevance": session_relevance}
@@ -794,17 +794,17 @@ class BESConnection:
         return json.loads(result.text)
 
     def session_relevance_json_array(self, relevance, **kwargs):
-        """Get Session Relevance Results in an array from the json return.
+        """Get Session Relevance Results in an array from the JSON return.
 
-        This will submit the relevance string as json instead of html form data.
+        This will submit the relevance string as JSON instead of HTML form data.
         """
         result = self.session_relevance_json(relevance, **kwargs)
         return result["result"]
 
     def session_relevance_json_string(self, relevance, **kwargs):
-        """Get Session Relevance Results in a string from the json return.
+        """Get Session Relevance Results in a string from the JSON return.
 
-        This will submit the relevance string as json instead of html form data.
+        This will submit the relevance string as JSON instead of HTML form data.
         """
         # not sure if the following is needed to handle some cases:
         # relevance = "(it as string) of ( " + relevance + " )"
@@ -1077,7 +1077,7 @@ class BESConnection:
         besapi_logger.info("User `%s` Not Found!", user_name)
 
     def create_user_from_file(self, bes_file_path):
-        """Create user from xml."""
+        """Create user from XML."""
         xml_parsed = lxml.etree.parse(bes_file_path)
         new_user_name = xml_parsed.xpath("/BESAPI/Operator/Name/text()")[0]
         result_user = self.get_user(new_user_name)
@@ -1355,7 +1355,7 @@ class BESConnection:
         export_folder="./",
         name_trim=100,
     ):
-        """Save an xml string to bes file."""
+        """Save an XML string to bes file."""
         item_folder = export_folder
         if not os.path.exists(item_folder):
             os.makedirs(item_folder)
@@ -1611,7 +1611,7 @@ class RESTResult:
 
     @property
     def besxml(self):
-        """Property for parsed xml representation."""
+        """Property for parsed XML representation."""
         if self.valid and self._besxml is None:
             self._besxml = self.xmlparse_text(self.text)
 
@@ -1619,7 +1619,7 @@ class RESTResult:
 
     @property
     def besobj(self):
-        """Property for xml object representation."""
+        """Property for XML object representation."""
         if self.valid and self._besobj is None:
             self._besobj = self.objectify_text(self.text)
 
@@ -1638,7 +1638,7 @@ class RESTResult:
 
     @property
     def besjson(self):
-        """Property for json representation."""
+        """Property for JSON representation."""
         if self._besjson is None:
             self._besjson = json.dumps(self.besdict, indent=2)
 
@@ -1652,7 +1652,7 @@ class RESTResult:
         return validate_xsd(doc)
 
     def xmlparse_text(self, text):
-        """Parse response text as xml."""
+        """Parse response text as XML."""
         if type(text) is str:
             root_xml = lxml.etree.fromstring(text.encode("utf-8"))
         else:
@@ -1661,7 +1661,7 @@ class RESTResult:
         return lxml.etree.tostring(root_xml, encoding="utf-8", xml_declaration=True)
 
     def objectify_text(self, text):
-        """Parse response text as objectified xml."""
+        """Parse response text as objectified XML."""
         if type(text) is str:
             root_xml = text.encode("utf-8")
         else:
