@@ -376,6 +376,216 @@ def test_action_xml_from_bes_file_escapes_title_and_cdata(tmp_path):
     assert "// before ]]> after" in tree.findtext("SingleAction/ActionScript")
 
 
+# ---------- issue 34: action_xml_from_bes_file keeps the script type ----------
+# The actionscript_keeps_markers, missing_mimetype_defaults_to_actionscript,
+# prefers_default_action and positional_targets_still_work tests cover
+# existing behavior the fix must keep, so they passed before it; they were
+# mutation-checked instead.
+
+TASK_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Task>
+		<Title>test task</Title>
+		<Description>test</Description>
+		<Relevance>true</Relevance>
+		<Category></Category>
+		<Source>Internal</Source>
+		<SourceID></SourceID>
+		<SourceReleaseDate>2026-01-01</SourceReleaseDate>
+		<SourceSeverity></SourceSeverity>
+		<CVENames></CVENames>
+		<SANSID></SANSID>
+		<Domain>BESC</Domain>
+{actions}
+	</Task>
+</BES>
+"""
+
+
+def fixlet_action(tag, script, mime=None, action_id="Action1", settings=""):
+    """Return one DefaultAction or Action element for TASK_TEMPLATE."""
+    mime_attr = "" if mime is None else f' MIMEType="{mime}"'
+    return (
+        f'\t\t<{tag} ID="{action_id}">\n'
+        f"\t\t\t<ActionScript{mime_attr}><![CDATA[{script}]]></ActionScript>\n"
+        f"{settings}"
+        f"\t\t</{tag}>"
+    )
+
+
+def convert_task(tmp_path, *actions, **kwargs):
+    """Write a Task with these actions and convert it to action XML."""
+    bes_file = tmp_path / "task.bes"
+    bes_file.write_text(
+        TASK_TEMPLATE.format(actions="\n".join(actions)), encoding="utf-8"
+    )
+    assert besapi.besapi.validate_xml_bes_file(str(bes_file))
+    return besapi.besapi.action_xml_from_bes_file(str(bes_file), **kwargs)
+
+
+def converted_script(action_xml):
+    """Return (MIMEType, script) of a converted action; check it is valid."""
+    assert besapi.besapi.validate_xsd(action_xml.encode("utf-8"))
+    elem = lxml.etree.fromstring(action_xml.encode("utf-8")).find(
+        "SingleAction/ActionScript"
+    )
+    return elem.get("MIMEType"), elem.text
+
+
+def test_action_xml_keeps_powershell_mimetype_without_markers(tmp_path):
+    """Test that a PowerShell DefaultAction stays PowerShell, unwrapped."""
+    script = 'Write-Output "hi"\r\nexit 0'
+    action_xml = convert_task(
+        tmp_path,
+        fixlet_action(
+            "DefaultAction", script, "application/x-Fixlet-Windows-PowerShell"
+        ),
+    )
+    mime, text = converted_script(action_xml)
+    assert mime == "application/x-Fixlet-Windows-PowerShell"
+    assert text.replace("\r\n", "\n") == script.replace("\r\n", "\n")
+    assert "// Start:" not in text and "// End" not in text
+
+
+def test_action_xml_keeps_sh_mimetype_and_script(tmp_path):
+    """Test that an application/x-sh script is copied unchanged."""
+    script = "#!/bin/sh\necho hi"
+    action_xml = convert_task(
+        tmp_path, fixlet_action("DefaultAction", script, "application/x-sh")
+    )
+    assert converted_script(action_xml) == ("application/x-sh", script)
+
+
+def test_action_xml_actionscript_keeps_markers(tmp_path):
+    """Test that ActionScript output is unchanged: same type, with markers."""
+    action_xml = convert_task(
+        tmp_path,
+        fixlet_action("DefaultAction", "// hi", "application/x-Fixlet-Windows-Shell"),
+    )
+    assert converted_script(action_xml) == (
+        "application/x-Fixlet-Windows-Shell",
+        "// Start:\n// hi\n// End",
+    )
+
+
+def test_action_xml_missing_mimetype_defaults_to_actionscript(tmp_path):
+    """Test that an ActionScript with no MIMEType uses the XSD default."""
+    action_xml = convert_task(tmp_path, fixlet_action("DefaultAction", "// hi"))
+    assert converted_script(action_xml) == (
+        "application/x-Fixlet-Windows-Shell",
+        "// Start:\n// hi\n// End",
+    )
+
+
+def test_action_xml_uses_first_action_without_default_action(tmp_path):
+    """Test that a Task with only <Action> elements uses the first one."""
+    action_xml = convert_task(
+        tmp_path,
+        fixlet_action("Action", "// first", action_id="Action1"),
+        fixlet_action("Action", "// second", action_id="Action2"),
+    )
+    assert converted_script(action_xml)[1] == "// Start:\n// first\n// End"
+
+
+def test_action_xml_prefers_default_action(tmp_path):
+    """Test that DefaultAction wins over other actions."""
+    action_xml = convert_task(
+        tmp_path,
+        fixlet_action("DefaultAction", "// default", action_id="Action1"),
+        fixlet_action("Action", "// other", action_id="Action2"),
+    )
+    assert converted_script(action_xml)[1] == "// Start:\n// default\n// End"
+
+
+def test_action_xml_action_id_picks_action(tmp_path):
+    """Test that action_id picks that action, with its own settings."""
+    settings = (
+        "\t\t\t<Settings><HasEndTime>true</HasEndTime>"
+        "<EndDateTimeLocalOffset>P2D</EndDateTimeLocalOffset></Settings>\n"
+    )
+    action_xml = convert_task(
+        tmp_path,
+        fixlet_action("DefaultAction", "// default", action_id="Action1"),
+        fixlet_action(
+            "Action",
+            "#!/bin/sh\necho two",
+            "application/x-sh",
+            action_id="Action2",
+            settings=settings,
+        ),
+        action_id="Action2",
+    )
+    assert converted_script(action_xml) == ("application/x-sh", "#!/bin/sh\necho two")
+    tree = lxml.etree.fromstring(action_xml.encode("utf-8"))
+    assert tree.findtext("SingleAction/Settings/EndDateTimeLocalOffset") == "P2D"
+
+
+def test_action_xml_positional_targets_still_work(tmp_path):
+    """Test that existing callers passing (file_path, targets) keep working."""
+    bes_file = tmp_path / "task.bes"
+    bes_file.write_text(
+        TASK_TEMPLATE.format(actions=fixlet_action("DefaultAction", "// hi")),
+        encoding="utf-8",
+    )
+    action_xml = besapi.besapi.action_xml_from_bes_file(str(bes_file), 12345)
+    tree = lxml.etree.fromstring(action_xml.encode("utf-8"))
+    assert tree.findtext("SingleAction/Target/ComputerID") == "12345"
+
+
+def test_action_xml_settings_have_no_namespace_declaration(tmp_path):
+    """Test that the copied <Settings> does not carry xmlns:xsi."""
+    settings = "\t\t\t<Settings><HasEndTime>false</HasEndTime></Settings>\n"
+    action_xml = convert_task(
+        tmp_path, fixlet_action("DefaultAction", "// hi", settings=settings)
+    )
+    assert converted_script(action_xml)
+    assert "<Settings><HasEndTime>false</HasEndTime></Settings>" in action_xml
+
+
+@pytest.mark.parametrize(
+    "actions, kwargs, message",
+    [
+        ([fixlet_action("DefaultAction", "// hi")], {"action_id": "Nope"}, "Nope"),
+        (
+            [fixlet_action("DefaultAction", "https://x.test/", "text/x-uri")],
+            {},
+            "x-uri",
+        ),
+        ([], {}, "no action"),
+        ([fixlet_action("DefaultAction", "")], {}, "empty"),
+    ],
+    ids=["unknown-action-id", "text-x-uri", "no-action", "empty-actionscript"],
+)
+def test_action_xml_rejects_unusable_actions(tmp_path, actions, kwargs, message):
+    """Test that unusable actions raise ValueError, not IndexError."""
+    with pytest.raises(ValueError, match=message):
+        convert_task(tmp_path, *actions, **kwargs)
+
+
+ANALYSIS_BES = b"""<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Analysis>
+		<Title>test analysis</Title>
+		<Description>test</Description>
+		<Relevance>true</Relevance>
+		<Source>Internal</Source>
+		<SourceReleaseDate>2026-01-01</SourceReleaseDate>
+		<Domain>BESC</Domain>
+		<Property Name="test" ID="1" EvaluationPeriod="PT1H">true</Property>
+	</Analysis>
+</BES>
+"""
+
+
+def test_action_xml_rejects_non_actionable_bes_file(tmp_path):
+    """Test that an Analysis raises ValueError, not IndexError."""
+    bes_file = tmp_path / "analysis.bes"
+    bes_file.write_bytes(ANALYSIS_BES)
+    assert besapi.besapi.validate_xml_bes_file(str(bes_file))
+    with pytest.raises(ValueError, match="Fixlet, Task or SingleAction"):
+        besapi.besapi.action_xml_from_bes_file(str(bes_file))
+
+
 # ---------- E6: unfinished update_item_from_file ----------
 
 
