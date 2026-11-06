@@ -416,8 +416,9 @@ def fixlet_action(tag, script, mime=None, action_id="Action1", settings=""):
 def convert_task(tmp_path, *actions, **kwargs):
     """Write a Task with these actions and convert it to action XML."""
     bes_file = tmp_path / "task.bes"
-    bes_file.write_text(
-        TASK_TEMPLATE.format(actions="\n".join(actions)), encoding="utf-8"
+    # bytes, so Windows does not turn the script's \r\n into \r\r\n:
+    bes_file.write_bytes(
+        TASK_TEMPLATE.format(actions="\n".join(actions)).encode("utf-8")
     )
     assert besapi.besapi.validate_xml_bes_file(str(bes_file))
     return besapi.besapi.action_xml_from_bes_file(str(bes_file), **kwargs)
@@ -523,9 +524,10 @@ def test_action_xml_action_id_picks_action(tmp_path):
 def test_action_xml_positional_targets_still_work(tmp_path):
     """Test that existing callers passing (file_path, targets) keep working."""
     bes_file = tmp_path / "task.bes"
-    bes_file.write_text(
-        TASK_TEMPLATE.format(actions=fixlet_action("DefaultAction", "// hi")),
-        encoding="utf-8",
+    bes_file.write_bytes(
+        TASK_TEMPLATE.format(actions=fixlet_action("DefaultAction", "// hi")).encode(
+            "utf-8"
+        )
     )
     action_xml = besapi.besapi.action_xml_from_bes_file(str(bes_file), 12345)
     tree = lxml.etree.fromstring(action_xml.encode("utf-8"))
