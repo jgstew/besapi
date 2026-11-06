@@ -649,7 +649,7 @@ def test_action_xml_mimetype_case_and_whitespace(
     """Test that MIMEType checks ignore case and surrounding whitespace."""
     action_xml = convert_task(tmp_path, fixlet_action("DefaultAction", "// hi", mime))
     out_mime, out_script = converted_script(action_xml)
-    assert out_mime.strip() == (expected_mime or mime.strip())
+    assert out_mime == (expected_mime or mime.strip())
     assert out_script == expected_script
 
 
