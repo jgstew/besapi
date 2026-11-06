@@ -11,6 +11,7 @@ Library for communicating with the BES (BigFix) REST API.
 """
 
 import configparser
+import copy
 import datetime
 import getpass
 import hashlib
@@ -31,7 +32,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.4.4"
+__version__ = "4.4.6"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -314,6 +315,10 @@ def xml_elem_strip_namespace(elem):
     clean_elem.text = elem.text
 
     for child in elem:
+        if not isinstance(child.tag, str):
+            # comment or processing instruction: no namespace, copy as is
+            clean_elem.append(copy.deepcopy(child))
+            continue
         # Create a true, independent copy of the child element
         child_copy = xml_elem_strip_namespace(child)
         clean_elem.append(child_copy)
@@ -321,49 +326,86 @@ def xml_elem_strip_namespace(elem):
     return clean_elem
 
 
-def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
-    """Create action XML from bes file with fixlet or task or singleaction."""
+ACTIONSCRIPT_MIME_TYPE = "application/x-Fixlet-Windows-Shell"
+
+
+def action_xml_from_bes_file(file_path, targets="<AllComputers>", action_id=None):
+    """Create action XML from bes file with fixlet or task or singleaction.
+
+    For a Fixlet or Task the `DefaultAction` is used, else the first `Action`,
+    unless `action_id` names the `ID` of the action to use.
+
+    The script keeps its source `MIMEType` (ActionScript if missing, the XSD
+    default). Only ActionScript is wrapped in `// Start:` / `// End` comments,
+    other script types are copied unchanged.
+
+    Raises ValueError if the file has no usable script action.
+    """
     # default to empty string:
     custom_relevance_xml = ""
 
     if not validate_xml_bes_file(file_path):
-        err_msg = "bes file is not valid according to XML Schema!"
-        logging.error(err_msg)
-        raise ValueError(err_msg)
+        raise ValueError("bes file is not valid according to XML Schema!")
 
     tree = lxml.etree.parse(file_path)
 
     # //BES/*[self::Task or self::Fixlet]/*[@id='elid']/name()
-    bes_type = str(
-        tree.xpath("//BES/*[self::Task or self::Fixlet or self::SingleAction]")[0].tag
-    )
+    bes_items = tree.xpath("//BES/*[self::Task or self::Fixlet or self::SingleAction]")
+    if not bes_items:
+        raise ValueError(f"bes file is not a Fixlet, Task or SingleAction: {file_path}")
+    bes_item = bes_items[0]
+    bes_type = str(bes_item.tag)
 
     logging.debug("BES Type: %s", bes_type)
 
-    title = tree.xpath(f"//BES/{bes_type}/Title/text()")[0]
+    title = bes_item.findtext("Title")
 
     logging.debug("Title: %s", title)
 
-    try:
-        actionscript = tree.xpath(
-            f"//BES/{bes_type}/DefaultAction/ActionScript/text()"
-        )[0]
-    except IndexError:
-        # handle SingleAction case:
-        actionscript = tree.xpath(f"//BES/{bes_type}/ActionScript/text()")[0]
+    # the element holding ActionScript, SuccessCriteria and Settings:
+    if bes_type == "SingleAction":
+        if action_id is not None:
+            raise ValueError(
+                f"action_id {action_id!r} given, but a SingleAction has one action"
+            )
+        action_elem = bes_item
+    else:
+        actions = bes_item.findall("DefaultAction") + bes_item.findall("Action")
+        if action_id is not None:
+            actions = [elem for elem in actions if elem.get("ID") == action_id]
+            if not actions:
+                raise ValueError(
+                    f"{bes_type} has no action with ID {action_id!r}: {title}"
+                )
+        if not actions:
+            raise ValueError(f"{bes_type} has no action: {title}")
+        action_elem = actions[0]
 
+    actionscript_elem = action_elem.find("ActionScript")
+    # normalizedString allows surrounding spaces; MIME types ignore case:
+    mime_type = actionscript_elem.get("MIMEType", ACTIONSCRIPT_MIME_TYPE).strip()
+    mime_type_key = mime_type.lower()
+    actionscript = actionscript_elem.text or ""
+
+    logging.debug("ActionScript MIMEType: %s", mime_type)
     logging.debug("ActionScript: %s", actionscript)
 
-    try:
-        if bes_type != "SingleAction":
-            success_criteria = tree.xpath(
-                f"//BES/{bes_type}/DefaultAction/SuccessCriteria/@Option"
-            )[0]
-        else:
-            success_criteria = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/@Option")[
-                0
-            ]
-    except IndexError:
+    # script types are application/*, for example text/x-uri opens a URL:
+    if not mime_type_key.startswith("application/"):
+        raise ValueError(f"action is not a script (MIMEType {mime_type}): {title}")
+
+    if not actionscript.strip():
+        raise ValueError(f"action has an empty ActionScript: {title}")
+
+    if mime_type_key == ACTIONSCRIPT_MIME_TYPE.lower():
+        actionscript = f"// Start:\n{actionscript}\n// End"
+
+    mime_type_attr = xml_escape(mime_type, {'"': "&quot;"})
+
+    success_criteria = action_elem.xpath("SuccessCriteria/@Option")
+    if success_criteria:
+        success_criteria = success_criteria[0]
+    else:
         # set success criteria if missing: (default)
         success_criteria = "RunToCompletion"
         if bes_type == "Fixlet":
@@ -371,18 +413,13 @@ def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
             success_criteria = "OriginalRelevance"
 
     if success_criteria == "CustomRelevance":
-        if bes_type != "SingleAction":
-            custom_relevance = tree.xpath(
-                f"//BES/{bes_type}/DefaultAction/SuccessCriteria/text()"
-            )[0]
-        else:
-            custom_relevance = tree.xpath(f"//BES/{bes_type}/SuccessCriteria/text()")[0]
+        custom_relevance = action_elem.findtext("SuccessCriteria")
 
         custom_relevance_xml = f"<![CDATA[{cdata_escape(custom_relevance)}]]>"
 
     logging.debug("success_criteria: %s", success_criteria)
 
-    relevance_clauses = tree.xpath(f"//BES/{bes_type}/Relevance/text()")
+    relevance_clauses = bes_item.xpath("Relevance/text()")
 
     logging.debug("Relevances: %s", relevance_clauses)
 
@@ -392,27 +429,20 @@ def action_xml_from_bes_file(file_path, targets="<AllComputers>"):
 
     # get settings if found
     settings_xml_string = ""
-    try:
-        if bes_type != "SingleAction":
-            settings_xml = tree.xpath(f"//BES/{bes_type}/DefaultAction/Settings")[0]
-        else:
-            settings_xml = tree.xpath(f"//BES/{bes_type}/Settings")[0]
-
-        # get_settings_xml = xml_elem_strip_namespace(get_settings_xml)
+    settings_xml = action_elem.find("Settings")
+    if settings_xml is not None:
+        # drop the xmlns:xsi copied from the source <BES> element:
+        settings_xml = xml_elem_strip_namespace(settings_xml)
         settings_xml_string = lxml.etree.tostring(
             settings_xml, encoding="utf-8"
         ).decode("utf-8")
-    except IndexError:
-        pass
 
     action_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<SingleAction>
 		<Title>{xml_escape(title)}</Title>
 		<Relevance><![CDATA[{cdata_escape(relevance_clauses_combined)}]]></Relevance>
-		<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[// Start:
-{cdata_escape(actionscript)}
-// End]]></ActionScript>
+		<ActionScript MIMEType="{mime_type_attr}"><![CDATA[{cdata_escape(actionscript)}]]></ActionScript>
 		<SuccessCriteria Option="{success_criteria}">{custom_relevance_xml}</SuccessCriteria>{settings_xml_string}
 		<Target>
             {get_target_xml(targets)}
