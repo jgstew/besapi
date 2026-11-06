@@ -6,6 +6,7 @@ is replaced by a stub that records each request.
 
 import inspect
 import json
+import logging
 import os
 import sys
 
@@ -540,7 +541,7 @@ def test_action_xml_settings_have_no_namespace_declaration(tmp_path):
     action_xml = convert_task(
         tmp_path, fixlet_action("DefaultAction", "// hi", settings=settings)
     )
-    assert converted_script(action_xml)
+    assert besapi.besapi.validate_xsd(action_xml.encode("utf-8"))
     assert "<Settings><HasEndTime>false</HasEndTime></Settings>" in action_xml
 
 
@@ -586,6 +587,78 @@ def test_action_xml_rejects_non_actionable_bes_file(tmp_path):
     assert besapi.besapi.validate_xml_bes_file(str(bes_file))
     with pytest.raises(ValueError, match="Fixlet, Task or SingleAction"):
         besapi.besapi.action_xml_from_bes_file(str(bes_file))
+
+
+# ---------- PR 35 review: action_xml_from_bes_file edge cases ----------
+
+
+def test_action_xml_settings_with_comment(tmp_path):
+    """Test that a comment inside <Settings> does not break conversion."""
+    settings = (
+        "\t\t\t<Settings><!-- keep for 2 days --><HasEndTime>true</HasEndTime>"
+        "<EndDateTimeLocalOffset>P2D</EndDateTimeLocalOffset></Settings>\n"
+    )
+    action_xml = convert_task(
+        tmp_path, fixlet_action("DefaultAction", "// hi", settings=settings)
+    )
+    assert besapi.besapi.validate_xsd(action_xml.encode("utf-8"))
+    tree = lxml.etree.fromstring(action_xml.encode("utf-8"))
+    assert tree.findtext("SingleAction/Settings/EndDateTimeLocalOffset") == "P2D"
+
+
+def test_action_xml_uses_relevance_of_converted_item_only(tmp_path):
+    """Test that a file with two Tasks uses only the first Task's relevance."""
+    one_task = TASK_TEMPLATE.format(actions=fixlet_action("DefaultAction", "// hi"))
+    task_start = one_task.index("\t<Task>")
+    task_end = one_task.index("</Task>") + len("</Task>\n")
+    second_task = (
+        one_task[task_start:task_end]
+        .replace("<Title>test task</Title>", "<Title>second task</Title>")
+        .replace("<Relevance>true</Relevance>", "<Relevance>false</Relevance>")
+    )
+    bes_file = tmp_path / "two_tasks.bes"
+    bes_file.write_bytes(
+        (one_task[:task_end] + second_task + one_task[task_end:]).encode("utf-8")
+    )
+    assert besapi.besapi.validate_xml_bes_file(str(bes_file))
+
+    action_xml = besapi.besapi.action_xml_from_bes_file(str(bes_file))
+
+    tree = lxml.etree.fromstring(action_xml.encode("utf-8"))
+    assert tree.findtext("SingleAction/Title") == "test task"
+    assert tree.findtext("SingleAction/Relevance") == "true"
+
+
+@pytest.mark.parametrize(
+    "mime, expected_mime, expected_script",
+    [
+        (
+            "application/x-fixlet-windows-shell",
+            "application/x-fixlet-windows-shell",
+            "// Start:\n// hi\n// End",
+        ),
+        (" application/x-Fixlet-Windows-Shell ", None, "// Start:\n// hi\n// End"),
+        ("Application/x-sh", "Application/x-sh", "// hi"),
+        (" application/x-sh", None, "// hi"),
+    ],
+    ids=["lowercase-actionscript", "padded-actionscript", "uppercase-sh", "padded-sh"],
+)
+def test_action_xml_mimetype_case_and_whitespace(
+    tmp_path, mime, expected_mime, expected_script
+):
+    """Test that MIMEType checks ignore case and surrounding whitespace."""
+    action_xml = convert_task(tmp_path, fixlet_action("DefaultAction", "// hi", mime))
+    out_mime, out_script = converted_script(action_xml)
+    assert out_mime.strip() == (expected_mime or mime.strip())
+    assert out_script == expected_script
+
+
+def test_action_xml_value_error_is_not_logged(tmp_path, caplog):
+    """Test that a ValueError the caller can handle is not also logged."""
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ValueError, match="no action"):
+        convert_task(tmp_path)
+    assert not [rec for rec in caplog.records if rec.levelno >= logging.ERROR]
 
 
 # ---------- E6: unfinished update_item_from_file ----------
