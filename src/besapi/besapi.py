@@ -33,7 +33,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.4.7"
+__version__ = "4.4.8"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -759,8 +759,8 @@ class BESConnection:
         self.webreports_info_xml = None
 
         # which engine answers session relevance, learned from answers, and
-        # the root server it was learned for. NOTE: instance attributes,
-        # since BESConnection defines __eq__ without __hash__.
+        # the root server it was learned for. NOTE: kept per connection, even
+        # when two connections compare equal.
         self._relevance_engine = None
         self._relevance_engine_root = None
 
@@ -789,14 +789,23 @@ class BESConnection:
         # https://stackoverflow.com/a/2626364/861745
         return f"Object: besapi.BESConnection( username={self.username}, rootserver={self.rootserver} )"
 
+    def _identity(self):
+        """The fields that make two connections equal, without the password."""
+        return (self.rootserver, self.username, self.verify)
+
     def __eq__(self, other):
-        if (
-            self.rootserver == other.rootserver
-            and self.session.auth == other.session.auth
-            and self.verify == other.verify
-        ):
-            return True
-        return False
+        """Same root server, username and verify, ignoring the password."""
+        if not isinstance(other, BESConnection):
+            return NotImplemented
+        return self._identity() == other._identity()
+
+    def __hash__(self):
+        """Hash of the fields __eq__ compares.
+
+        NOTE: changing rootserver, username or verify changes the hash, so don't
+        change them while the connection is a dict key or in a set.
+        """
+        return hash(self._identity())
 
     def __del__(self):
         """Cleanup on deletion of instance."""

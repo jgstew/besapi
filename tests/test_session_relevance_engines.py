@@ -1128,14 +1128,10 @@ def test_rootserver_change_resets_the_state(offline_login):
 
 
 def test_state_is_per_connection(offline_login):
-    """Test two connections keep their own state, without hashing them.
-
-    BESConnection defines __eq__ without __hash__, so it can't be a dict key.
-    """
+    """Test two connections keep their own state, even when equal."""
     conn_wr, server_wr = engine_conn("web_reports")
     conn_ex, server_ex = engine_conn("explorer")
-    with pytest.raises(TypeError):
-        hash(conn_wr)
+    assert conn_wr == conn_ex
     conn_wr.session_relevance_xml('("a%22b")')
     conn_ex.session_relevance_xml('("a%22b")')
     assert len(server_wr.form_requests) == 2

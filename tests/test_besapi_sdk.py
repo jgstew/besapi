@@ -12,6 +12,7 @@ import sys
 
 import lxml.etree
 import pytest
+import requests
 
 # Ensure the local `src/` is first on sys.path so tests import the workspace package
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -1072,3 +1073,67 @@ def test_session_relevance_array_empty_default(offline_login):
     assert conn.session_relevance_array("nothing") == [
         "<Nothing> Nothing returned, but no error."
     ]
+
+
+# ---------- equality and hashing ----------
+
+
+def new_conn(username="user", password="pass", rootserver="bigfix.example", **kwargs):
+    """Create an offline BESConnection with a real session, for equality."""
+    return BESConnection(username, password, rootserver, **kwargs)
+
+
+def test_conn_hashable(offline_login):
+    """Test equal connections hash the same, so they can be dict keys."""
+    assert hash(new_conn()) == hash(new_conn())
+    assert len({new_conn(), new_conn()}) == 1
+    assert {new_conn(): "x"}[new_conn()] == "x"
+
+
+def test_conn_eq_ignores_password(offline_login):
+    """Test the password isn't part of equality."""
+    assert new_conn(password="one") == new_conn(password="two")
+    assert hash(new_conn(password="one")) == hash(new_conn(password="two"))
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        {"username": "other"},
+        {"rootserver": "other.example"},
+        {"rootserver": "bigfix.example:52312"},
+        {"verify": True},
+    ],
+)
+def test_conn_not_equal(offline_login, other):
+    """Test a different username, root server, port or verify isn't equal."""
+    assert new_conn() != new_conn(**other)
+    assert len({new_conn(), new_conn(**other)}) == 2
+
+
+def test_conn_eq_normalized_rootserver(offline_login):
+    """Test the root server is compared after https:// and the port are added."""
+    assert new_conn(rootserver="bigfix.example") == new_conn(
+        rootserver="https://bigfix.example:52311"
+    )
+
+
+@pytest.mark.parametrize("other", [None, "CONNECTION", 1])
+def test_conn_eq_other_type(offline_login, other):
+    """Test comparing with something that isn't a connection is False."""
+    conn = new_conn()
+    assert conn != other
+    assert not conn == other  # pylint: disable=unneeded-not
+
+
+def test_conn_hash_ignores_session_auth(offline_login):
+    """Test hash and equality don't use session.auth, which may change.
+
+    NOTE: __del__ sets session.auth to None, and requests allows an auth
+    object, which may not be hashable.
+    """
+    conn = new_conn()
+    before = hash(conn)
+    conn.session.auth = requests.auth.HTTPBasicAuth("user", "pass")
+    assert hash(conn) == before
+    assert conn == new_conn()
