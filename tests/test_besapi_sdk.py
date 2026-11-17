@@ -66,7 +66,10 @@ class FakeSession:
         # what every recorded request responds with:
         self.response_text = "<BESAPI />"
         self.response_status = 200
-        # per URL responses, {url: (text, status)}, override the above:
+        # per URL responses, {url: (text, status)}, override the above.
+        # A route may also be a callable (method, url, kwargs) returning
+        # (text, status) or (text, status, headers), for responses that
+        # depend on the request, see FakeQueryServer:
         self.routes = {}
         self.mounted = []
 
@@ -76,8 +79,14 @@ class FakeSession:
         if unknown:
             raise TypeError(f"unexpected keyword arguments for requests: {unknown}")
         self.calls.append((method, url, kwargs))
-        text, status = self.routes.get(url, (self.response_text, self.response_status))
-        return FakeResponse(url, text, status)
+        route = self.routes.get(url, (self.response_text, self.response_status))
+        if callable(route):
+            route = route(method, url, kwargs)
+        text, status, *headers = route
+        response = FakeResponse(url, text, status)
+        if headers:
+            response.headers = headers[0]
+        return response
 
     def mount(self, prefix, adapter):
         """Record a mounted transport adapter."""
@@ -675,28 +684,32 @@ def test_update_item_from_file_not_implemented(offline_login, capsys):
 # ---------- E7: XML session relevance keeps %XX escapes ----------
 
 
-def server_decoded_relevance(data):
-    """Decode a posted query body the way the BigFix server does: twice.
-
-    Verified against a live server: the JSON query path (which double
-    encodes) keeps `%22` escapes, while a single encoded body loses them.
-    """
-    import urllib.parse
-
-    body = data if isinstance(data, str) else urllib.parse.urlencode(data)
-    form = urllib.parse.parse_qs(body)
-    return urllib.parse.unquote(form["relevance"][0])
+# NOTE: only Web Reports decodes the body twice. When BigFix Explorer answers
+# it decodes once, see issue #30 and tests/test_session_relevance_engines.py,
+# which tests both engines.
 
 
 @pytest.mark.parametrize(
     "relevance",
-    ['(it as string) of ( "a%22b" )', '"100%25 of " & "5+5"'],
+    [
+        '(it as string) of ( "a%22b" )',
+        '"100%25 of " & "5+5"',
+        '("a%22b")',
+        '("x%22y")',
+        '("100%25 done")',
+        '("%2541")',
+        '("%2522")',
+    ],
 )
 def test_session_relevance_xml_body_survives_double_decode(offline_login, relevance):
-    """Test that relevance escapes like %22 reach the evaluator intact."""
-    conn = make_conn()
+    """Test that relevance escapes like %22 reach Web Reports intact."""
+    # pylint: disable=import-outside-toplevel
+    from test_session_relevance_engines import engine_conn
+
+    conn, server = engine_conn("web_reports")
     conn.session_relevance_xml(relevance)
-    assert server_decoded_relevance(conn.session.calls[-1][2]["data"]) == relevance
+    # the text the final request had Web Reports evaluate:
+    assert server.form_requests[-1] == relevance
 
 
 # ---------- P1: XSD schemas are compiled once, not per call ----------

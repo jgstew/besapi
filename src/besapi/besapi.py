@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import random
+import re
 import site
 import string
 import sys
@@ -32,7 +33,7 @@ import lxml.objectify
 import requests
 import urllib3.poolmanager
 
-__version__ = "4.4.6"
+__version__ = "4.4.7"
 
 besapi_logger = logging.getLogger("besapi")
 
@@ -40,7 +41,84 @@ besapi_logger = logging.getLogger("besapi")
 # NOTE: long read timeout since some REST API calls, like exports, are slow
 DEFAULT_TIMEOUT = (90, 600)
 
+# Who answers session relevance posted to /api/query, see issue #30:
+# BigFix Explorer if it is reachable, otherwise Web Reports. Explorer decodes
+# the form body once, Web Reports twice. Without `%` in the relevance both
+# evaluate the same text, so only relevance with `%` needs to know.
+RELEVANCE_ENGINE_EXPLORER = "assume_explorer"
+RELEVANCE_ENGINE_WEB_REPORTS = "web_reports"
+# a JSON body query, which only Explorer answers:
+RELEVANCE_JSON_BODY_TYPE = "application/json+relevance"
+# relevance's escape for a `%` followed by two hex digits. Web Reports
+# answers it wrongly, with no error, when encoded once: ("%2541") gives `A`.
+_PERCENT_25_HEX = re.compile(r"%25[0-9A-Fa-f]{2}")
+
 # pylint: disable=consider-using-f-string
+
+
+def _reject_json_constant(constant):
+    """Reject NaN and Infinity, which a server treats as relevance, not JSON."""
+    raise ValueError(constant)
+
+
+def _json_safe_relevance(relevance):
+    """Put relevance that is also valid JSON, such as `"now"` or `1`, in parentheses.
+
+    Explorer reads a form value that parses as JSON as a JSON query and
+    answers HTTP 400 "Invalid JSON". Its parser is lenient (a leading BOM,
+    control characters in strings). Parentheses don't change what the
+    relevance means.
+    """
+    try:
+        json.loads(
+            relevance.lstrip("﻿"),
+            strict=False,
+            parse_constant=_reject_json_constant,
+        )
+    except ValueError:
+        return relevance
+    return f"({relevance})"
+
+
+def _xml_query_resource_error(result):
+    """Get the Resource (the text the engine evaluated) and Error of an answer.
+
+    Returns (None, None) for a body that isn't a query answer.
+    """
+    try:
+        query = lxml.etree.fromstring(result.text.encode("utf-8")).find("Query")
+    except (lxml.etree.XMLSyntaxError, ValueError, AttributeError):
+        return None, None
+    if query is None:
+        return None, None
+    error = query.find("Error")
+    return query.get("Resource"), None if error is None else (error.text or "")
+
+
+def _normalize_resource(text):
+    """Normalize whitespace as an XML parser does in an attribute value."""
+    if text is None:
+        return None
+    return text.replace("\r\n", "\n").translate({9: " ", 10: " ", 13: " "})
+
+
+def _json_query_answer(result):
+    """Get a JSON query answer as a dict, or None if the body isn't one."""
+    try:
+        answer = json.loads(result.text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(answer, dict) and "result" in answer:
+        return answer
+    return None
+
+
+def _json_answer_ok(result):
+    """Whether a JSON query answer has a result and no relevance error."""
+    if result.request.status_code >= 400:
+        return False
+    answer = _json_query_answer(result)
+    return answer is not None and "error" not in answer
 
 
 def rand_password(length=20):
@@ -680,6 +758,12 @@ class BESConnection:
 
         self.webreports_info_xml = None
 
+        # which engine answers session relevance, learned from answers, and
+        # the root server it was learned for. NOTE: instance attributes,
+        # since BESConnection defines __eq__ without __hash__.
+        self._relevance_engine = None
+        self._relevance_engine_root = None
+
         # use a sitepath context if none specified when required.
         self.site_path = "master"
 
@@ -813,15 +897,152 @@ class BESConnection:
         if self.is_main_operator is not None:
             return self.is_main_operator
 
+    def _get_relevance_engine(self):
+        """Get which engine is assumed to answer session relevance."""
+        if not self._relevance_engine or self._relevance_engine_root != self.rootserver:
+            return RELEVANCE_ENGINE_EXPLORER
+        return self._relevance_engine
+
+    def _set_relevance_engine(self, engine):
+        """Remember which engine answered session relevance."""
+        if engine != self._get_relevance_engine():
+            besapi_logger.debug("Session relevance is now answered by: %s", engine)
+        self._relevance_engine = engine
+        self._relevance_engine_root = self.rootserver
+
+    def _post_relevance_form(self, relevance, twice, output=None, **kwargs):
+        """Post session relevance as form data, encoded once or twice.
+
+        NOTE: requests form encodes the value once. Web Reports decodes it
+        twice, so for that engine it is quoted here too.
+        """
+        value = urllib.parse.quote(relevance, safe=":+") if twice else relevance
+        data = {"relevance": value}
+        if output:
+            data["output"] = output
+        return self.post("query", data=data, **kwargs)
+
+    def _post_relevance_json_body(self, relevance, **kwargs):
+        """Post session relevance as a JSON body, which only Explorer answers."""
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers["Content-Type"] = RELEVANCE_JSON_BODY_TYPE
+        return self.post(
+            "query",
+            data=json.dumps({"relevance": relevance}),
+            headers=headers,
+            **kwargs,
+        )
+
+    def _try_relevance_form(self, relevance, twice, output=None, **kwargs):
+        """Post session relevance as form data: (result, None) or (None, HTTPError)."""
+        try:
+            return self._post_relevance_form(relevance, twice, output, **kwargs), None
+        except requests.HTTPError as err:
+            return None, err
+
+    def _post_relevance_with_fallback(
+        self, relevance, evaluated_as_sent, output=None, **kwargs
+    ):
+        """Post relevance containing `%`, retrying once with the other encoding.
+
+        The connection's engine picks the first encoding. If that answer was
+        not evaluated as sent (an error, an HTTP error, or for XML a different
+        Resource), retry once with the other encoding. If the retry was, the
+        other engine answers now: remember it. Otherwise return the first
+        answer, or raise its HTTP error: the relevance has a genuine error.
+
+        Returns (result, rejected_retry), where rejected_retry is the retry's
+        result when it was made and not used.
+        """
+        twice = self._get_relevance_engine() == RELEVANCE_ENGINE_WEB_REPORTS
+        first, first_error = self._try_relevance_form(
+            relevance, twice, output, **kwargs
+        )
+        if first_error is None and evaluated_as_sent(first):
+            return first, None
+
+        retry, _ = self._try_relevance_form(relevance, not twice, output, **kwargs)
+        if retry is not None and evaluated_as_sent(retry):
+            self._set_relevance_engine(
+                RELEVANCE_ENGINE_EXPLORER if twice else RELEVANCE_ENGINE_WEB_REPORTS
+            )
+            return retry, None
+        if first_error is not None:
+            raise first_error
+        return first, retry
+
+    def _post_relevance_json_percent_25xx(self, relevance, **kwargs):
+        """Post relevance containing `%25XX` for a JSON answer.
+
+        Web Reports answers it wrongly with no error when encoded once, and a
+        JSON answer has no Resource to compare. So while Explorer is assumed,
+        send it as a JSON body, which needs no encoding and which only
+        Explorer answers. Anything else means Web Reports: encode it twice.
+        """
+        if self._get_relevance_engine() == RELEVANCE_ENGINE_EXPLORER:
+            explorer_unreachable = True
+            try:
+                result = self._post_relevance_json_body(relevance, **kwargs)
+            except (requests.HTTPError, PermissionError):
+                result = None
+            except requests.RequestException as err:
+                # a network error says nothing about which engine answers:
+                besapi_logger.debug("JSON body session relevance failed: %s", err)
+                result = None
+                explorer_unreachable = False
+            if result is not None and result.request.status_code == 200:
+                if _json_query_answer(result) is not None:
+                    return result
+            besapi_logger.debug("Explorer did not answer, trying Web Reports")
+            result = self._post_relevance_form(relevance, True, "json", **kwargs)
+            if explorer_unreachable and _json_answer_ok(result):
+                self._set_relevance_engine(RELEVANCE_ENGINE_WEB_REPORTS)
+            return result
+
+        result, result_error = self._try_relevance_form(
+            relevance, True, "json", **kwargs
+        )
+        if result_error is None and _json_answer_ok(result):
+            return result
+        # Explorer may be back:
+        try:
+            retry = self._post_relevance_json_body(relevance, **kwargs)
+        except (requests.RequestException, PermissionError):
+            retry = None
+        if retry is not None and retry.request.status_code == 200:
+            if _json_answer_ok(retry):
+                self._set_relevance_engine(RELEVANCE_ENGINE_EXPLORER)
+                return retry
+        if result_error is not None:
+            raise result_error
+        return result
+
     def session_relevance_json(self, relevance, **kwargs):
         """Get Session Relevance Results in JSON.
 
-        This will submit the relevance string as JSON instead of HTML form data.
+        This submits the relevance as form data, asking for a JSON answer.
+        Relevance containing `%` is encoded for the engine that answers, see
+        session_relevance_xml().
         """
-        session_relevance = urllib.parse.quote(relevance, safe=":+")
-        rel_data = {"output": "json", "relevance": session_relevance}
-        result = self.post("query", data=rel_data, **kwargs)
-        return json.loads(result.text)
+        relevance = _json_safe_relevance(relevance)
+        if "%" not in relevance:
+            result = self._post_relevance_form(relevance, False, "json", **kwargs)
+        elif _PERCENT_25_HEX.search(relevance):
+            result = self._post_relevance_json_percent_25xx(relevance, **kwargs)
+        else:
+            result, _ = self._post_relevance_with_fallback(
+                relevance, _json_answer_ok, "json", **kwargs
+            )
+        answer = json.loads(result.text)
+        # NOTE: only Explorer's JSON answers have `count`, so an answer tells
+        # which engine answered, without another request:
+        if isinstance(answer, dict) and "result" in answer and "error" not in answer:
+            self._set_relevance_engine(
+                RELEVANCE_ENGINE_EXPLORER
+                if "count" in answer
+                else RELEVANCE_ENGINE_WEB_REPORTS
+            )
+        return answer
 
     def session_relevance_json_array(self, relevance, **kwargs):
         """Get Session Relevance Results in an array from the JSON return.
@@ -843,15 +1064,40 @@ class BESConnection:
         return "\n".join(map(str, rel_result_array))
 
     def session_relevance_xml(self, relevance, **kwargs):
-        """Get Session Relevance Results XML."""
-        # NOTE: the server URL decodes the query twice, so quote here and let
-        # requests form encode it again, same as session_relevance_json.
-        # Otherwise relevance escapes such as %22 are decoded too early.
-        return self.post(
-            "query",
-            data={"relevance": urllib.parse.quote(relevance, safe=":+")},
-            **kwargs,
+        """Get Session Relevance Results XML.
+
+        NOTE: BigFix Explorer, which answers when it is reachable, decodes the
+        query once, Web Reports twice (issue #30). Relevance without `%` is
+        the same either way, one request. Relevance with `%` is encoded for
+        the engine last seen answering, assuming Explorer at first. An answer
+        whose Resource (the text evaluated) differs from what was sent, or an
+        error, is retried once with the other encoding.
+        """
+        relevance = _json_safe_relevance(relevance)
+        if "%" not in relevance:
+            return self._post_relevance_form(relevance, False, **kwargs)
+
+        sent = _normalize_resource(relevance)
+
+        def evaluated_as_sent(result):
+            if result.request.status_code >= 400:
+                return False
+            resource, error = _xml_query_resource_error(result)
+            return error is None and _normalize_resource(resource) == sent
+
+        result, rejected_retry = self._post_relevance_with_fallback(
+            relevance, evaluated_as_sent, **kwargs
         )
+        if rejected_retry is not None:
+            resource, error = _xml_query_resource_error(result)
+            if error is None and resource is not None:
+                besapi_logger.warning(
+                    "Session relevance was evaluated as `%s`, then as `%s`, not as sent: `%s`",
+                    resource,
+                    _xml_query_resource_error(rejected_retry)[0],
+                    relevance,
+                )
+        return result
 
     def session_relevance_array(self, relevance, raise_errors=False, **kwargs):
         """Get Session Relevance Results array.
@@ -933,6 +1179,8 @@ class BESConnection:
             if result_login.request.status_code == 200:
                 # set time of connection
                 self.last_connected = datetime.datetime.now()
+                # learn again which engine answers session relevance:
+                self._relevance_engine = None
 
         # This doesn't work until urllib3 is at least ~v2:
         if self.last_connected:
