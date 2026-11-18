@@ -67,9 +67,14 @@ NEITHER_BODY = "PLACEHOLDER: no engine is available to evaluate session relevanc
 GENUINE_ERROR_MARKER = "bogus_operator"
 GENUINE_ERROR = f'The operator "{GENUINE_ERROR_MARKER}" is not defined.'
 
-XML_TYPE = {"content-type": "application/xml"}
-JSON_TYPE = {"content-type": "application/json"}
-TEXT_TYPE = {"content-type": "text/plain"}
+# the header each engine adds to its answers, see headers.json in the
+# fixtures. NOTE: a live server sends no Content-Type for query answers.
+ENGINE_HEADER = "x-bes-relevance-engine-type"
+ENGINE_TYPES = {
+    "explorer": "BigFix Explorer",
+    "web_reports": "BigFix Web Reports Server",
+}
+NO_HEADERS: dict[str, str] = {}
 
 
 def encode(relevance, encoding):
@@ -183,10 +188,14 @@ class FakeQueryServer:
     such as when Explorer stops or starts. Answers for texts in the captures
     are the captured answers; any other text answers as a string equal to
     the evaluated text, so tests can assert what was evaluated.
+
+    `headers` False is a server that doesn't say which engine answered, as
+    older servers may not.
     """
 
-    def __init__(self, engine):
+    def __init__(self, engine, headers=True):
         self.engine = engine
+        self.headers = headers
         self.form_requests = []  # evaluated text of each form query
         self.json_body_requests = []  # relevance of each JSON body query
         # optional: a function that rewrites the Resource of answers (tests
@@ -203,6 +212,12 @@ class FakeQueryServer:
         """Number of /api/query requests of any kind."""
         return len(self.form_requests) + len(self.json_body_requests)
 
+    def engine_headers(self):
+        """The headers of an answer from the engine answering now."""
+        if not self.headers or self.engine not in ENGINE_TYPES:
+            return NO_HEADERS
+        return {ENGINE_HEADER: ENGINE_TYPES[self.engine]}
+
     def __call__(self, method, url, kwargs):
         assert method == "post" and url == QUERY_URL
         headers = kwargs.get("headers") or {}
@@ -212,9 +227,10 @@ class FakeQueryServer:
             if isinstance(self.json_body_answer, Exception):
                 raise self.json_body_answer
             if self.json_body_answer:
-                return (*self.json_body_answer, TEXT_TYPE)
+                return (*self.json_body_answer, NO_HEADERS)
             if self.engine != "explorer":
-                return NO_EXPLORER_BODY, 503, TEXT_TYPE
+                # NOTE: no engine header, no engine answered:
+                return NO_EXPLORER_BODY, 503, NO_HEADERS
             # NOTE: the JSON body has no form decoding and no JSON value check
             return self.evaluate(relevance, "json", check_json=False)
 
@@ -227,24 +243,29 @@ class FakeQueryServer:
             text = urllib.parse.unquote(text)
         self.form_requests.append(text)
         if self.fail_next:
+            # such as a proxy's error page, with no engine header:
             answer, self.fail_next = self.fail_next, None
-            return (*answer, TEXT_TYPE)
+            return (*answer, NO_HEADERS)
         if self.engine == "neither":
-            return NEITHER_BODY, 503, TEXT_TYPE
+            return NEITHER_BODY, 503, NO_HEADERS
         return self.evaluate(text, form.get("output", ["xml"])[0])
 
     def evaluate(self, text, output, check_json=True):
         """Answer for the text the engine evaluates."""
         if check_json and self.engine == "explorer" and looks_like_json(text):
-            return INVALID_JSON_BODY, 400, JSON_TYPE
+            return INVALID_JSON_BODY, 400, self.engine_headers()
         error = relevance_error(text)
         items, plurality = ([], None) if error else self.answer_for(text)
         if output == "json":
-            return self.json_body(error, items, plurality), 200, JSON_TYPE
+            return self.json_body(error, items, plurality), 200, self.engine_headers()
         resource = text
         if self.resource_override:
             resource = self.resource_override(text)
-        return self.xml_body(resource, error, items, plurality), 200, XML_TYPE
+        return (
+            self.xml_body(resource, error, items, plurality),
+            200,
+            self.engine_headers(),
+        )
 
     @staticmethod
     def answer_for(text):
@@ -322,10 +343,10 @@ class FakeQueryServer:
         return json.dumps(answer, separators=(",", ":"), ensure_ascii=False)
 
 
-def engine_conn(engine, **kwargs):
+def engine_conn(engine, headers=True, **kwargs):
     """Create an offline connection answered by a FakeQueryServer."""
     conn = make_conn(**kwargs)
-    server = FakeQueryServer(engine)
+    server = FakeQueryServer(engine, headers)
     conn.session.routes[QUERY_URL] = server
     return conn, server
 
@@ -400,6 +421,78 @@ def test_fixtures_cover_both_engines_and_encodings():
         keys = {key.rsplit(" | ", 1)[0] for key in CORPUS[engine]}
         assert len(keys) == 23
         assert len(CORPUS[engine]) == 23 * 4
+
+
+def load_headers(engine):
+    """Load the live captures of each engine's answer headers, headers.json."""
+    with open(os.path.join(FIXTURES, engine, "headers.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+HEADERS = {engine: load_headers(engine) for engine in ENGINES}
+
+
+def twice(relevance):
+    """A relevance value quoted once more, as for Web Reports."""
+    return urllib.parse.quote(relevance, safe=":+")
+
+
+# how each case in headers.json was sent: a form dict, or a JSON body
+HEADER_CASES = {
+    "form once ok": {"relevance": "number of bes sites"},
+    "form once json ok": {"relevance": "1 + 1", "output": "json"},
+    "form once error": {"relevance": GENUINE_ERROR_MARKER},
+    "form once json error": {"relevance": GENUINE_ERROR_MARKER, "output": "json"},
+    "form once %22": {"relevance": '("a%22b")'},
+    "form once %2541": {"relevance": '("%2541")'},
+    "form twice %22": {"relevance": twice('("a%22b")')},
+    "form twice %2541 json": {"relevance": twice('("%2541")'), "output": "json"},
+    "form json-shaped 1": {"relevance": "1"},
+    "form json-shaped (1)": {"relevance": "(1)"},
+    "json body ok": '("%2541")',
+    "json body error": GENUINE_ERROR_MARKER,
+}
+
+
+@pytest.mark.parametrize("case", HEADER_CASES)
+@pytest.mark.parametrize("engine", ENGINES)
+def test_fake_query_server_matches_live_headers(engine, case):
+    """Test the fake says which engine answered, as each live engine did.
+
+    Every answer from an engine has its header, errors and HTTP 400 too.
+    Only the 503 to a JSON body, which no engine answered, has none.
+    """
+    live = HEADERS[engine][case]
+    sent = HEADER_CASES[case]
+    if isinstance(sent, str):
+        request = {
+            "data": json.dumps({"relevance": sent}),
+            "headers": {"Content-Type": JSON_BODY_TYPE},
+        }
+    else:
+        request = {"data": sent}
+
+    text, status, headers = FakeQueryServer(engine)("post", QUERY_URL, request)
+
+    assert status == live["status"]
+    assert headers.get(ENGINE_HEADER) == live["engine_type"]
+    # a live server sends no Content-Type, so besapi can't rely on one:
+    assert "content-type" not in {h.lower() for h in headers}
+    if "body" not in live:
+        return  # cut short in the capture
+    if live["body"].startswith("<"):
+        assert (
+            parse_answers(normalize(text))[:3]
+            == parse_answers(normalize(live["body"]))[:3]
+        )
+    else:
+        assert normalize(text) == normalize(live["body"])
+
+
+def test_header_fixtures_cover_every_case():
+    """Test both engines' header captures have the same cases."""
+    for engine in ENGINES:
+        assert set(HEADERS[engine]) - {"GET query"} == set(HEADER_CASES)
 
 
 def test_fake_query_server_json_body_needs_explorer():
@@ -553,14 +646,16 @@ def as_compared(value):
     return json.loads(json.dumps(value))
 
 
-def check_row(engine, relevance, entry, raise_for_status=False):
+def check_row(engine, relevance, entry, raise_for_status=False, headers=True):
     """Run a relevance twice on a fresh connection, return what was wrong.
 
     The first query on a connection may need one retry to learn which
     engine answers, the second must not. Relevance without `%` must never
     need more than one request.
     """
-    conn, server = engine_conn(engine, raise_for_status=raise_for_status)
+    conn, server = engine_conn(
+        engine, headers=headers, raise_for_status=raise_for_status
+    )
     problems = []
     for attempt in ("first", "again"):
         before = server.requests
@@ -590,15 +685,20 @@ def isolated_home(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
 
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
 @pytest.mark.parametrize("raise_for_status", [False, True])
 @pytest.mark.parametrize("entry", ENTRIES)
 @pytest.mark.parametrize("relevance", list(EXPECTED))
 @pytest.mark.parametrize("engine", ENGINES)
 def test_regression_matrix(
-    offline_login, isolated_home, engine, relevance, entry, raise_for_status
+    offline_login, isolated_home, engine, relevance, entry, raise_for_status, headers
 ):
-    """Test every method answers correctly whichever engine answers."""
-    assert check_row(engine, relevance, entry, raise_for_status) == []
+    """Test every method answers correctly whichever engine answers.
+
+    With the engine header, as live servers send, and without, as older
+    servers may.
+    """
+    assert check_row(engine, relevance, entry, raise_for_status, headers) == []
 
 
 def test_matrix_covers_every_capture():
@@ -700,6 +800,7 @@ def test_matrix_catches_420_on_web_reports(offline_login, isolated_home, monkeyp
 SWITCH_RELEVANCE = ['("%2541")', '("a%22b")', '("%41")', "number of bes sites", "true"]
 
 
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
 @pytest.mark.parametrize("entry", ENTRIES)
 @pytest.mark.parametrize("relevance", SWITCH_RELEVANCE)
 @pytest.mark.parametrize(
@@ -708,20 +809,23 @@ SWITCH_RELEVANCE = ['("%2541")', '("a%22b")', '("%41")', "number of bes sites", 
     ids=["explorer_stops", "explorer_starts"],
 )
 def test_engine_switch_mid_session(
-    offline_login, isolated_home, before, after, relevance, entry
+    offline_login, isolated_home, before, after, relevance, entry, headers
 ):
     """Test the call after Explorer stops or starts is still right.
 
     Never a wrong answer: a wrong encoding is detected from the answer and
     retried once within the same call.
     """
-    conn, server = engine_conn(before)
+    conn, server = engine_conn(before, headers=headers)
     want = as_compared(expected(entry, relevance))
     assert run_entry(conn, entry, relevance) == want
     server.engine = after
     requests_before = server.requests
     assert run_entry(conn, entry, relevance) == want
-    assert server.requests - requests_before <= (2 if "%" in relevance else 1)
+    # NOTE: relevance that is valid JSON is sent as is for Web Reports, so
+    # Explorer starting costs it one resend too:
+    retry_needed = "%" in relevance or relevance in JSON_SHAPED
+    assert server.requests - requests_before <= (2 if retry_needed else 1)
     # and the call after that has learned the new engine:
     requests_before = server.requests
     assert run_entry(conn, entry, relevance) == want
@@ -854,40 +958,84 @@ def test_silent_wrong_answer_is_detected_from_resource(offline_login, relevance)
 BROKEN = '("a%22b") ' + GENUINE_ERROR_MARKER
 
 
-def test_genuine_error_with_explorer(offline_login):
-    """Test a real relevance error: one retry, the first error, same state."""
-    conn, server = engine_conn("explorer")
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
+def test_genuine_error_with_explorer(offline_login, headers):
+    """Test a real relevance error with Explorer: one request, no retry.
+
+    With the header, Explorer said it answered what was sent for it. Without,
+    the Resource shows the relevance was evaluated as sent.
+    """
+    conn, server = engine_conn("explorer", headers=headers)
     result = conn.session_relevance_xml(BROKEN)
     assert parse_answers(result.text)[1] == GENUINE_ERROR
-    assert len(server.form_requests) == 2
+    assert server.form_requests == [BROKEN]
     # still assumes Explorer: the next query is sent once first
     conn.session_relevance_xml('("a%22b")')
-    assert server.form_requests[2:] == ['("a%22b")']
+    assert server.form_requests[1:] == ['("a%22b")']
 
 
-def test_genuine_error_raises_once(offline_login):
-    """Test raise_errors raises the first error, after the one retry."""
-    conn, server = engine_conn("explorer")
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
+def test_genuine_error_raises_once(offline_login, headers):
+    """Test raise_errors raises the error, after one request."""
+    conn, server = engine_conn("explorer", headers=headers)
     with pytest.raises(ValueError, match=GENUINE_ERROR):
         conn.session_relevance_array(BROKEN, raise_errors=True)
-    assert len(server.form_requests) == 2
+    assert len(server.form_requests) == 1
 
 
-def test_genuine_error_with_web_reports(offline_login):
-    """Test a real relevance error once Web Reports was learned."""
-    conn, server = engine_conn("web_reports")
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
+def test_genuine_error_with_web_reports(offline_login, headers):
+    """Test a real relevance error once Web Reports was learned: one request."""
+    conn, server = engine_conn("web_reports", headers=headers)
     conn.session_relevance_xml('("a%22b")')
     server.form_requests.clear()
     result = conn.session_relevance_xml(BROKEN)
     assert parse_answers(result.text)[1] == GENUINE_ERROR
+    assert server.form_requests == [BROKEN]
+
+
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
+def test_genuine_error_on_a_fresh_web_reports_connection(offline_login, headers):
+    """Test a real error while Web Reports isn't known yet: the wrong encoding.
+
+    Sent once, Web Reports evaluates ("a"b") instead: the header, or the
+    Resource, shows that. Sent twice, the error is genuine: returned, and
+    Web Reports is learned from it.
+    """
+    conn, server = engine_conn("web_reports", headers=headers)
+    result = conn.session_relevance_xml(BROKEN)
+    assert parse_answers(result.text)[:2] == (BROKEN, GENUINE_ERROR)
     assert len(server.form_requests) == 2
     conn.session_relevance_xml('("a%22b")')
     assert server.form_requests[2:] == ['("a%22b")']
 
 
+BROKEN_JSON = '("a%22b") ' + GENUINE_ERROR_MARKER
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_genuine_json_error_with_the_header_is_one_request(offline_login, engine):
+    """Test a real error through _json once the engine is known: no retry."""
+    conn, server = engine_conn(engine)
+    conn.session_relevance_json("number of bes sites")
+    server.form_requests.clear()
+    assert conn.session_relevance_json(BROKEN_JSON)["error"] == GENUINE_ERROR
+    assert len(server.form_requests) == 1
+
+
+def test_genuine_json_error_without_the_header_is_retried(offline_login):
+    """Test a real error through _json, no header: JSON has no Resource.
+
+    So any error may be the encoding, and is retried once.
+    """
+    conn, server = engine_conn("explorer", headers=False)
+    assert conn.session_relevance_json(BROKEN_JSON)["error"] == GENUINE_ERROR
+    assert len(server.form_requests) == 2
+
+
 def test_resource_mismatch_both_times_returns_first(offline_login, caplog):
     """Test an engine whose Resource never matches: no loop, a warning."""
-    conn, server = engine_conn("explorer")
+    conn, server = engine_conn("explorer", headers=False)
     server.resource_override = lambda text: text + " (rewritten)"
     with caplog.at_level("WARNING", logger="besapi"):
         result = conn.session_relevance_xml('("a%22b")')
@@ -900,7 +1048,7 @@ def test_resource_mismatch_both_times_returns_first(offline_login, caplog):
 
 def test_resource_mismatch_without_percent_is_not_retried(offline_login):
     """Test that without % a different Resource can't be the encoding."""
-    conn, server = engine_conn("explorer")
+    conn, server = engine_conn("explorer", headers=False)
     server.resource_override = lambda text: text + " (rewritten)"
     conn.session_relevance_xml("number of bes sites")
     assert len(server.form_requests) == 1
@@ -909,7 +1057,7 @@ def test_resource_mismatch_without_percent_is_not_retried(offline_login):
 @pytest.mark.parametrize("relevance", ['("a&b=c%22")', '"%41"'])
 def test_resource_compared_unescaped_after_parentheses(offline_login, relevance):
     """Test that &quot; / &amp; and the added parentheses don't cause a retry."""
-    conn, server = engine_conn("explorer")
+    conn, server = engine_conn("explorer", headers=False)
     conn.session_relevance_xml(relevance)
     assert len(server.form_requests) == 1
 
@@ -937,12 +1085,42 @@ def test_first_http_error_is_a_trigger(offline_login, raise_for_status):
 # ---------- unit tests: session_relevance_json and %25XX ----------
 
 
-def test_json_percent_25xx_with_explorer_is_one_request(offline_login):
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
+def test_json_percent_25xx_with_explorer_is_one_request(offline_login, headers):
     """Test %25XX through _json with Explorer: one JSON body query, no form."""
-    conn, server = engine_conn("explorer")
+    conn, server = engine_conn("explorer", headers=headers)
     assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
     assert server.json_body_requests == ['("%2541")']
     assert server.form_requests == []
+
+
+def test_json_percent_25xx_once_the_header_was_seen(offline_login):
+    """Test %25XX through _json once an answer said who answers: the form.
+
+    The header shows whether Web Reports answered a once encoded query,
+    which it answers wrongly, so no JSON body query is needed.
+    """
+    conn, server = engine_conn("explorer")
+    conn.session_relevance_json("number of bes sites")
+    assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
+    assert server.form_requests == ["number of bes sites", '("%2541")']
+    assert server.json_body_requests == []
+
+
+def test_json_percent_25xx_once_the_header_was_seen_explorer_stops(offline_login):
+    """Test the silent `A` from Web Reports is never returned, with the header.
+
+    Explorer was learned, then stops: the once encoded answer says Web
+    Reports answered it, so it is sent again twice encoded.
+    """
+    conn, server = engine_conn("explorer")
+    conn.session_relevance_json("number of bes sites")
+    server.engine = "web_reports"
+    server.form_requests.clear()
+    assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
+    # what Web Reports evaluated: ("%41"), answered `A`, then right:
+    assert server.form_requests == ['("%41")', '("%2541")']
+    assert server.json_body_requests == []
 
 
 def test_json_percent_25xx_with_web_reports(offline_login):
@@ -1000,10 +1178,11 @@ def test_json_body_network_error(offline_login):
 def test_json_body_network_error_does_not_mean_web_reports(offline_login):
     """Test a network error alone doesn't make besapi assume Web Reports.
 
-    With Explorer answering, the twice encoded fallback fails loudly, and
-    the next query asks Explorer again rather than encoding twice.
+    Without the header, the twice encoded fallback fails loudly with
+    Explorer, and the next query asks Explorer again rather than encoding
+    twice.
     """
-    conn, server = engine_conn("explorer")
+    conn, server = engine_conn("explorer", headers=False)
     server.json_body_answer = besapi.besapi.requests.ConnectionError("reset")
     assert "error" in conn.session_relevance_json('("%2541")')
     server.json_body_answer = None
@@ -1011,9 +1190,20 @@ def test_json_body_network_error_does_not_mean_web_reports(offline_login):
     assert len(server.json_body_requests) == 2
 
 
+def test_json_body_network_error_with_the_header(offline_login):
+    """Test the twice encoded fallback after a network error, with the header.
+
+    Explorer's answer says it answered, so the query is sent again for it.
+    """
+    conn, server = engine_conn("explorer")
+    server.json_body_answer = besapi.besapi.requests.ConnectionError("reset")
+    assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
+    assert server.form_requests == ["%28%22%252541%22%29", '("%2541")']
+
+
 def test_json_percent_25xx_after_explorer_starts(offline_login):
     """Test %25XX through _json once Explorer is back: one retry, as JSON body."""
-    conn, server = engine_conn("web_reports")
+    conn, server = engine_conn("web_reports", headers=False)
     conn.session_relevance_json('("%2541")')
     server.engine = "explorer"
     server.form_requests.clear()
@@ -1021,6 +1211,19 @@ def test_json_percent_25xx_after_explorer_starts(offline_login):
     assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
     assert len(server.form_requests) == 1
     assert server.json_body_requests == ['("%2541")']
+
+
+def test_json_percent_25xx_after_explorer_starts_with_the_header(offline_login):
+    """Test %25XX through _json once Explorer is back, with the header."""
+    conn, server = engine_conn("web_reports")
+    conn.session_relevance_json('("%2541")')
+    server.engine = "explorer"
+    server.form_requests.clear()
+    server.json_body_requests.clear()
+    assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
+    # twice (not allowed), then once:
+    assert server.form_requests == ["%28%22%252541%22%29", '("%2541")']
+    assert server.json_body_requests == []
 
 
 def test_json_percent_without_25xx_uses_the_form(offline_login):
@@ -1043,7 +1246,7 @@ def test_state_is_shared_by_xml_and_json(offline_login):
 
 def test_json_fingerprint_learns_web_reports(offline_login):
     """Test a JSON answer without `count` means Web Reports answered."""
-    conn, server = engine_conn("web_reports")
+    conn, server = engine_conn("web_reports", headers=False)
     conn.session_relevance_json("number of bes sites")
     conn.session_relevance_xml('("a%22b")')
     # sent twice encoded first, no retry:
@@ -1052,7 +1255,7 @@ def test_json_fingerprint_learns_web_reports(offline_login):
 
 def test_json_fingerprint_learns_explorer(offline_login):
     """Test a JSON answer with `count` means Explorer answered."""
-    conn, server = engine_conn("web_reports")
+    conn, server = engine_conn("web_reports", headers=False)
     conn.session_relevance_xml('("a%22b")')
     server.engine = "explorer"
     conn.session_relevance_json("number of bes sites")
@@ -1064,20 +1267,64 @@ def test_json_fingerprint_learns_explorer(offline_login):
 # ---------- unit tests: relevance that is valid JSON ----------
 
 
-@pytest.mark.parametrize(
-    "relevance",
-    ['"now"', "1", "-1", "1.5", "true", "null", '"x" ', '"a\tb"', '{"a": 1}'],
-)
-@pytest.mark.parametrize("engine", ENGINES)
+JSON_SHAPED_MORE = [
+    '"now"',
+    "1",
+    "-1",
+    "1.5",
+    "true",
+    "null",
+    '"x" ',
+    '"a\tb"',
+    '{"a": 1}',
+]
+
+
+@pytest.mark.parametrize("relevance", JSON_SHAPED_MORE)
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
 @pytest.mark.parametrize("raise_for_status", [False, True])
-def test_json_shaped_relevance_in_parentheses(
-    offline_login, engine, relevance, raise_for_status
+def test_json_shaped_relevance_in_parentheses_for_explorer(
+    offline_login, relevance, headers, raise_for_status
 ):
-    """Test relevance that is valid JSON is sent in parentheses, one request."""
-    conn, server = engine_conn(engine, raise_for_status=raise_for_status)
+    """Test relevance that is valid JSON is sent in parentheses, for Explorer."""
+    conn, server = engine_conn(
+        "explorer", headers=headers, raise_for_status=raise_for_status
+    )
     conn.session_relevance_xml(relevance)
     conn.session_relevance_json(relevance)
     assert server.form_requests == [f"({relevance})"] * 2
+
+
+@pytest.mark.parametrize("relevance", JSON_SHAPED_MORE)
+@pytest.mark.parametrize("raise_for_status", [False, True])
+def test_json_shaped_relevance_unchanged_for_web_reports(
+    offline_login, relevance, raise_for_status
+):
+    """Test relevance that is valid JSON is sent as is once Web Reports answers.
+
+    Only Explorer needs the parentheses. A fresh connection assumes
+    Explorer, so the first query has them; the header then says Web Reports
+    answered, and the parentheses are harmless, so it isn't sent again.
+    """
+    conn, server = engine_conn("web_reports", raise_for_status=raise_for_status)
+    conn.session_relevance_xml(relevance)
+    conn.session_relevance_json(relevance)
+    conn.session_relevance_xml(relevance)
+    assert server.form_requests == [f"({relevance})", relevance, relevance]
+
+
+@pytest.mark.parametrize("raise_for_status", [False, True])
+def test_json_shaped_relevance_after_explorer_starts(offline_login, raise_for_status):
+    """Test Explorer's HTTP 400 to valid JSON, sent as is for Web Reports.
+
+    Its header says Explorer answered, so it is sent again in parentheses.
+    """
+    conn, server = engine_conn("web_reports", raise_for_status=raise_for_status)
+    conn.session_relevance_xml("number of bes sites")
+    server.engine = "explorer"
+    server.form_requests.clear()
+    assert conn.session_relevance_array("1") == ["1"]
+    assert server.form_requests == ["1", "(1)"]
 
 
 @pytest.mark.parametrize("relevance", ['"a" & "b"', "01", "now", "NaN", "(1)"])
@@ -1110,21 +1357,40 @@ def test_login_resets_the_state(monkeypatch):
     assert len(server.form_requests) == 4
 
 
-def test_rootserver_change_resets_the_state(offline_login):
-    """Test that state learned for one root server is not used for another."""
-    conn, server = engine_conn("web_reports")
-    conn.session_relevance_xml('("a%22b")')
-    other = FakeQueryServer("web_reports")
+def other_root_server(conn, engine, headers=True):
+    """Point a connection at another root server, answered by `engine`."""
+    other = FakeQueryServer(engine, headers)
     conn.rootserver = "https://other.example:52311"
-    conn.session.routes["https://other.example:52311/api/query"] = other
-    other_url = "https://other.example:52311/api/query"
 
     def answer(method, url, kwargs):
         return other(method, QUERY_URL, kwargs)
 
-    conn.session.routes[other_url] = answer
+    conn.session.routes["https://other.example:52311/api/query"] = answer
+    return other
+
+
+def test_rootserver_change_keeps_the_state(offline_login):
+    """Test the state isn't tied to the root server: no extra request.
+
+    A wrong state only costs one retry, see the next test.
+    """
+    conn, _ = engine_conn("web_reports")
     conn.session_relevance_xml('("a%22b")')
+    other = other_root_server(conn, "web_reports")
+    conn.session_relevance_xml('("a%22b")')
+    assert other.form_requests == ['("a%22b")']
+
+
+@pytest.mark.parametrize("headers", [True, False], ids=["header", "no_header"])
+def test_rootserver_change_to_another_engine(offline_login, headers):
+    """Test a root server answered by another engine is learned in one call."""
+    conn, _ = engine_conn("web_reports", headers=headers)
+    conn.session_relevance_xml('("a%22b")')
+    other = other_root_server(conn, "explorer", headers)
+    assert conn.session_relevance_array('("a%22b")') == ['a"b']
     assert len(other.form_requests) == 2
+    conn.session_relevance_array('("a%22b")')
+    assert len(other.form_requests) == 3
 
 
 def test_state_is_per_connection(offline_login):
@@ -1136,6 +1402,88 @@ def test_state_is_per_connection(offline_login):
     conn_ex.session_relevance_xml('("a%22b")')
     assert len(server_wr.form_requests) == 2
     assert server_ex.form_requests == ['("a%22b")']
+
+
+# ---------- unit tests: the engine header ----------
+
+
+def test_header_teaches_the_engine_without_percent(offline_login):
+    """Test any answer says who answers, so the first % query is right."""
+    conn, server = engine_conn("web_reports")
+    conn.session_relevance_array("number of bes sites")
+    assert conn.session_relevance_array('("a%22b")') == ['a"b']
+    assert server.form_requests == ["number of bes sites", '("a%22b")']
+
+
+@pytest.mark.parametrize("value", ["BigFix Something Else", "", "explorer"])
+def test_unknown_header_value_is_no_header(offline_login, value):
+    """Test an engine type besapi doesn't know is treated as no header."""
+    conn, server = engine_conn("explorer")
+    server.engine_headers = lambda: {ENGINE_HEADER: value}
+    conn.session_relevance_json("number of bes sites")
+    server.form_requests.clear()
+    # no header to trust: %25XX through _json asks Explorer with a JSON body
+    assert conn.session_relevance_json('("%2541")')["result"] == ["%41"]
+    assert server.json_body_requests == ['("%2541")']
+
+
+def test_header_engine_changing_again_is_not_retried_twice(offline_login):
+    """Test the engine changing between the query and its retry: no loop."""
+    conn, server = engine_conn("explorer")
+    answered = []
+    real_call = server.__call__
+
+    def flapping(method, url, kwargs):
+        answer = real_call(method, url, kwargs)
+        answered.append(server.engine)
+        server.engine = "explorer" if server.engine == "web_reports" else "web_reports"
+        return answer
+
+    server.engine = "web_reports"
+    conn.session.routes[QUERY_URL] = flapping
+    conn.session_relevance_xml('("a%22b")')
+    assert answered == ["web_reports", "explorer"]
+    assert len(server.form_requests) == 2
+
+
+def test_header_on_an_http_error(offline_login):
+    """Test the header is read from an HTTPError under raise_for_status."""
+    conn, server = engine_conn("explorer", raise_for_status=True)
+    conn.session_relevance_xml("number of bes sites")
+    server.engine = "web_reports"
+    conn.session_relevance_xml("number of bes sites")  # learns Web Reports
+    server.engine = "explorer"
+    server.form_requests.clear()
+    # sent as is for Web Reports, Explorer answers HTTP 400 with its header:
+    assert conn.session_relevance_string("1") == "1"
+
+
+@pytest.mark.parametrize(
+    "relevance", [b'("a%22b")', b"number of bes sites", '("é")'.encode()]
+)
+@pytest.mark.parametrize("engine", ENGINES)
+def test_bytes_relevance(offline_login, engine, relevance):
+    """Test relevance as bytes works as its UTF-8 text does, as in 4.4.6."""
+    text = relevance.decode("utf-8")
+    conn, server = engine_conn(engine)
+    assert conn.session_relevance_array(relevance) == conn.session_relevance_array(text)
+    assert conn.session_relevance_json(relevance) == conn.session_relevance_json(text)
+
+
+def test_login_forgets_the_header(monkeypatch):
+    """Test a real login forgets an engine learned from the header."""
+    from test_besapi_sdk import FakeSession  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setattr(besapi.besapi.requests, "Session", FakeSession)
+    conn = BESConnection("user", "pass", "https://bigfix.example:52311")
+    server = FakeQueryServer("explorer")
+    conn.session.routes[QUERY_URL] = server
+    conn.session_relevance_json("number of bes sites")
+    conn.last_connected = None
+    assert conn.login()
+    # nothing is known again: %25XX through _json asks with a JSON body
+    conn.session_relevance_json('("%2541")')
+    assert server.json_body_requests == ['("%2541")']
 
 
 # ---------- unit tests: request arguments ----------
@@ -1167,10 +1515,38 @@ def test_resource_compared_as_xml_normalizes_whitespace(offline_login, newline):
     so the Resource of multi-line relevance never equals it exactly.
     NOTE: whether a live server escapes them in Resource isn't captured.
     """
-    conn, server = engine_conn("explorer")
+    conn, server = engine_conn("explorer", headers=False)
     relevance = f'("a%22b"){newline}& ("c")'
     conn.session_relevance_xml(relevance)
     assert len(server.form_requests) == 1
+
+
+def test_header_answer_is_trusted_over_resource(offline_login):
+    """Test that with the header, the Resource isn't needed: one request."""
+    conn, server = engine_conn("explorer")
+    server.resource_override = lambda text: text + " (rewritten)"
+    conn.session_relevance_xml('("a%22b")')
+    assert len(server.form_requests) == 1
+
+
+def test_resource_check_reads_only_the_query_tag(offline_login, monkeypatch):
+    """Test the check without the header doesn't parse the whole answer.
+
+    Only the Query tag's Resource decides it. A full parse, when needed, is
+    the lazy one of the result.
+    """
+    conn, server = engine_conn("explorer", headers=False)
+    parses = []
+    real_fromstring = besapi.besapi.lxml.etree.fromstring
+
+    def counting_fromstring(*args, **kwargs):
+        parses.append(args)
+        return real_fromstring(*args, **kwargs)
+
+    monkeypatch.setattr(besapi.besapi.lxml.etree, "fromstring", counting_fromstring)
+    conn.session_relevance_xml('("%2541")')
+    assert len(server.form_requests) == 1
+    assert parses == []
 
 
 def test_answer_without_query_is_retried_once(offline_login):

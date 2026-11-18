@@ -1,0 +1,67 @@
+{
+  "form once ok": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"number of bes sites\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.75ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form once json ok": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[2],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "form once error": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"bogus_operator\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"bogus_operator\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form once json error": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"bogus_operator\\\" is not defined.\"}"
+  },
+  "form once %22": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&quot;b&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had no ending quotation mark.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form once %2541": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%41&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.35ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form twice %22": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%22b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\"b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.36ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form twice %2541 json": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"%41\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "form json-shaped 1": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.24ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form json-shaped (1)": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.25ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "json body ok": {
+    "status": 503,
+    "engine_type": null,
+    "body": "Cannot perform relevance query evaluation at this time because there is no reachable BigFix Explorer instance collecting data from this Server."
+  },
+  "json body error": {
+    "status": 503,
+    "engine_type": null,
+    "body": "Cannot perform relevance query evaluation at this time because there is no reachable BigFix Explorer instance collecting data from this Server."
+  },
+  "GET query": {
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.23ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  }
+}

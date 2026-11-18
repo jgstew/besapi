@@ -65,16 +65,21 @@ def isolated_home(monkeypatch, tmp_path):
 
 
 def test_live_engine_detected(live_conn):
-    """Report which engine answers, from the JSON answer's fingerprint."""
+    """Report which engine answers, from the answer's header.
+
+    The JSON answer's fingerprint must agree: `count` only from Explorer.
+    """
     # pylint: disable=protected-access
-    answer = live_conn.session_relevance_json("1")
-    engine = "explorer" if "count" in answer else "web_reports"
-    print(f"\n/api/query is answered by: {engine}")
-    assert live_conn._get_relevance_engine() == (
-        besapi.besapi.RELEVANCE_ENGINE_EXPLORER
-        if engine == "explorer"
-        else besapi.besapi.RELEVANCE_ENGINE_WEB_REPORTS
+    result = live_conn.post("query", data={"relevance": "1 + 1", "output": "json"})
+    engine_type = result.request.headers.get(besapi.besapi.RELEVANCE_ENGINE_HEADER)
+    print(f"\n/api/query is answered by: {engine_type}")
+    engine = besapi.besapi._relevance_engine_answering(result.request)
+    assert engine is not None, f"unknown engine header: {engine_type!r}"
+    assert ("count" in result.text) == (
+        engine == besapi.besapi.RELEVANCE_ENGINE_EXPLORER
     )
+    live_conn.session_relevance_json("1")
+    assert live_conn._get_relevance_engine() == engine
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
