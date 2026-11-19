@@ -122,14 +122,6 @@ def engine(live_conn):
     return answered_by
 
 
-@pytest.fixture(scope="module")
-def web_reports(live_conn, engine):
-    """Skip unless Web Reports answers, the only engine this was captured with."""
-    if engine != WEB_REPORTS:
-        pytest.skip(f"only captured with Web Reports answering, not {engine}")
-    return live_conn
-
-
 @pytest.mark.parametrize(
     "query, body",
     [
@@ -172,13 +164,9 @@ def test_live_get_request_target_too_long(live_conn):
     assert besapi.besapi.RELEVANCE_ENGINE_HEADER not in response.headers
 
 
-def test_live_get_request_target_longest(web_reports):
-    """Test a request target of exactly 32755 bytes is evaluated.
-
-    NOTE: Web Reports only: Explorer stopped answering during the probe that
-    sent requests this long, so it isn't run against Explorer.
-    """
-    response = get(web_reports, request_target_query(web_reports, MAX_REQUEST_TARGET))
+def test_live_get_request_target_longest(live_conn):
+    """Test a request target of exactly 32755 bytes is evaluated."""
+    response = get(live_conn, request_target_query(live_conn, MAX_REQUEST_TARGET))
 
     assert response.status_code == 200
     assert besapi.besapi.RELEVANCE_ENGINE_HEADER in response.headers
