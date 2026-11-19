@@ -1,0 +1,1005 @@
+{
+  "Relevance_capital|-|xml": {
+    "query": "Relevance=1",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "accept_json|-|xml": {
+    "query": "relevance=%281%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.041ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n",
+    "request_headers": {
+      "Accept": "application/json"
+    }
+  },
+  "accept_json|once|xml": {
+    "query": "relevance=1",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}",
+    "request_headers": {
+      "Accept": "application/json"
+    }
+  },
+  "amp|once|json": {
+    "query": "relevance=%28%22a%26b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a&b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.042}"
+  },
+  "amp|once|xml": {
+    "query": "relevance=%28%22a%26b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&amp;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a&amp;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.04ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "amp|plus|json": {
+    "query": "relevance=%28%22a%26b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a&b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.033}"
+  },
+  "amp|plus|xml": {
+    "query": "relevance=%28%22a%26b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&amp;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a&amp;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.04ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "amp|twice|json": {
+    "query": "relevance=%2528%2522a%2526b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "amp|twice|xml": {
+    "query": "relevance=%2528%2522a%2526b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%26b%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "backslash|once|json": {
+    "query": "relevance=%28%22a%5Cb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a\\\\b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.035}"
+  },
+  "backslash|once|xml": {
+    "query": "relevance=%28%22a%5Cb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a\\b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.038ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "backslash|plus|json": {
+    "query": "relevance=%28%22a%5Cb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a\\\\b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.034}"
+  },
+  "backslash|plus|xml": {
+    "query": "relevance=%28%22a%5Cb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a\\b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.038ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "backslash|twice|json": {
+    "query": "relevance=%2528%2522a%255Cb%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "backslash|twice|xml": {
+    "query": "relevance=%2528%2522a%255Cb%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%5Cb%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "bad_pct|-|xml": {
+    "query": "relevance=(%2522a%25zzb%2522)",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(%22a%zzb%22)\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "ctrl|once|json": {
+    "query": "relevance=%28%22a%2501b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a\\u0001b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.057}"
+  },
+  "ctrl|once|xml": {
+    "query": "relevance=%28%22a%2501b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%01b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\\u0001b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.059ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "ctrl|plus|json": {
+    "query": "relevance=%28%22a%2501b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a\\u0001b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.058}"
+  },
+  "ctrl|plus|xml": {
+    "query": "relevance=%28%22a%2501b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%01b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\\u0001b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.042ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "ctrl|twice|json": {
+    "query": "relevance=%2528%2522a%252501b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "ctrl|twice|xml": {
+    "query": "relevance=%2528%2522a%252501b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%2501b%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "empty_relevance|-|json": {
+    "query": "relevance=&output=json",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "empty_relevance|-|xml": {
+    "query": "relevance=",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "empty|once|json": {
+    "query": "relevance=%281%3B2%29%20whose%20%28it%20%3E%205%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"count\":0,\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0.067}"
+  },
+  "empty|once|xml": {
+    "query": "relevance=%281%3B2%29%20whose%20%28it%20%3E%205%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2) whose (it &gt; 5)\">\n\t\t<Result></Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.064ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "empty|plus|json": {
+    "query": "relevance=%281%3B2%29+whose+%28it+%3E+5%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"count\":0,\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0.068}"
+  },
+  "empty|plus|xml": {
+    "query": "relevance=%281%3B2%29+whose+%28it+%3E+5%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2) whose (it &gt; 5)\">\n\t\t<Result></Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.148ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "empty|twice|json": {
+    "query": "relevance=%25281%253B2%2529%2520whose%2520%2528it%2520%253E%25205%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "empty|twice|xml": {
+    "query": "relevance=%25281%253B2%2529%2520whose%2520%2528it%2520%253E%25205%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%281%3B2%29%20whose%20%28it%20%3E%205%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "equals|once|json": {
+    "query": "relevance=%28%22a%3Db%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a=b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.04}"
+  },
+  "equals|once|xml": {
+    "query": "relevance=%28%22a%3Db%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a=b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a=b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.04ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "equals|plus|json": {
+    "query": "relevance=%28%22a%3Db%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a=b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.024}"
+  },
+  "equals|plus|xml": {
+    "query": "relevance=%28%22a%3Db%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a=b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a=b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.039ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "equals|twice|json": {
+    "query": "relevance=%2528%2522a%253Db%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "equals|twice|xml": {
+    "query": "relevance=%2528%2522a%253Db%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%3Db%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "error|once|json": {
+    "query": "relevance=foo%20bar%20baz&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"foo bar baz\\\" is not defined.\"}"
+  },
+  "error|once|xml": {
+    "query": "relevance=foo%20bar%20baz",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"foo bar baz\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"foo bar baz\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "error|plus|json": {
+    "query": "relevance=foo+bar+baz&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"foo bar baz\\\" is not defined.\"}"
+  },
+  "error|plus|xml": {
+    "query": "relevance=foo+bar+baz",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"foo bar baz\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"foo bar baz\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "error|twice|json": {
+    "query": "relevance=foo%2520bar%2520baz&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "error|twice|xml": {
+    "query": "relevance=foo%2520bar%2520baz",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"foo%20bar%20baz\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "hash|once|json": {
+    "query": "relevance=%28%22a%23b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a#b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.038}"
+  },
+  "hash|once|xml": {
+    "query": "relevance=%28%22a%23b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a#b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a#b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.04ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "hash|plus|json": {
+    "query": "relevance=%28%22a%23b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a#b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.033}"
+  },
+  "hash|plus|xml": {
+    "query": "relevance=%28%22a%23b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a#b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a#b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.037ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "hash|twice|json": {
+    "query": "relevance=%2528%2522a%2523b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "hash|twice|xml": {
+    "query": "relevance=%2528%2522a%2523b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%23b%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "int|once|json": {
+    "query": "relevance=1&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "int|once|xml": {
+    "query": "relevance=1",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "int|plus|json": {
+    "query": "relevance=1&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "int|plus|xml": {
+    "query": "relevance=1",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "int|twice|json": {
+    "query": "relevance=1&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "int|twice|xml": {
+    "query": "relevance=1",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "json_string|once|json": {
+    "query": "relevance=%22text%22&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "json_string|once|xml": {
+    "query": "relevance=%22text%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "json_string|plus|json": {
+    "query": "relevance=%22text%22&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "json_string|plus|xml": {
+    "query": "relevance=%22text%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "json_string|twice|json": {
+    "query": "relevance=%2522text%2522&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "json_string|twice|xml": {
+    "query": "relevance=%2522text%2522",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%22text%22\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "length_2000|once|json": {
+    "query": "relevance=length%20of%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[2000],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.049}"
+  },
+  "length_4000|once|json": {
+    "query": "relevance=length%20of%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression has a very long string.\"}"
+  },
+  "length_65000|once|xml": {
+    "query": null,
+    "status": 414,
+    "engine_type": null,
+    "body": "{\"error\":\"Request-URI Too Long\"}",
+    "query_note": "relevance=length of \"<65000 x>\" encoded once: a request target longer than 32755 bytes"
+  },
+  "literal_2048|-|json": {
+    "query": "relevance=length%20of%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[2048],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.036}"
+  },
+  "literal_2049|-|json": {
+    "query": "relevance=length%20of%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression has a very long string.\"}"
+  },
+  "lt|once|json": {
+    "query": "relevance=%281%20%3C%202%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[true],\"count\":1,\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0.056}"
+  },
+  "lt|once|xml": {
+    "query": "relevance=%281%20%3C%202%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1 &lt; 2)\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.063ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "lt|plus|json": {
+    "query": "relevance=%281+%3C+2%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[true],\"count\":1,\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0.055}"
+  },
+  "lt|plus|xml": {
+    "query": "relevance=%281+%3C+2%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1 &lt; 2)\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.056ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "lt|twice|json": {
+    "query": "relevance=%25281%2520%253C%25202%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "lt|twice|xml": {
+    "query": "relevance=%25281%2520%253C%25202%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%281%20%3C%202%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "newline|once|json": {
+    "query": "relevance=number%20of%20bes%20sites%0A&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[6],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.279}"
+  },
+  "newline|once|xml": {
+    "query": "relevance=number%20of%20bes%20sites%0A",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.276ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "newline|twice|json": {
+    "query": "relevance=number%2520of%2520bes%2520sites%250A&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "newline|twice|xml": {
+    "query": "relevance=number%2520of%2520bes%2520sites%250A",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"number%20of%20bes%20sites%0A\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "no_query|-|xml": {
+    "query": "",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "no_relevance|-|xml": {
+    "query": "output=json",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "nonascii|once|json": {
+    "query": "relevance=%22caf%C3%A9%22&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "nonascii|once|xml": {
+    "query": "relevance=%22caf%C3%A9%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "nonascii|plus|json": {
+    "query": "relevance=%22caf%C3%A9%22&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "nonascii|plus|xml": {
+    "query": "relevance=%22caf%C3%A9%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "nonascii|twice|json": {
+    "query": "relevance=%2522caf%25C3%25A9%2522&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "nonascii|twice|xml": {
+    "query": "relevance=%2522caf%25C3%25A9%2522",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%22caf%C3%A9%22\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_JSON_upper|once|json": {
+    "query": "relevance=1&output=JSON",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "output_JSON|-|json": {
+    "query": "relevance=%281%29&output=JSON",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[1],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.05}"
+  },
+  "output_empty|-|xml": {
+    "query": "relevance=%281%29&output=",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.168ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_empty|once|xml": {
+    "query": "relevance=1&output=",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "output_first|-|json": {
+    "query": "output=json&relevance=%281%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[1],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.041}"
+  },
+  "output_first|once|json": {
+    "query": "output=json&relevance=1",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "output_foo|once|xml": {
+    "query": "relevance=1&output=foo",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "output_json|-|json": {
+    "query": "relevance=%281%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[1],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.032}"
+  },
+  "output_xml|-|xml": {
+    "query": "relevance=%281%29&output=xml",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.035ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_xml|once|xml": {
+    "query": "relevance=1&output=xml",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "paren_plus_once|-|json": {
+    "query": "relevance=%28%22a%2Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a+b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.029}"
+  },
+  "paren_space_once|-|json": {
+    "query": "relevance=%28%22a%20b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.081}"
+  },
+  "pct22|once|json": {
+    "query": "relevance=%28%22a%2522b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a\\\"b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.117}"
+  },
+  "pct22|once|xml": {
+    "query": "relevance=%28%22a%2522b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%22b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\"b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.062ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct22|plus|json": {
+    "query": "relevance=%28%22a%2522b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a\\\"b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.059}"
+  },
+  "pct22|plus|xml": {
+    "query": "relevance=%28%22a%2522b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%22b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\"b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.069ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct22|twice|json": {
+    "query": "relevance=%2528%2522a%252522b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "pct22|twice|xml": {
+    "query": "relevance=%2528%2522a%252522b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%2522b%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct252B_twice|-|json": {
+    "query": "relevance=(%2522a%252Bb%2522)&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "pct2541|once|json": {
+    "query": "relevance=%28%22%252541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"%41\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.058}"
+  },
+  "pct2541|once|xml": {
+    "query": "relevance=%28%22%252541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%2541&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">%41</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.056ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct2541|plus|json": {
+    "query": "relevance=%28%22%252541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"%41\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.05}"
+  },
+  "pct2541|plus|xml": {
+    "query": "relevance=%28%22%252541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%2541&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">%41</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.06ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct2541|twice|json": {
+    "query": "relevance=%2528%2522%25252541%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "pct2541|twice|xml": {
+    "query": "relevance=%2528%2522%25252541%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22%252541%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct2B_once|-|json": {
+    "query": "relevance=1%2B1&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[2],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.057}"
+  },
+  "pct41|once|json": {
+    "query": "relevance=%28%22%2541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"A\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.056}"
+  },
+  "pct41|once|xml": {
+    "query": "relevance=%28%22%2541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%41&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.06ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct41|plus|json": {
+    "query": "relevance=%28%22%2541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"A\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.053}"
+  },
+  "pct41|plus|xml": {
+    "query": "relevance=%28%22%2541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%41&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.322ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct41|twice|json": {
+    "query": "relevance=%2528%2522%252541%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "pct41|twice|xml": {
+    "query": "relevance=%2528%2522%252541%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22%2541%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct_trailing|once|json": {
+    "query": "relevance=%28%22100%25%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  },
+  "pct_trailing|once|xml": {
+    "query": "relevance=%28%22100%25%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;100%&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct_trailing|plus|json": {
+    "query": "relevance=%28%22100%25%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  },
+  "pct_trailing|plus|xml": {
+    "query": "relevance=%28%22100%25%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;100%&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct_trailing|twice|json": {
+    "query": "relevance=%2528%2522100%2525%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "pct_trailing|twice|xml": {
+    "query": "relevance=%2528%2522100%2525%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22100%25%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plural|once|json": {
+    "query": "relevance=%281%3B2%3B3%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[1,2,3],\"count\":3,\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0.06}"
+  },
+  "plural|once|xml": {
+    "query": "relevance=%281%3B2%3B3%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2;3)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t<Answer type=\"integer\">2</Answer>\n\t\t\t<Answer type=\"integer\">3</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.071ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plural|plus|json": {
+    "query": "relevance=%281%3B2%3B3%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[1,2,3],\"count\":3,\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0.069}"
+  },
+  "plural|plus|xml": {
+    "query": "relevance=%281%3B2%3B3%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2;3)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t<Answer type=\"integer\">2</Answer>\n\t\t\t<Answer type=\"integer\">3</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.073ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plural|twice|json": {
+    "query": "relevance=%25281%253B2%253B3%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "plural|twice|xml": {
+    "query": "relevance=%25281%253B2%253B3%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%281%3B2%3B3%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plus|once|json": {
+    "query": "relevance=%28%22a%2Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a+b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.035}"
+  },
+  "plus|once|xml": {
+    "query": "relevance=%28%22a%2Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a+b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a+b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.028ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plus|plus|json": {
+    "query": "relevance=%28%22a%2Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a+b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.032}"
+  },
+  "plus|plus|xml": {
+    "query": "relevance=%28%22a%2Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a+b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a+b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.045ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plus|twice|json": {
+    "query": "relevance=%2528%2522a%252Bb%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "plus|twice|xml": {
+    "query": "relevance=%2528%2522a%252Bb%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%2Bb%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "raw_plus_in_string|-|json": {
+    "query": "relevance=(%22a+b%22)&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.027}"
+  },
+  "raw_plus_operator|-|json": {
+    "query": "relevance=1+%2B+1&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[2],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.039}"
+  },
+  "raw_space|-|xml": {
+    "query": "relevance=%22a%20b%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "relevance_twice|-|xml": {
+    "query": "relevance=1&relevance=2",
+    "status": 400,
+    "engine_type": null,
+    "body": "More than one value exists for parameter \"relevance\" when only one was expected."
+  },
+  "resource_newline_once|-|xml": {
+    "query": "relevance=number%20of%20bes%20sites%0A",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.258ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "resource_plain|-|xml": {
+    "query": "relevance=number%20of%20bes%20sites",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"number of bes sites\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.227ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "resource_raw_ctrl|-|xml": {
+    "query": "relevance=%28%22a%01b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\\u0001b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.032ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "semicolon_str|once|json": {
+    "query": "relevance=%28%22a%3Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a;b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.035}"
+  },
+  "semicolon_str|once|xml": {
+    "query": "relevance=%28%22a%3Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.042ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "semicolon_str|plus|json": {
+    "query": "relevance=%28%22a%3Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"a;b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.033}"
+  },
+  "semicolon_str|plus|xml": {
+    "query": "relevance=%28%22a%3Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.037ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "semicolon_str|twice|json": {
+    "query": "relevance=%2528%2522a%253Bb%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "semicolon_str|twice|xml": {
+    "query": "relevance=%2528%2522a%253Bb%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%28%22a%3Bb%22%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "space|once|json": {
+    "query": "relevance=%22a%20b%22&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "space|once|xml": {
+    "query": "relevance=%22a%20b%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "space|plus|json": {
+    "query": "relevance=%22a+b%22&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "space|plus|xml": {
+    "query": "relevance=%22a+b%22",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "space|twice|json": {
+    "query": "relevance=%2522a%2520b%2522&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "space|twice|xml": {
+    "query": "relevance=%2522a%2520b%2522",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%22a%20b%22\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "true|once|json": {
+    "query": "relevance=true&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "true|once|xml": {
+    "query": "relevance=true",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "true|plus|json": {
+    "query": "relevance=true&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "true|plus|xml": {
+    "query": "relevance=true",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "true|twice|json": {
+    "query": "relevance=true&output=json",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "true|twice|xml": {
+    "query": "relevance=true",
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "tuple|once|json": {
+    "query": "relevance=%281%2C%20%22a%22%2C%20true%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[[1,\"a\",true]],\"count\":1,\"plural\":false,\"type\":\"( integer, string, boolean )\",\"evaltime_ms\":0.043}"
+  },
+  "tuple|once|xml": {
+    "query": "relevance=%281%2C%20%22a%22%2C%20true%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1, &quot;a&quot;, true)\">\n\t\t<Result>\n\t\t\t<Tuple>\n\t\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t\t<Answer type=\"string\">a</Answer>\n\t\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t\t</Tuple>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.105ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "tuple|plus|json": {
+    "query": "relevance=%281%2C+%22a%22%2C+true%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[[1,\"a\",true]],\"count\":1,\"plural\":false,\"type\":\"( integer, string, boolean )\",\"evaltime_ms\":0.057}"
+  },
+  "tuple|plus|xml": {
+    "query": "relevance=%281%2C+%22a%22%2C+true%29",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1, &quot;a&quot;, true)\">\n\t\t<Result>\n\t\t\t<Tuple>\n\t\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t\t<Answer type=\"string\">a</Answer>\n\t\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t\t</Tuple>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.076ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "tuple|twice|json": {
+    "query": "relevance=%25281%252C%2520%2522a%2522%252C%2520true%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "tuple|twice|xml": {
+    "query": "relevance=%25281%252C%2520%2522a%2522%252C%2520true%2529",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"%281%2C%20%22a%22%2C%20true%29\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "two_1500|-|json": {
+    "query": "relevance=length%20of%20%28%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%22%20%26%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[3000],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.046}"
+  },
+  "unencoded_pct|-|xml": {
+    "query": "relevance=(%2522100%25%2522)",
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(%22100%%22)\">\n\t\t<Result></Result>\n\t\t<Error>This expression contained a character which is not allowed.</Error>\n\t</Query>\n</BESAPI>\n"
+  }
+}

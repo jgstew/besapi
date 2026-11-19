@@ -1,0 +1,906 @@
+{
+  "Relevance_capital|-|xml": {
+    "query": "Relevance=1",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "accept_json|once|xml": {
+    "query": "relevance=1",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.23ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n",
+    "request_headers": {
+      "Accept": "application/json"
+    }
+  },
+  "amp|once|json": {
+    "query": "relevance=%28%22a%26b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a&b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "amp|once|xml": {
+    "query": "relevance=%28%22a%26b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&amp;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a&amp;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.21ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "amp|plus|json": {
+    "query": "relevance=%28%22a%26b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a&b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "amp|plus|xml": {
+    "query": "relevance=%28%22a%26b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&amp;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a&amp;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.26ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "amp|twice|json": {
+    "query": "relevance=%2528%2522a%2526b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a&b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "amp|twice|xml": {
+    "query": "relevance=%2528%2522a%2526b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&amp;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a&amp;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.28ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "backslash|once|json": {
+    "query": "relevance=%28%22a%5Cb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\\\b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "backslash|once|xml": {
+    "query": "relevance=%28%22a%5Cb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a\\b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.31ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "backslash|plus|json": {
+    "query": "relevance=%28%22a%5Cb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\\\b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "backslash|plus|xml": {
+    "query": "relevance=%28%22a%5Cb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a\\b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.26ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "backslash|twice|json": {
+    "query": "relevance=%2528%2522a%255Cb%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\\\b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "backslash|twice|xml": {
+    "query": "relevance=%2528%2522a%255Cb%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a\\b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.26ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "bad_pct|-|xml": {
+    "query": "relevance=(%2522a%25zzb%2522)",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%zzb&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "ctrl|once|json": {
+    "query": "relevance=%28%22a%2501b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\u0001b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "ctrl|once|xml": {
+    "query": "relevance=%28%22a%2501b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\\u0001b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.21ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "ctrl|plus|json": {
+    "query": "relevance=%28%22a%2501b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\u0001b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "ctrl|plus|xml": {
+    "query": "relevance=%28%22a%2501b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\\u0001b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.26ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "ctrl|twice|json": {
+    "query": "relevance=%2528%2522a%252501b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\u0001b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "ctrl|twice|xml": {
+    "query": "relevance=%2528%2522a%252501b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%01b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\\\u0001b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.51ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "empty_relevance|-|json": {
+    "query": "relevance=&output=json",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "empty_relevance|-|xml": {
+    "query": "relevance=",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "empty|once|json": {
+    "query": "relevance=%281%3B2%29%20whose%20%28it%20%3E%205%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "empty|once|xml": {
+    "query": "relevance=%281%3B2%29%20whose%20%28it%20%3E%205%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2) whose (it &gt; 5)\">\n\t\t<Result></Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.38ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "empty|plus|json": {
+    "query": "relevance=%281%3B2%29+whose+%28it+%3E+5%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "empty|plus|xml": {
+    "query": "relevance=%281%3B2%29+whose+%28it+%3E+5%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2) whose (it &gt; 5)\">\n\t\t<Result></Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.56ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "empty|twice|json": {
+    "query": "relevance=%25281%253B2%2529%2520whose%2520%2528it%2520%253E%25205%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "empty|twice|xml": {
+    "query": "relevance=%25281%253B2%2529%2520whose%2520%2528it%2520%253E%25205%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2) whose (it &gt; 5)\">\n\t\t<Result></Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.52ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "equals|once|json": {
+    "query": "relevance=%28%22a%3Db%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a=b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "equals|once|xml": {
+    "query": "relevance=%28%22a%3Db%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a=b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a=b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.19ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "equals|plus|json": {
+    "query": "relevance=%28%22a%3Db%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a=b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "equals|plus|xml": {
+    "query": "relevance=%28%22a%3Db%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a=b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a=b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.27ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "equals|twice|json": {
+    "query": "relevance=%2528%2522a%253Db%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a=b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "equals|twice|xml": {
+    "query": "relevance=%2528%2522a%253Db%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a=b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a=b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.29ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "error|once|json": {
+    "query": "relevance=foo%20bar%20baz&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"foo bar baz\\\" is not defined.\"}"
+  },
+  "error|once|xml": {
+    "query": "relevance=foo%20bar%20baz",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"foo bar baz\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"foo bar baz\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "error|plus|json": {
+    "query": "relevance=foo+bar+baz&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"foo bar baz\\\" is not defined.\"}"
+  },
+  "error|plus|xml": {
+    "query": "relevance=foo+bar+baz",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"foo bar baz\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"foo bar baz\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "error|twice|json": {
+    "query": "relevance=foo%2520bar%2520baz&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"foo bar baz\\\" is not defined.\"}"
+  },
+  "error|twice|xml": {
+    "query": "relevance=foo%2520bar%2520baz",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"foo bar baz\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"foo bar baz\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "hash|once|json": {
+    "query": "relevance=%28%22a%23b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a#b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "hash|once|xml": {
+    "query": "relevance=%28%22a%23b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a#b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a#b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.22ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "hash|plus|json": {
+    "query": "relevance=%28%22a%23b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a#b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "hash|plus|xml": {
+    "query": "relevance=%28%22a%23b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a#b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a#b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.23ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "hash|twice|json": {
+    "query": "relevance=%2528%2522a%2523b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a#b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "hash|twice|xml": {
+    "query": "relevance=%2528%2522a%2523b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a#b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a#b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.28ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "int|once|json": {
+    "query": "relevance=1&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "int|once|xml": {
+    "query": "relevance=1",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.33ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "int|plus|json": {
+    "query": "relevance=1&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "int|plus|xml": {
+    "query": "relevance=1",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.26ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "int|twice|json": {
+    "query": "relevance=1&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "int|twice|xml": {
+    "query": "relevance=1",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.27ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "json_string|once|json": {
+    "query": "relevance=%22text%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"text\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "json_string|once|xml": {
+    "query": "relevance=%22text%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;text&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">text</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.19ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "json_string|plus|json": {
+    "query": "relevance=%22text%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"text\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "json_string|plus|xml": {
+    "query": "relevance=%22text%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;text&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">text</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.25ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "json_string|twice|json": {
+    "query": "relevance=%2522text%2522&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"text\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "json_string|twice|xml": {
+    "query": "relevance=%2522text%2522",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;text&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">text</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.25ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "length_2000|once|json": {
+    "query": "relevance=length%20of%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[2000],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "length_4000|once|json": {
+    "query": "relevance=length%20of%20%22xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"This expression has a very long string.\"}"
+  },
+  "length_65000|once|xml": {
+    "query": null,
+    "status": 414,
+    "engine_type": null,
+    "body": "{\"error\":\"Request-URI Too Long\"}",
+    "query_note": "relevance=length of \"<65000 x>\" encoded once: a request target longer than 32755 bytes"
+  },
+  "lt|once|json": {
+    "query": "relevance=%281%20%3C%202%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  },
+  "lt|once|xml": {
+    "query": "relevance=%281%20%3C%202%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1 &lt; 2)\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.34ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "lt|plus|json": {
+    "query": "relevance=%281+%3C+2%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  },
+  "lt|plus|xml": {
+    "query": "relevance=%281+%3C+2%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1 &lt; 2)\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.32ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "lt|twice|json": {
+    "query": "relevance=%25281%2520%253C%25202%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  },
+  "lt|twice|xml": {
+    "query": "relevance=%25281%2520%253C%25202%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1 &lt; 2)\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.33ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "newline|once|json": {
+    "query": "relevance=number%20of%20bes%20sites%0A&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[6],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "newline|once|xml": {
+    "query": "relevance=number%20of%20bes%20sites%0A",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.77ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "newline|plus|json": {
+    "query": "relevance=number+of+bes+sites%0A&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[6],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "newline|plus|xml": {
+    "query": "relevance=number+of+bes+sites%0A",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.106ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "newline|twice|json": {
+    "query": "relevance=number%2520of%2520bes%2520sites%250A&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[6],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "newline|twice|xml": {
+    "query": "relevance=number%2520of%2520bes%2520sites%250A",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query>\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">6</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.104ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "no_query|-|xml": {
+    "query": "",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "no_relevance|-|xml": {
+    "query": "output=json",
+    "status": 400,
+    "engine_type": null,
+    "body": "Bad request parameters"
+  },
+  "nonascii|once|json": {
+    "query": "relevance=%22caf%C3%A9%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"café\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "nonascii|once|xml": {
+    "query": "relevance=%22caf%C3%A9%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;café&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">café</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.19ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "nonascii|plus|json": {
+    "query": "relevance=%22caf%C3%A9%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"café\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "nonascii|plus|xml": {
+    "query": "relevance=%22caf%C3%A9%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;café&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">café</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.19ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "nonascii|twice|json": {
+    "query": "relevance=%2522caf%25C3%25A9%2522&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"café\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "nonascii|twice|xml": {
+    "query": "relevance=%2522caf%25C3%25A9%2522",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;café&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">café</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.24ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_JSON_upper|once|json": {
+    "query": "relevance=1&output=JSON",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.33ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_empty|once|xml": {
+    "query": "relevance=1&output=",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.37ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_first|once|json": {
+    "query": "output=json&relevance=1",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "output_foo|once|xml": {
+    "query": "relevance=1&output=foo",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.36ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "output_xml|once|xml": {
+    "query": "relevance=1&output=xml",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"1\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.33ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct22|once|json": {
+    "query": "relevance=%28%22a%2522b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"A string constant had no ending quotation mark.\"}"
+  },
+  "pct22|once|xml": {
+    "query": "relevance=%28%22a%2522b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&quot;b&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had no ending quotation mark.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct22|plus|json": {
+    "query": "relevance=%28%22a%2522b%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"A string constant had no ending quotation mark.\"}"
+  },
+  "pct22|plus|xml": {
+    "query": "relevance=%28%22a%2522b%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a&quot;b&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had no ending quotation mark.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct22|twice|json": {
+    "query": "relevance=%2528%2522a%252522b%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a\\\"b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct22|twice|xml": {
+    "query": "relevance=%2528%2522a%252522b%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a%22b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a\"b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.48ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct2541|once|json": {
+    "query": "relevance=%28%22%252541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct2541|once|xml": {
+    "query": "relevance=%28%22%252541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%41&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.42ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct2541|plus|json": {
+    "query": "relevance=%28%22%252541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct2541|plus|xml": {
+    "query": "relevance=%28%22%252541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%41&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.38ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct2541|twice|json": {
+    "query": "relevance=%2528%2522%25252541%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"%41\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct2541|twice|xml": {
+    "query": "relevance=%2528%2522%25252541%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%2541&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">%41</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.47ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct41|once|json": {
+    "query": "relevance=%28%22%2541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct41|once|xml": {
+    "query": "relevance=%28%22%2541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;A&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.27ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct41|plus|json": {
+    "query": "relevance=%28%22%2541%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct41|plus|xml": {
+    "query": "relevance=%28%22%2541%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;A&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.117ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct41|twice|json": {
+    "query": "relevance=%2528%2522%252541%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "pct41|twice|xml": {
+    "query": "relevance=%2528%2522%252541%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;%41&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">A</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.50ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct_trailing|once|json": {
+    "query": "relevance=%28%22100%25%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  },
+  "pct_trailing|once|xml": {
+    "query": "relevance=%28%22100%25%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;100%&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct_trailing|plus|json": {
+    "query": "relevance=%28%22100%25%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  },
+  "pct_trailing|plus|xml": {
+    "query": "relevance=%28%22100%25%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;100%&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "pct_trailing|twice|json": {
+    "query": "relevance=%2528%2522100%2525%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  },
+  "pct_trailing|twice|xml": {
+    "query": "relevance=%2528%2522100%2525%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;100%&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plural|once|json": {
+    "query": "relevance=%281%3B2%3B3%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1,2,3],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "plural|once|xml": {
+    "query": "relevance=%281%3B2%3B3%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2;3)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t<Answer type=\"integer\">2</Answer>\n\t\t\t<Answer type=\"integer\">3</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.38ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plural|plus|json": {
+    "query": "relevance=%281%3B2%3B3%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1,2,3],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "plural|plus|xml": {
+    "query": "relevance=%281%3B2%3B3%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2;3)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t<Answer type=\"integer\">2</Answer>\n\t\t\t<Answer type=\"integer\">3</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.39ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plural|twice|json": {
+    "query": "relevance=%25281%253B2%253B3%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[1,2,3],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  },
+  "plural|twice|xml": {
+    "query": "relevance=%25281%253B2%253B3%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1;2;3)\">\n\t\t<Result>\n\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t<Answer type=\"integer\">2</Answer>\n\t\t\t<Answer type=\"integer\">3</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.58ms</Time>\n\t\t\t<Plurality>Plural</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plus|once|json": {
+    "query": "relevance=%28%22a%2Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a+b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "plus|once|xml": {
+    "query": "relevance=%28%22a%2Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a+b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a+b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.21ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plus|plus|json": {
+    "query": "relevance=%28%22a%2Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a+b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "plus|plus|xml": {
+    "query": "relevance=%28%22a%2Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a+b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a+b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.27ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "plus|twice|json": {
+    "query": "relevance=%2528%2522a%252Bb%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a+b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "plus|twice|xml": {
+    "query": "relevance=%2528%2522a%252Bb%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a+b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a+b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.27ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "raw_space|-|xml": {
+    "query": "relevance=%22a%20b%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;a b&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.26ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "relevance_twice|-|xml": {
+    "query": "relevance=1&relevance=2",
+    "status": 400,
+    "engine_type": null,
+    "body": "More than one value exists for parameter \"relevance\" when only one was expected."
+  },
+  "semicolon_str|once|json": {
+    "query": "relevance=%28%22a%3Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a;b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "semicolon_str|once|xml": {
+    "query": "relevance=%28%22a%3Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.22ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "semicolon_str|plus|json": {
+    "query": "relevance=%28%22a%3Bb%22%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a;b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "semicolon_str|plus|xml": {
+    "query": "relevance=%28%22a%3Bb%22%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.20ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "semicolon_str|twice|json": {
+    "query": "relevance=%2528%2522a%253Bb%2522%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a;b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "semicolon_str|twice|xml": {
+    "query": "relevance=%2528%2522a%253Bb%2522%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;a;b&quot;)\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a;b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.15ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "space|once|json": {
+    "query": "relevance=%22a%20b%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "space|once|xml": {
+    "query": "relevance=%22a%20b%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;a b&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.24ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "space|plus|json": {
+    "query": "relevance=%22a+b%22&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "space|plus|xml": {
+    "query": "relevance=%22a+b%22",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;a b&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.19ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "space|twice|json": {
+    "query": "relevance=%2522a%2520b%2522&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[\"a b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  },
+  "space|twice|xml": {
+    "query": "relevance=%2522a%2520b%2522",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"&quot;a b&quot;\">\n\t\t<Result>\n\t\t\t<Answer type=\"string\">a b</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.24ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "true|once|json": {
+    "query": "relevance=true&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  },
+  "true|once|xml": {
+    "query": "relevance=true",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"true\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.24ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "true|plus|json": {
+    "query": "relevance=true&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  },
+  "true|plus|xml": {
+    "query": "relevance=true",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"true\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.22ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "true|twice|json": {
+    "query": "relevance=true&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  },
+  "true|twice|xml": {
+    "query": "relevance=true",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"true\">\n\t\t<Result>\n\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.22ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "tuple|once|json": {
+    "query": "relevance=%281%2C%20%22a%22%2C%20true%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[[1,\"a\",true]],\"plural\":false,\"type\":\"( integer, string, boolean )\",\"evaltime_ms\":0}"
+  },
+  "tuple|once|xml": {
+    "query": "relevance=%281%2C%20%22a%22%2C%20true%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1, &quot;a&quot;, true)\">\n\t\t<Result>\n\t\t\t<Tuple>\n\t\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t\t<Answer type=\"string\">a</Answer>\n\t\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t\t</Tuple>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.73ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "tuple|plus|json": {
+    "query": "relevance=%281%2C+%22a%22%2C+true%29&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[[1,\"a\",true]],\"plural\":false,\"type\":\"( integer, string, boolean )\",\"evaltime_ms\":0}"
+  },
+  "tuple|plus|xml": {
+    "query": "relevance=%281%2C+%22a%22%2C+true%29",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1, &quot;a&quot;, true)\">\n\t\t<Result>\n\t\t\t<Tuple>\n\t\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t\t<Answer type=\"string\">a</Answer>\n\t\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t\t</Tuple>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.59ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "tuple|twice|json": {
+    "query": "relevance=%25281%252C%2520%2522a%2522%252C%2520true%2529&output=json",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "{\"result\":[[1,\"a\",true]],\"plural\":false,\"type\":\"( integer, string, boolean )\",\"evaltime_ms\":0}"
+  },
+  "tuple|twice|xml": {
+    "query": "relevance=%25281%252C%2520%2522a%2522%252C%2520true%2529",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(1, &quot;a&quot;, true)\">\n\t\t<Result>\n\t\t\t<Tuple>\n\t\t\t\t<Answer type=\"integer\">1</Answer>\n\t\t\t\t<Answer type=\"string\">a</Answer>\n\t\t\t\t<Answer type=\"boolean\">True</Answer>\n\t\t\t</Tuple>\n\t\t</Result>\n\t\t<Evaluation>\n\t\t\t<Time>0.59ms</Time>\n\t\t\t<Plurality>Singular</Plurality>\n\t\t</Evaluation>\n\t</Query>\n</BESAPI>\n"
+  },
+  "unencoded_pct|-|xml": {
+    "query": "relevance=(%2522100%25%2522)",
+    "status": 200,
+    "engine_type": "BigFix Web Reports Server",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"(&quot;100%&quot;)\">\n\t\t<Result></Result>\n\t\t<Error>A string constant had an improper %-sequence.</Error>\n\t</Query>\n</BESAPI>\n"
+  }
+}
