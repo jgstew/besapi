@@ -1,0 +1,370 @@
+{
+  "now | once": [
+    200,
+    "<BESAPI><Query Resource=\"now\"><Result><Answer type=\"time\">Mon, 16 Nov 2026 23:39:04 -0500</Answer></Result><Evaluation><Time>1.599ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "now | twice": [
+    200,
+    "<BESAPI><Query Resource=\"now\"><Result><Answer type=\"time\">Mon, 16 Nov 2026 23:39:05 -0500</Answer></Result><Evaluation><Time>0.061ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "now | plain": [
+    200,
+    "<BESAPI><Query Resource=\"now\"><Result><Answer type=\"time\">Mon, 16 Nov 2026 23:39:05 -0500</Answer></Result><Evaluation><Time>0.056ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "now | once_json": [
+    200,
+    "{\"result\":[\"Mon, 16 Nov 2026 23:39:05 -0500\"],\"count\":1,\"plural\":false,\"type\":\"time\",\"evaltime_ms\":0.055}"
+  ],
+  "number of bes sites | once": [
+    200,
+    "<BESAPI><Query Resource=\"number of bes sites\"><Result><Answer type=\"integer\">6</Answer></Result><Evaluation><Time>1.284ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "number of bes sites | twice": [
+    200,
+    "<BESAPI><Query Resource=\"number%20of%20bes%20sites\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "number of bes sites | plain": [
+    200,
+    "<BESAPI><Query Resource=\"number of bes sites\"><Result><Answer type=\"integer\">6</Answer></Result><Evaluation><Time>0.224ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "number of bes sites | once_json": [
+    200,
+    "{\"result\":[6],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.248}"
+  ],
+  "(1, \"a\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(1, &quot;a&quot;)\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple></Result><Evaluation><Time>0.406ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(1, \"a\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%281%2C%20%22a%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(1, \"a\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(1, &quot;a&quot;)\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple></Result><Evaluation><Time>0.063ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(1, \"a\") | once_json": [
+    200,
+    "{\"result\":[[1,\"a\"]],\"count\":1,\"plural\":false,\"type\":\"( integer, string )\",\"evaltime_ms\":0.052}"
+  ],
+  "1 + 1 | once": [
+    200,
+    "<BESAPI><Query Resource=\"1 + 1\"><Result><Answer type=\"integer\">2</Answer></Result><Evaluation><Time>0.041ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 + 1 | twice": [
+    200,
+    "<BESAPI><Query Resource=\"1%20+%201\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "1 + 1 | plain": [
+    200,
+    "<BESAPI><Query Resource=\"1 + 1\"><Result><Answer type=\"integer\">2</Answer></Result><Evaluation><Time>0.064ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 + 1 | once_json": [
+    200,
+    "{\"result\":[2],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.055}"
+  ],
+  "(\"a+b\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a+b&quot;)\"><Result><Answer type=\"string\">a+b</Answer></Result><Evaluation><Time>0.039ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a+b\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22a+b%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"a+b\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a+b&quot;)\"><Result><Answer type=\"string\">a+b</Answer></Result><Evaluation><Time>0.055ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a+b\") | once_json": [
+    200,
+    "{\"result\":[\"a+b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.038}"
+  ],
+  "(\"a&b=c\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&amp;b=c&quot;)\"><Result><Answer type=\"string\">a&amp;b=c</Answer></Result><Evaluation><Time>0.057ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a&b=c\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22a%26b%3Dc%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"a&b=c\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&amp;b=c&quot;)\"><Result><Answer type=\"string\">a&amp;b=c</Answer></Result><Evaluation><Time>0.031ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a&b=c\") | once_json": [
+    200,
+    "{\"result\":[\"a&b=c\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.028}"
+  ],
+  "(\"a b\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a b&quot;)\"><Result><Answer type=\"string\">a b</Answer></Result><Evaluation><Time>0.045ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a b\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22a%20b%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"a b\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a b&quot;)\"><Result><Answer type=\"string\">a b</Answer></Result><Evaluation><Time>0.044ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a b\") | once_json": [
+    200,
+    "{\"result\":[\"a b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.039}"
+  ],
+  "(\"é\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;é&quot;)\"><Result><Answer type=\"string\">é</Answer></Result><Evaluation><Time>0.076ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"é\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22%C3%A9%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"é\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;é&quot;)\"><Result><Answer type=\"string\">é</Answer></Result><Evaluation><Time>0.082ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"é\") | once_json": [
+    200,
+    "{\"result\":[\"é\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.036}"
+  ],
+  "((1, \"a\"); (2, \"b\")) | once": [
+    200,
+    "<BESAPI><Query Resource=\"((1, &quot;a&quot;); (2, &quot;b&quot;))\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple><Tuple><Answer type=\"integer\">2</Answer><Answer type=\"string\">b</Answer></Tuple></Result><Evaluation><Time>0.084ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "((1, \"a\"); (2, \"b\")) | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%281%2C%20%22a%22%29%3B%20%282%2C%20%22b%22%29%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "((1, \"a\"); (2, \"b\")) | plain": [
+    200,
+    "<BESAPI><Query Resource=\"((1, &quot;a&quot;); (2, &quot;b&quot;))\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple><Tuple><Answer type=\"integer\">2</Answer><Answer type=\"string\">b</Answer></Tuple></Result><Evaluation><Time>0.089ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "((1, \"a\"); (2, \"b\")) | once_json": [
+    200,
+    "{\"result\":[[1,\"a\"],[2,\"b\"]],\"count\":2,\"plural\":true,\"type\":\"( integer, string )\",\"evaltime_ms\":0.064}"
+  ],
+  "(\"a%22b\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a%22b&quot;)\"><Result><Answer type=\"string\">a\"b</Answer></Result><Evaluation><Time>0.063ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a%22b\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22a%2522b%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"a%22b\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a%22b&quot;)\"><Result><Answer type=\"string\">a\"b</Answer></Result><Evaluation><Time>0.075ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a%22b\") | once_json": [
+    200,
+    "{\"result\":[\"a\\\"b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.05}"
+  ],
+  "\"100%25 of \" & \"5+5\" | once": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;100%25 of &quot; &amp; &quot;5+5&quot;\"><Result><Answer type=\"string\">100% of 5+5</Answer></Result><Evaluation><Time>0.053ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "\"100%25 of \" & \"5+5\" | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%22100%2525%20of%20%22%20%26%20%225+5%22\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "\"100%25 of \" & \"5+5\" | plain": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;100%25 of &quot; &amp; &quot;5+5&quot;\"><Result><Answer type=\"string\">100% of 5+5</Answer></Result><Evaluation><Time>0.064ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "\"100%25 of \" & \"5+5\" | once_json": [
+    200,
+    "{\"result\":[\"100% of 5+5\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.062}"
+  ],
+  "(\"x%22y\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;x%22y&quot;)\"><Result><Answer type=\"string\">x\"y</Answer></Result><Evaluation><Time>0.05ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"x%22y\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22x%2522y%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"x%22y\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;x%22y&quot;)\"><Result><Answer type=\"string\">x\"y</Answer></Result><Evaluation><Time>0.045ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"x%22y\") | once_json": [
+    200,
+    "{\"result\":[\"x\\\"y\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.043}"
+  ],
+  "(\"100%25 done\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;100%25 done&quot;)\"><Result><Answer type=\"string\">100% done</Answer></Result><Evaluation><Time>0.067ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"100%25 done\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22100%2525%20done%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"100%25 done\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;100%25 done&quot;)\"><Result><Answer type=\"string\">100% done</Answer></Result><Evaluation><Time>0.062ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"100%25 done\") | once_json": [
+    200,
+    "{\"result\":[\"100% done\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.059}"
+  ],
+  "(\"%2541\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%2541&quot;)\"><Result><Answer type=\"string\">%41</Answer></Result><Evaluation><Time>0.064ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2541\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22%252541%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"%2541\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%2541&quot;)\"><Result><Answer type=\"string\">%41</Answer></Result><Evaluation><Time>0.06ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2541\") | once_json": [
+    200,
+    "{\"result\":[\"%41\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.042}"
+  ],
+  "(\"%41\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%41&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.06ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%41\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22%2541%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"%41\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%41&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.063ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%41\") | once_json": [
+    200,
+    "{\"result\":[\"A\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.063}"
+  ],
+  "(\"%2522\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%2522&quot;)\"><Result><Answer type=\"string\">%22</Answer></Result><Evaluation><Time>0.057ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2522\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22%252522%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"%2522\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%2522&quot;)\"><Result><Answer type=\"string\">%22</Answer></Result><Evaluation><Time>0.066ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2522\") | once_json": [
+    200,
+    "{\"result\":[\"%22\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.054}"
+  ],
+  "(it as string) of ( \"a%22b\" ) | once": [
+    200,
+    "<BESAPI><Query Resource=\"(it as string) of ( &quot;a%22b&quot; )\"><Result><Answer type=\"string\">a\"b</Answer></Result><Evaluation><Time>0.076ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(it as string) of ( \"a%22b\" ) | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28it%20as%20string%29%20of%20%28%20%22a%2522b%22%20%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(it as string) of ( \"a%22b\" ) | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(it as string) of ( &quot;a%22b&quot; )\"><Result><Answer type=\"string\">a\"b</Answer></Result><Evaluation><Time>0.078ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(it as string) of ( \"a%22b\" ) | once_json": [
+    200,
+    "{\"result\":[\"a\\\"b\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.06}"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | once": [
+    200,
+    "<BESAPI><Query Resource=\"lengths of first matches (regex &quot; +&quot;) of &quot;        &quot;\"><Result><Answer type=\"integer\">8</Answer></Result><Evaluation><Time>2.364ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | twice": [
+    200,
+    "<BESAPI><Query Resource=\"lengths%20of%20first%20matches%20%28regex%20%22%20+%22%29%20of%20%22%20%20%20%20%20%20%20%20%22\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | plain": [
+    200,
+    "<BESAPI><Query Resource=\"lengths of first matches (regex &quot; +&quot;) of &quot;        &quot;\"><Result><Answer type=\"integer\">8</Answer></Result><Evaluation><Time>0.081ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | once_json": [
+    200,
+    "{\"result\":[8],\"count\":1,\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0.073}"
+  ],
+  "\"now\" | once": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "\"now\" | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%22now%22\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "\"now\" | plain": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "\"now\" | once_json": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "1 | once": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "1 | twice": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "1 | plain": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "1 | once_json": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "true | once": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "true | twice": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "true | plain": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "true | once_json": [
+    400,
+    "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  ],
+  "(true) | once": [
+    200,
+    "<BESAPI><Query Resource=\"(true)\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.048ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(true) | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28true%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(true) | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(true)\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.041ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(true) | once_json": [
+    200,
+    "{\"result\":[true],\"count\":1,\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0.041}"
+  ],
+  "(\"now\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;now&quot;)\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.045ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"now\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"%28%22now%22%29\"><Result></Result><Error>This expression contained a character which is not allowed.</Error></Query></BESAPI>"
+  ],
+  "(\"now\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;now&quot;)\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.043ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"now\") | once_json": [
+    200,
+    "{\"result\":[\"now\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.037}"
+  ]
+}

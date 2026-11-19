@@ -12,6 +12,7 @@ import sys
 
 import lxml.etree
 import pytest
+import requests
 
 # Ensure the local `src/` is first on sys.path so tests import the workspace package
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -66,7 +67,10 @@ class FakeSession:
         # what every recorded request responds with:
         self.response_text = "<BESAPI />"
         self.response_status = 200
-        # per URL responses, {url: (text, status)}, override the above:
+        # per URL responses, {url: (text, status)}, override the above.
+        # A route may also be a callable (method, url, kwargs) returning
+        # (text, status) or (text, status, headers), for responses that
+        # depend on the request, see FakeQueryServer:
         self.routes = {}
         self.mounted = []
 
@@ -76,8 +80,14 @@ class FakeSession:
         if unknown:
             raise TypeError(f"unexpected keyword arguments for requests: {unknown}")
         self.calls.append((method, url, kwargs))
-        text, status = self.routes.get(url, (self.response_text, self.response_status))
-        return FakeResponse(url, text, status)
+        route = self.routes.get(url, (self.response_text, self.response_status))
+        if callable(route):
+            route = route(method, url, kwargs)
+        text, status, *headers = route
+        response = FakeResponse(url, text, status)
+        if headers:
+            response.headers = headers[0]
+        return response
 
     def mount(self, prefix, adapter):
         """Record a mounted transport adapter."""
@@ -675,28 +685,32 @@ def test_update_item_from_file_not_implemented(offline_login, capsys):
 # ---------- E7: XML session relevance keeps %XX escapes ----------
 
 
-def server_decoded_relevance(data):
-    """Decode a posted query body the way the BigFix server does: twice.
-
-    Verified against a live server: the JSON query path (which double
-    encodes) keeps `%22` escapes, while a single encoded body loses them.
-    """
-    import urllib.parse
-
-    body = data if isinstance(data, str) else urllib.parse.urlencode(data)
-    form = urllib.parse.parse_qs(body)
-    return urllib.parse.unquote(form["relevance"][0])
+# NOTE: only Web Reports decodes the body twice. When BigFix Explorer answers
+# it decodes once, see issue #30 and tests/test_session_relevance_engines.py,
+# which tests both engines.
 
 
 @pytest.mark.parametrize(
     "relevance",
-    ['(it as string) of ( "a%22b" )', '"100%25 of " & "5+5"'],
+    [
+        '(it as string) of ( "a%22b" )',
+        '"100%25 of " & "5+5"',
+        '("a%22b")',
+        '("x%22y")',
+        '("100%25 done")',
+        '("%2541")',
+        '("%2522")',
+    ],
 )
 def test_session_relevance_xml_body_survives_double_decode(offline_login, relevance):
-    """Test that relevance escapes like %22 reach the evaluator intact."""
-    conn = make_conn()
+    """Test that relevance escapes like %22 reach Web Reports intact."""
+    # pylint: disable=import-outside-toplevel
+    from test_session_relevance_engines import engine_conn
+
+    conn, server = engine_conn("web_reports")
     conn.session_relevance_xml(relevance)
-    assert server_decoded_relevance(conn.session.calls[-1][2]["data"]) == relevance
+    # the text the final request had Web Reports evaluate:
+    assert server.form_requests[-1] == relevance
 
 
 # ---------- P1: XSD schemas are compiled once, not per call ----------
@@ -1059,3 +1073,67 @@ def test_session_relevance_array_empty_default(offline_login):
     assert conn.session_relevance_array("nothing") == [
         "<Nothing> Nothing returned, but no error."
     ]
+
+
+# ---------- equality and hashing ----------
+
+
+def new_conn(username="user", password="pass", rootserver="bigfix.example", **kwargs):
+    """Create an offline BESConnection with a real session, for equality."""
+    return BESConnection(username, password, rootserver, **kwargs)
+
+
+def test_conn_hashable(offline_login):
+    """Test equal connections hash the same, so they can be dict keys."""
+    assert hash(new_conn()) == hash(new_conn())
+    assert len({new_conn(), new_conn()}) == 1
+    assert {new_conn(): "x"}[new_conn()] == "x"
+
+
+def test_conn_eq_ignores_password(offline_login):
+    """Test the password isn't part of equality."""
+    assert new_conn(password="one") == new_conn(password="two")
+    assert hash(new_conn(password="one")) == hash(new_conn(password="two"))
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        {"username": "other"},
+        {"rootserver": "other.example"},
+        {"rootserver": "bigfix.example:52312"},
+        {"verify": True},
+    ],
+)
+def test_conn_not_equal(offline_login, other):
+    """Test a different username, root server, port or verify isn't equal."""
+    assert new_conn() != new_conn(**other)
+    assert len({new_conn(), new_conn(**other)}) == 2
+
+
+def test_conn_eq_normalized_rootserver(offline_login):
+    """Test the root server is compared after https:// and the port are added."""
+    assert new_conn(rootserver="bigfix.example") == new_conn(
+        rootserver="https://bigfix.example:52311"
+    )
+
+
+@pytest.mark.parametrize("other", [None, "CONNECTION", 1])
+def test_conn_eq_other_type(offline_login, other):
+    """Test comparing with something that isn't a connection is False."""
+    conn = new_conn()
+    assert conn != other
+    assert not conn == other  # pylint: disable=unneeded-not
+
+
+def test_conn_hash_ignores_session_auth(offline_login):
+    """Test hash and equality don't use session.auth, which may change.
+
+    NOTE: __del__ sets session.auth to None, and requests allows an auth
+    object, which may not be hashable.
+    """
+    conn = new_conn()
+    before = hash(conn)
+    conn.session.auth = requests.auth.HTTPBasicAuth("user", "pass")
+    assert hash(conn) == before
+    assert conn == new_conn()

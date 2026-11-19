@@ -38,6 +38,12 @@ jobs:
         exclude:
           - os: windows-11-arm
             python-version: "3.9"
+          # ubuntu-latest is Ubuntu 26.04, which has no Python 3.9 build:
+          - os: ubuntu-latest
+            python-version: "3.9"
+        include:
+          - os: ubuntu-24.04
+            python-version: "3.9"
     steps:
       - uses: actions/checkout@v7
 

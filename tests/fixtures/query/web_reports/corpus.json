@@ -1,0 +1,370 @@
+{
+  "now | once": [
+    200,
+    "<BESAPI><Query Resource=\"now\"><Result><Answer type=\"time\">Mon, 16 Nov 2026 23:28:26 -0500</Answer></Result><Evaluation><Time>0.419ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "now | twice": [
+    200,
+    "<BESAPI><Query Resource=\"now\"><Result><Answer type=\"time\">Mon, 16 Nov 2026 23:28:29 -0500</Answer></Result><Evaluation><Time>0.32ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "now | plain": [
+    200,
+    "<BESAPI><Query Resource=\"now\"><Result><Answer type=\"time\">Mon, 16 Nov 2026 23:28:32 -0500</Answer></Result><Evaluation><Time>0.33ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "now | once_json": [
+    200,
+    "{\"result\":[\"Mon, 16 Nov 2026 23:28:35 -0500\"],\"plural\":false,\"type\":\"time\",\"evaltime_ms\":0}"
+  ],
+  "number of bes sites | once": [
+    200,
+    "<BESAPI><Query Resource=\"number of bes sites\"><Result><Answer type=\"integer\">6</Answer></Result><Evaluation><Time>0.87ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "number of bes sites | twice": [
+    200,
+    "<BESAPI><Query Resource=\"number of bes sites\"><Result><Answer type=\"integer\">6</Answer></Result><Evaluation><Time>0.76ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "number of bes sites | plain": [
+    200,
+    "<BESAPI><Query Resource=\"number of bes sites\"><Result><Answer type=\"integer\">6</Answer></Result><Evaluation><Time>0.81ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "number of bes sites | once_json": [
+    200,
+    "{\"result\":[6],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  ],
+  "(1, \"a\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(1, &quot;a&quot;)\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple></Result><Evaluation><Time>0.83ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(1, \"a\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(1, &quot;a&quot;)\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple></Result><Evaluation><Time>0.35ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(1, \"a\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(1, &quot;a&quot;)\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple></Result><Evaluation><Time>0.38ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(1, \"a\") | once_json": [
+    200,
+    "{\"result\":[[1,\"a\"]],\"plural\":false,\"type\":\"( integer, string )\",\"evaltime_ms\":0}"
+  ],
+  "1 + 1 | once": [
+    200,
+    "<BESAPI><Query Resource=\"1 + 1\"><Result><Answer type=\"integer\">2</Answer></Result><Evaluation><Time>0.35ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 + 1 | twice": [
+    200,
+    "<BESAPI><Query Resource=\"1 + 1\"><Result><Answer type=\"integer\">2</Answer></Result><Evaluation><Time>0.33ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 + 1 | plain": [
+    200,
+    "<BESAPI><Query Resource=\"1 + 1\"><Result><Answer type=\"integer\">2</Answer></Result><Evaluation><Time>0.45ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 + 1 | once_json": [
+    200,
+    "{\"result\":[2],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  ],
+  "(\"a+b\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a+b&quot;)\"><Result><Answer type=\"string\">a+b</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a+b\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a+b&quot;)\"><Result><Answer type=\"string\">a+b</Answer></Result><Evaluation><Time>0.29ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a+b\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a+b&quot;)\"><Result><Answer type=\"string\">a+b</Answer></Result><Evaluation><Time>0.22ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a+b\") | once_json": [
+    200,
+    "{\"result\":[\"a+b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "(\"a&b=c\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&amp;b=c&quot;)\"><Result><Answer type=\"string\">a&amp;b=c</Answer></Result><Evaluation><Time>0.20ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a&b=c\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&amp;b=c&quot;)\"><Result><Answer type=\"string\">a&amp;b=c</Answer></Result><Evaluation><Time>0.22ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a&b=c\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&amp;b=c&quot;)\"><Result><Answer type=\"string\">a&amp;b=c</Answer></Result><Evaluation><Time>0.23ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a&b=c\") | once_json": [
+    200,
+    "{\"result\":[\"a&b=c\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "(\"a b\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a b&quot;)\"><Result><Answer type=\"string\">a b</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a b\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a b&quot;)\"><Result><Answer type=\"string\">a b</Answer></Result><Evaluation><Time>0.20ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a b\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a b&quot;)\"><Result><Answer type=\"string\">a b</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a b\") | once_json": [
+    200,
+    "{\"result\":[\"a b\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "(\"é\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;é&quot;)\"><Result><Answer type=\"string\">é</Answer></Result><Evaluation><Time>0.19ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"é\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;é&quot;)\"><Result><Answer type=\"string\">é</Answer></Result><Evaluation><Time>0.23ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"é\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;é&quot;)\"><Result><Answer type=\"string\">é</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"é\") | once_json": [
+    200,
+    "{\"result\":[\"é\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "((1, \"a\"); (2, \"b\")) | once": [
+    200,
+    "<BESAPI><Query Resource=\"((1, &quot;a&quot;); (2, &quot;b&quot;))\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple><Tuple><Answer type=\"integer\">2</Answer><Answer type=\"string\">b</Answer></Tuple></Result><Evaluation><Time>0.50ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "((1, \"a\"); (2, \"b\")) | twice": [
+    200,
+    "<BESAPI><Query Resource=\"((1, &quot;a&quot;); (2, &quot;b&quot;))\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple><Tuple><Answer type=\"integer\">2</Answer><Answer type=\"string\">b</Answer></Tuple></Result><Evaluation><Time>0.47ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "((1, \"a\"); (2, \"b\")) | plain": [
+    200,
+    "<BESAPI><Query Resource=\"((1, &quot;a&quot;); (2, &quot;b&quot;))\"><Result><Tuple><Answer type=\"integer\">1</Answer><Answer type=\"string\">a</Answer></Tuple><Tuple><Answer type=\"integer\">2</Answer><Answer type=\"string\">b</Answer></Tuple></Result><Evaluation><Time>0.46ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "((1, \"a\"); (2, \"b\")) | once_json": [
+    200,
+    "{\"result\":[[1,\"a\"],[2,\"b\"]],\"plural\":true,\"type\":\"( integer, string )\",\"evaltime_ms\":0}"
+  ],
+  "(\"a%22b\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&quot;b&quot;)\"><Result></Result><Error>A string constant had no ending quotation mark.</Error></Query></BESAPI>"
+  ],
+  "(\"a%22b\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a%22b&quot;)\"><Result><Answer type=\"string\">a\"b</Answer></Result><Evaluation><Time>0.51ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"a%22b\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;a&quot;b&quot;)\"><Result></Result><Error>A string constant had no ending quotation mark.</Error></Query></BESAPI>"
+  ],
+  "(\"a%22b\") | once_json": [
+    200,
+    "{\"result\":[],\"error\":\"A string constant had no ending quotation mark.\"}"
+  ],
+  "\"100%25 of \" & \"5+5\" | once": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;100% of &quot; &amp; &quot;5+5&quot;\"><Result></Result><Error>A string constant had an improper %-sequence.</Error></Query></BESAPI>"
+  ],
+  "\"100%25 of \" & \"5+5\" | twice": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;100%25 of &quot; &amp; &quot;5+5&quot;\"><Result><Answer type=\"string\">100% of 5+5</Answer></Result><Evaluation><Time>0.43ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "\"100%25 of \" & \"5+5\" | plain": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;100% of &quot; &amp; &quot;5+5&quot;\"><Result></Result><Error>A string constant had an improper %-sequence.</Error></Query></BESAPI>"
+  ],
+  "\"100%25 of \" & \"5+5\" | once_json": [
+    200,
+    "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  ],
+  "(\"x%22y\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;x&quot;y&quot;)\"><Result></Result><Error>A string constant had no ending quotation mark.</Error></Query></BESAPI>"
+  ],
+  "(\"x%22y\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;x%22y&quot;)\"><Result><Answer type=\"string\">x\"y</Answer></Result><Evaluation><Time>0.38ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"x%22y\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;x&quot;y&quot;)\"><Result></Result><Error>A string constant had no ending quotation mark.</Error></Query></BESAPI>"
+  ],
+  "(\"x%22y\") | once_json": [
+    200,
+    "{\"result\":[],\"error\":\"A string constant had no ending quotation mark.\"}"
+  ],
+  "(\"100%25 done\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;100% done&quot;)\"><Result></Result><Error>A string constant had an improper %-sequence.</Error></Query></BESAPI>"
+  ],
+  "(\"100%25 done\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;100%25 done&quot;)\"><Result><Answer type=\"string\">100% done</Answer></Result><Evaluation><Time>0.38ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"100%25 done\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;100% done&quot;)\"><Result></Result><Error>A string constant had an improper %-sequence.</Error></Query></BESAPI>"
+  ],
+  "(\"100%25 done\") | once_json": [
+    200,
+    "{\"result\":[],\"error\":\"A string constant had an improper %-sequence.\"}"
+  ],
+  "(\"%2541\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%41&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.35ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2541\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%2541&quot;)\"><Result><Answer type=\"string\">%41</Answer></Result><Evaluation><Time>0.39ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2541\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%41&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.37ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2541\") | once_json": [
+    200,
+    "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "(\"%41\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;A&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%41\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%41&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.180ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%41\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;A&quot;)\"><Result><Answer type=\"string\">A</Answer></Result><Evaluation><Time>0.20ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%41\") | once_json": [
+    200,
+    "{\"result\":[\"A\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "(\"%2522\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%22&quot;)\"><Result><Answer type=\"string\">\"</Answer></Result><Evaluation><Time>0.37ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2522\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%2522&quot;)\"><Result><Answer type=\"string\">%22</Answer></Result><Evaluation><Time>0.38ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2522\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;%22&quot;)\"><Result><Answer type=\"string\">\"</Answer></Result><Evaluation><Time>0.37ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"%2522\") | once_json": [
+    200,
+    "{\"result\":[\"\\\"\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "(it as string) of ( \"a%22b\" ) | once": [
+    200,
+    "<BESAPI><Query Resource=\"(it as string) of ( &quot;a&quot;b&quot; )\"><Result></Result><Error>A string constant had no ending quotation mark.</Error></Query></BESAPI>"
+  ],
+  "(it as string) of ( \"a%22b\" ) | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(it as string) of ( &quot;a%22b&quot; )\"><Result><Answer type=\"string\">a\"b</Answer></Result><Evaluation><Time>0.44ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(it as string) of ( \"a%22b\" ) | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(it as string) of ( &quot;a&quot;b&quot; )\"><Result></Result><Error>A string constant had no ending quotation mark.</Error></Query></BESAPI>"
+  ],
+  "(it as string) of ( \"a%22b\" ) | once_json": [
+    200,
+    "{\"result\":[],\"error\":\"A string constant had no ending quotation mark.\"}"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | once": [
+    200,
+    "<BESAPI><Query Resource=\"lengths of first matches (regex &quot; +&quot;) of &quot;        &quot;\"><Result><Answer type=\"integer\">8</Answer></Result><Evaluation><Time>2.286ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | twice": [
+    200,
+    "<BESAPI><Query Resource=\"lengths of first matches (regex &quot; +&quot;) of &quot;        &quot;\"><Result><Answer type=\"integer\">8</Answer></Result><Evaluation><Time>0.68ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | plain": [
+    200,
+    "<BESAPI><Query Resource=\"lengths of first matches (regex &quot; +&quot;) of &quot;        &quot;\"><Result><Answer type=\"integer\">8</Answer></Result><Evaluation><Time>0.74ms</Time><Plurality>Plural</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "lengths of first matches (regex \" +\") of \"        \" | once_json": [
+    200,
+    "{\"result\":[8],\"plural\":true,\"type\":\"integer\",\"evaltime_ms\":0}"
+  ],
+  "\"now\" | once": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;now&quot;\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.75ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "\"now\" | twice": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;now&quot;\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "\"now\" | plain": [
+    200,
+    "<BESAPI><Query Resource=\"&quot;now&quot;\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.19ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "\"now\" | once_json": [
+    200,
+    "{\"result\":[\"now\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ],
+  "1 | once": [
+    200,
+    "<BESAPI><Query Resource=\"1\"><Result><Answer type=\"integer\">1</Answer></Result><Evaluation><Time>0.112ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 | twice": [
+    200,
+    "<BESAPI><Query Resource=\"1\"><Result><Answer type=\"integer\">1</Answer></Result><Evaluation><Time>0.24ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 | plain": [
+    200,
+    "<BESAPI><Query Resource=\"1\"><Result><Answer type=\"integer\">1</Answer></Result><Evaluation><Time>0.26ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "1 | once_json": [
+    200,
+    "{\"result\":[1],\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0}"
+  ],
+  "true | once": [
+    200,
+    "<BESAPI><Query Resource=\"true\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.32ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "true | twice": [
+    200,
+    "<BESAPI><Query Resource=\"true\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.25ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "true | plain": [
+    200,
+    "<BESAPI><Query Resource=\"true\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.22ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "true | once_json": [
+    200,
+    "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  ],
+  "(true) | once": [
+    200,
+    "<BESAPI><Query Resource=\"(true)\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.24ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(true) | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(true)\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.27ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(true) | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(true)\"><Result><Answer type=\"boolean\">True</Answer></Result><Evaluation><Time>0.24ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(true) | once_json": [
+    200,
+    "{\"result\":[true],\"plural\":false,\"type\":\"boolean\",\"evaltime_ms\":0}"
+  ],
+  "(\"now\") | once": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;now&quot;)\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.21ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"now\") | twice": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;now&quot;)\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.30ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"now\") | plain": [
+    200,
+    "<BESAPI><Query Resource=\"(&quot;now&quot;)\"><Result><Answer type=\"string\">now</Answer></Result><Evaluation><Time>0.28ms</Time><Plurality>Singular</Plurality></Evaluation></Query></BESAPI>"
+  ],
+  "(\"now\") | once_json": [
+    200,
+    "{\"result\":[\"now\"],\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0}"
+  ]
+}

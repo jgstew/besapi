@@ -1,0 +1,62 @@
+{
+  "form once ok": {
+    "status": 200,
+    "engine_type": "BigFix Explorer"
+  },
+  "form once json ok": {
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[2],\"count\":1,\"plural\":false,\"type\":\"integer\",\"evaltime_ms\":0.047}"
+  },
+  "form once error": {
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<BESAPI xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"BESAPI.xsd\">\n\t<Query Resource=\"bogus_operator\">\n\t\t<Result></Result>\n\t\t<Error>The operator \"bogus_operator\" is not defined.</Error>\n\t</Query>\n</BESAPI>\n"
+  },
+  "form once json error": {
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"bogus_operator\\\" is not defined.\"}"
+  },
+  "form once %22": {
+    "status": 200,
+    "engine_type": "BigFix Explorer"
+  },
+  "form once %2541": {
+    "status": 200,
+    "engine_type": "BigFix Explorer"
+  },
+  "form twice %22": {
+    "status": 200,
+    "engine_type": "BigFix Explorer"
+  },
+  "form twice %2541 json": {
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"This expression contained a character which is not allowed.\"}"
+  },
+  "form json-shaped 1": {
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  },
+  "form json-shaped (1)": {
+    "status": 200,
+    "engine_type": "BigFix Explorer"
+  },
+  "json body ok": {
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[\"%41\"],\"count\":1,\"plural\":false,\"type\":\"string\",\"evaltime_ms\":0.066}"
+  },
+  "json body error": {
+    "status": 200,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"result\":[],\"error\":\"The operator \\\"bogus_operator\\\" is not defined.\"}"
+  },
+  "GET query": {
+    "status": 400,
+    "engine_type": "BigFix Explorer",
+    "body": "{\"error\":\"Invalid JSON: Invalid required value type, expected type: \\\"object\\\"\"}"
+  }
+}
